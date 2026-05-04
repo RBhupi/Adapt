@@ -1,21 +1,12 @@
-Adapt Documentation
-===================
+:orphan:
 
-Adaptive Radar Data Processing Platform — modular NEXRAD analysis for storm cell
-detection, motion projection, and tracking.
+.. raw:: html
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Overview
-
-   readme
-   USAGE
-   cli_reference
-   license
-
-.. toctree::
-   :maxdepth: 2
-   :caption: API Reference
-
-   api/cli
-   api/dashboard
+   <html>
+   <head>
+     <meta http-equiv="refresh" content="0; url=readme.html">
+   </head>
+   <body>
+     Redirecting to <a href="readme.html">documentation</a>.
+   </body>
+   </html>
