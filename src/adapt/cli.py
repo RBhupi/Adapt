@@ -19,7 +19,7 @@ used. Any value from the config file can be overridden with CLI flags.
 """
 
 import argparse
-import contextlib
+import logging
 import os
 import signal
 import sys
@@ -32,6 +32,8 @@ from adapt import __version__
 # ---------------------------------------------------------------------------
 # Single-instance enforcement
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 _PID_FILE = Path.home() / '.adapt' / 'pipeline.pid'
 
@@ -58,8 +60,10 @@ def _write_pid() -> None:
 
 
 def _remove_pid() -> None:
-    with contextlib.suppress(Exception):
+    try:
         _PID_FILE.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove PID file %s: %s", _PID_FILE, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +86,8 @@ def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
         help='Processing mode',
     )
     sub.add_argument('--start-time', dest='start_time', help='Start time (ISO 8601)')
-    sub.add_argument('--end-time',   dest='end_time',   help='End time (ISO 8601)')
-    sub.add_argument('--base-dir',   dest='base_dir',   help='Repository output directory')
+    sub.add_argument('--end-time', dest='end_time', help='End time (ISO 8601)')
+    sub.add_argument('--base-dir', dest='base_dir', help='Repository output directory')
     sub.add_argument(
         '--run-id',
         dest='run_id',

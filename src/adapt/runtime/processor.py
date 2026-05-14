@@ -86,13 +86,13 @@ class RadarProcessor(threading.Thread):
     ):
         super().__init__(daemon=True, name=name)
 
-        self.input_queue  = input_queue
-        self.config       = config
-        self.output_dirs  = {k: Path(v) for k, v in output_dirs.items()}
+        self.input_queue = input_queue
+        self.config = config
+        self.output_dirs = {k: Path(v) for k, v in output_dirs.items()}
         self.file_tracker = file_tracker
-        self.repository   = repository
-        self._stop_event  = threading.Event()
-        self.output_lock  = threading.Lock()
+        self.repository = repository
+        self._stop_event = threading.Event()
+        self.output_lock = threading.Lock()
 
         if not self.repository:
             raise ValueError(

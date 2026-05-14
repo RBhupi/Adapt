@@ -6,8 +6,8 @@
 
 pipeline:
   modules:
-    - adapt.modules.ingest.module
-    - adapt.modules.detection.module
-    - adapt.modules.projection.module
-    - adapt.modules.analysis.module
-    - adapt.modules.tracking.module
+    - adapt.execution.nodes.ingest
+    - adapt.execution.nodes.detection
+    - adapt.execution.nodes.projection
+    - adapt.execution.nodes.analysis
+    - adapt.execution.nodes.tracking

@@ -46,3 +46,8 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
             f"Projection contract violated: found {num_steps} steps, expected {expected_steps} "
             f"(1 registration + {max_steps_actual} projections from config)",
         )
+
+
+def check_projected_ds(ds: xr.Dataset) -> None:
+    """Bound contract for the standard projected dataset."""
+    assert_projected(ds)

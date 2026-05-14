@@ -4,17 +4,13 @@
 [![CI](https://github.com/ARM-DOE/Adapt/actions/workflows/ci.yml/badge.svg)](https://github.com/ARM-DOE/Adapt/actions?query=workflow%3ACI)
 [![Codecov](https://img.shields.io/codecov/c/github/ARM-DOE/Adapt.svg?logo=codecov)](https://codecov.io/gh/ARM-DOE/Adapt)
 [![CodeFactor](https://www.codefactor.io/repository/github/arm-doe/adapt/badge)](https://www.codefactor.io/repository/github/arm-doe/adapt)
-
-
-[![Docs](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml/badge.svg)](https://arm-doe.github.io/Adapt/)
-[![PyPi release](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml/badge.svg)](https://arm-doe.github.io/Adapt/) 
-[![PyPI - Version](https://img.shields.io/pypi/v/arm-adapt)](https://pypi.org/project/arm-adapt/)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/arm-adapt?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pypi.org/project/arm-adapt/)
-
 [![Security](https://github.com/ARM-DOE/Adapt/actions/workflows/security-analysis.yml/badge.svg)](https://arm-doe.github.io/Adapt/)
 [![Virus](https://github.com/ARM-DOE/Adapt/actions/workflows/virus.yml/badge.svg)](https://arm-doe.github.io/Adapt/)
 
 
+[![Docs](https://github.com/ARM-DOE/Adapt/actions/workflows/docs.yml/badge.svg)](https://arm-doe.github.io/Adapt/)
+[![PyPi release](https://github.com/ARM-DOE/Adapt/actions/workflows/pypi-release.yml/badge.svg)](https://arm-doe.github.io/Adapt/) 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/arm-adapt?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pypi.org/project/arm-adapt/)
 [![PyPI - License](https://img.shields.io/pypi/l/arm-adapt)](https://github.com/ARM-DOE/Adapt?tab=License-1-ov-file#)
 [![ARM](https://img.shields.io/badge/Sponsor-ARM-blue.svg?colorA=00c1de&colorB=00539c)](https://www.arm.gov/)
 

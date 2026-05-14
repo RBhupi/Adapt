@@ -48,3 +48,8 @@ def assert_segmented(ds: xr.Dataset, labels_name: str) -> None:
         labels.ndim == 2,
         f"Segmentation contract violated: '{labels_name}' has {labels.ndim} dims, expected 2",
     )
+
+
+def check_segmented_ds(ds: xr.Dataset) -> None:
+    """Bound contract for the standard segmented dataset (cell_labels variable name fixed)."""
+    assert_segmented(ds, "cell_labels")

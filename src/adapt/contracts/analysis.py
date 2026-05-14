@@ -94,3 +94,13 @@ def assert_cell_adjacency(df: pd.DataFrame) -> None:
         (df["touching_boundary_pixels"] >= 1).all(),
         "Cell adjacency contract violated: touching_boundary_pixels must be >= 1",
     )
+
+
+def check_cell_stats(df: pd.DataFrame) -> None:
+    """Bound contract for cell statistics DataFrame."""
+    assert_analysis_output(df)
+
+
+def check_cell_adjacency(df: pd.DataFrame) -> None:
+    """Bound contract for cell adjacency DataFrame."""
+    assert_cell_adjacency(df)

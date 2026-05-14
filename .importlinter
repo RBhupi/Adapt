@@ -1,4 +1,4 @@
-# Import Linter configuration for ADAPT
+# Import Linter configuration for Adapt
 #
 # Purpose:
 # Enforce architectural boundaries so the codebase stays modular,
@@ -19,22 +19,14 @@ root_packages =
 include_external_packages = False
 
 # ==========================================================
-# 1. Scientific modules must remain independent
+# 1. Scientific module independence — enforced by pytest
 # ==========================================================
 #
-# No module may import from any other module — directly or
-# transitively. Shared types belong in adapt.contracts.
+# Inter-module imports and upward imports from modules/ are
+# caught by tests/test_architecture.py, which auto-discovers
+# subpackages at runtime. No explicit module list needed there.
+# Run: pytest tests/test_architecture.py
 
-[importlinter:contract:independent_modules]
-name = Adapt modules remain independent
-type = independence
-modules =
-    adapt.modules.acquisition
-    adapt.modules.analysis
-    adapt.modules.detection
-    adapt.modules.ingest
-    adapt.modules.projection
-    adapt.modules.tracking
 
 # ==========================================================
 # 2. Modules do not depend on runtime orchestration
@@ -68,11 +60,38 @@ type = forbidden
 source_modules =
     adapt.modules
 forbidden_modules =
+    adapt.execution
     adapt.persistence
     adapt.api
     adapt.gui
     adapt.visualization
     adapt.configuration
+
+# ==========================================================
+# 3b. Utils package imports no adapt internals
+# ==========================================================
+#
+# adapt.utils contains pure stdlib functions shared across
+# the codebase. It must not depend on any adapt layer or
+# it creates import cycles and loses its zero-dependency value.
+
+[importlinter:contract:utils_are_pure]
+name = Utils package imports no adapt internals
+type = forbidden
+source_modules =
+    adapt.utils
+forbidden_modules =
+    adapt.modules
+    adapt.contracts
+    adapt.execution
+    adapt.runtime
+    adapt.persistence
+    adapt.configuration
+    adapt.api
+    adapt.gui
+    adapt.visualization
+    adapt.cli
+    adapt.extensions
 
 # ==========================================================
 # 4. Persistence is infrastructure — no science, no orchestration

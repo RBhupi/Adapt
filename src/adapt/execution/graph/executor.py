@@ -69,7 +69,7 @@ class GraphExecutor:
 
         while len(completed) < len(self.nodes):
             iteration += 1
-            if iteration > max_iterations:
+            if iteration > max_iterations:  # pragma: no cover — preempted by no-progress check
                 pending = [n.name for n in self.nodes if n.name not in completed]
                 raise RuntimeError(
                     f"Execution graph appears to contain a cycle or unresolvable "

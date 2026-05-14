@@ -38,3 +38,8 @@ def assert_gridded(ds: xr.Dataset, reflectivity_var: str) -> None:
         refl.ndim == 2,
         f"Grid contract violated: '{reflectivity_var}' has {refl.ndim} dims, expected 2",
     )
+
+
+def check_grid_ds_2d(ds: xr.Dataset) -> None:
+    """Bound contract for the standard 2D grid output (reflectivity variable name fixed)."""
+    assert_gridded(ds, "reflectivity")

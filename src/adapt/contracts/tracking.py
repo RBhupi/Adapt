@@ -92,3 +92,15 @@ def assert_cell_events(df: pd.DataFrame) -> None:
         f"Cell events contract violated: invalid event_type present "
         f"(valid={sorted(_VALID_EVENT_TYPES)})",
     )
+
+
+def check_tracked_cells(df: pd.DataFrame) -> None:
+    """Bound contract for tracked cells DataFrame (skips validation on empty frame)."""
+    if not df.empty:
+        assert_tracked_cells(df)
+
+
+def check_cell_events(df: pd.DataFrame) -> None:
+    """Bound contract for cell events DataFrame (skips validation on empty frame)."""
+    if not df.empty:
+        assert_cell_events(df)

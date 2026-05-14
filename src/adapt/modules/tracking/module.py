@@ -33,11 +33,9 @@ References: Raut, B. A., Jackson, R., Picel, M., Collis, S. M., Bergemann, M., &
 Journal of Applied Meteorology and Climatology, 60(4), 513-526.
 """
 
-import contextlib
 import hashlib
 import logging
 import string
-from datetime import UTC
 
 import networkx as nx
 import numpy as np
@@ -45,7 +43,9 @@ import pandas as pd
 import xarray as xr
 from scipy.optimize import linear_sum_assignment
 
-__all__ = ['RadarCellTracker', 'TrackingModule']
+from adapt.utils.time import normalize_time_scalar
+
+__all__ = ['RadarCellTracker']
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +428,7 @@ class RadarCellTracker:
     # ------------------------------------------------------------------
 
     def _get_time(self, ds: xr.Dataset):
-        return self._normalize_time_scalar(ds.time.values)
+        return normalize_time_scalar(ds.time.values)
 
     @staticmethod
     def _to_epoch_seconds(time_val) -> float:
@@ -438,45 +438,9 @@ class RadarCellTracker:
         return float(ts.timestamp())
 
     @staticmethod
-    def _normalize_time_scalar(time_val):
-        """Normalize xarray/cftime/numpy time representations to a scalar.
-
-        Returns a scalar compatible with pandas.Timestamp:
-        - np.datetime64
-        - datetime.datetime
-        - or a scalar string / timestamp-like object
-        """
-        tv = time_val
-        while isinstance(tv, np.ndarray) and tv.size == 1:
-            tv = tv.reshape(-1)[0]
-        if isinstance(tv, np.ndarray):
-            tv = tv.reshape(-1)[0]
-
-        if hasattr(tv, "item"):
-            with contextlib.suppress(Exception):
-                tv = tv.item()
-
-        # Handle cftime.* objects (pandas cannot convert them directly)
-        if getattr(type(tv), "__module__", "").startswith("cftime"):
-            from datetime import datetime
-
-            tv = datetime(
-                int(tv.year),
-                int(tv.month),
-                int(tv.day),
-                int(tv.hour),
-                int(tv.minute),
-                int(tv.second),
-                int(getattr(tv, "microsecond", 0) or 0),
-                tzinfo=UTC,
-            )
-
-        return tv
-
-    @staticmethod
     def _time_key(time_val) -> str:
         """Stable ISO8601 time key for event grouping."""
-        tv = RadarCellTracker._normalize_time_scalar(time_val)
+        tv = normalize_time_scalar(time_val)
         return pd.Timestamp(tv).isoformat()
 
     def _extract_cells_from_analyzer(
@@ -778,7 +742,7 @@ class RadarCellTracker:
         rows: list[dict] = []
         for node_id in node_ids:
             node = self.graph.graph.nodes[node_id]
-            time_val = RadarCellTracker._normalize_time_scalar(node["time"])
+            time_val = normalize_time_scalar(node["time"])
             time_val = pd.Timestamp(time_val).to_datetime64()
             cell_uid = str(node["cell_uid"])
             rows.append(
@@ -821,7 +785,7 @@ class RadarCellTracker:
                 df[col] = None
         df = df[cols]
         df["time"] = df["time"].apply(
-            lambda t: pd.Timestamp(RadarCellTracker._normalize_time_scalar(t))
+            lambda t: pd.Timestamp(normalize_time_scalar(t))
         )
         return df
 
@@ -924,77 +888,3 @@ class RadarCellTracker:
         }
 
 
-# =============================================================================
-# BaseModule wrapper (Phase 6 implementation placeholder)
-# =============================================================================
-
-from adapt.contracts import (  # noqa: E402
-    assert_cell_events,
-    assert_projected,
-    assert_tracked_cells,
-)
-from adapt.execution.module_registry import registry  # noqa: E402
-from adapt.modules.base import BaseModule  # noqa: E402
-
-
-def _check_projected_ds(ds: xr.Dataset) -> None:
-    assert_projected(ds)
-
-
-def _check_tracked_cells(df: pd.DataFrame) -> None:
-    if not df.empty:
-        assert_tracked_cells(df)
-
-
-def _check_cell_events(df: pd.DataFrame) -> None:
-    if not df.empty:
-        assert_cell_events(df)
-
-
-class TrackingModule(BaseModule):
-    """Assign stable `cell_uid` identities to convective cells across consecutive radar scans.
-
-    Produces scan-local tracking outputs. Any higher-level grouping/aggregation
-    is outside this module's scope.
-
-    Context outputs
-    ---------------
-    tracked_cells : pd.DataFrame
-        Per-cell observations for the current scan with cell_uid/cell_label.
-    cell_events : pd.DataFrame
-        Explicit event rows for CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION.
-    """
-
-    name = "tracking"
-    inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
-    outputs = ["tracked_cells", "cell_events"]
-    input_contracts = {"projected_ds": _check_projected_ds}
-    output_contracts = {
-        "tracked_cells": _check_tracked_cells,
-        "cell_events": _check_cell_events,
-    }
-
-    def __init__(self) -> None:
-        self._tracker = None
-
-    def run(self, context: dict) -> dict:
-        config = context["tracking_config"]
-        ds_2d = context["projected_ds"]
-        cell_stats = context["cell_stats"]
-
-        if self._tracker is None:
-            self._tracker = RadarCellTracker(config)
-
-        tracked_cells, cell_events = self._tracker.track(
-            ds_projected=ds_2d,
-            cell_stats_df=cell_stats,
-        )
-
-        return {
-            "tracked_cells": tracked_cells,
-            "cell_events": cell_events,
-        }
-
-
-# Register module
-registry.register(TrackingModule)

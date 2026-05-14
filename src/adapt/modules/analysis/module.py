@@ -22,16 +22,16 @@ coordinates (latitude, longitude) for flexibility in downstream analysis.
 Author: Bhupendra Raut
 """
 
-import contextlib
 import json
 import logging
-from datetime import UTC
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.ndimage import center_of_mass
 from skimage.measure import regionprops
+
+from adapt.utils.time import normalize_time_scalar
 
 __all__ = ['RadarCellAnalyzer']
 
@@ -356,30 +356,6 @@ class RadarCellAnalyzer:
         dy = float(np.abs(ds.y[1] - ds.y[0]))
         return (dx * dy) / 1e6
 
-    @staticmethod
-    def _normalize_time_scalar(time_val):
-        tv = time_val
-        while isinstance(tv, np.ndarray) and tv.size == 1:
-            tv = tv.reshape(-1)[0]
-        if isinstance(tv, np.ndarray):
-            tv = tv.reshape(-1)[0]
-        if hasattr(tv, "item"):
-            with contextlib.suppress(Exception):
-                tv = tv.item()
-        if getattr(type(tv), "__module__", "").startswith("cftime"):
-            from datetime import datetime
-            tv = datetime(
-                int(tv.year),
-                int(tv.month),
-                int(tv.day),
-                int(tv.hour),
-                int(tv.minute),
-                int(tv.second),
-                int(getattr(tv, "microsecond", 0) or 0),
-                tzinfo=UTC,
-            )
-        return tv
-
     def _get_lat_lon_grids(self, ds):
         """Get lat/lon grids from dataset.
         
@@ -475,7 +451,7 @@ class RadarCellAnalyzer:
         # Get scan start time
         scan_time = ""
         if "time" in ds.coords:
-            tv = self._normalize_time_scalar(ds.time.values)
+            tv = normalize_time_scalar(ds.time.values)
             scan_time = pd.Timestamp(tv).isoformat()
 
         # === GEOMETRIC CENTROID (center of mass of binary mask) ===
@@ -655,68 +631,3 @@ class RadarCellAnalyzer:
             return np.nan, np.nan
         
         return float(lat), float(lon)
-
-
-
-# ---------------------------------------------------------------------------
-# BaseModule wrapper — Step 6
-# ---------------------------------------------------------------------------
-
-from adapt.contracts import assert_analysis_output, assert_cell_adjacency  # noqa: E402
-from adapt.execution.module_registry import registry  # noqa: E402
-from adapt.modules.base import BaseModule  # noqa: E402
-
-
-def _check_cell_stats(df):
-    assert_analysis_output(df)
-
-def _check_cell_adjacency(df):
-    assert_cell_adjacency(df)
-
-
-class AnalysisModule(BaseModule):
-    """BaseModule wrapper for RadarCellAnalyzer.
-
-    Extracts per-cell statistics (area, reflectivity, motion, centroids)
-    from a segmented/projected 2D dataset. Pure compute — no I/O.
-    Persistence is the processor's responsibility.
-
-    Context inputs
-    --------------
-    projected_ds : xr.Dataset
-        2D dataset with projections (output of ProjectionModule).
-    config : InternalConfig
-        Runtime configuration.
-    scan_time : datetime
-        Radar scan timestamp (from LoadModule).
-
-    Context outputs
-    ---------------
-    cell_stats : pd.DataFrame
-        Per-cell statistics DataFrame.
-    cell_adjacency : pd.DataFrame
-        Touching-cell pairs DataFrame.
-    """
-
-    name = "analysis"
-    inputs = ["projected_ds", "analysis_config", "scan_time"]
-    outputs = ["cell_stats", "cell_adjacency"]
-    output_contracts = {"cell_stats": _check_cell_stats, "cell_adjacency": _check_cell_adjacency}
-
-    def __init__(self) -> None:
-        self._analyzer = None
-
-    def run(self, context: dict) -> dict:
-        config = context["analysis_config"]
-        ds_2d = context["projected_ds"]
-
-        if self._analyzer is None:
-            self._analyzer = RadarCellAnalyzer(config)
-
-        df_cells = self._analyzer.extract(ds_2d, z_level=config.z_level)
-        df_adjacency = self._analyzer.extract_adjacency(ds_2d)
-
-        return {"cell_stats": df_cells, "cell_adjacency": df_adjacency}
-
-
-registry.register(AnalysisModule)

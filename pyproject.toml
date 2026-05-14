@@ -58,6 +58,7 @@ adapt = "adapt.cli:main"
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "import-linter>=2.0",
 ]
 docs = [
     "sphinx>=7.0",
