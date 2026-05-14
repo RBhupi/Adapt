@@ -1,0 +1,25 @@
+import numpy as np
+import pytest
+
+pytestmark = pytest.mark.unit
+from adapt.modules.analysis.module import RadarCellAnalyzer  # noqa: E402
+
+
+def test_get_lat_lon_bounds():
+    lat = np.ones((5, 5))
+    lon = np.ones((5, 5))
+
+    lat_val, lon_val = RadarCellAnalyzer.get_lat_lon(100, 100, lat, lon)
+
+    assert np.isnan(lat_val)
+    assert np.isnan(lon_val)
+
+
+def test_pixel_area_computation(simple_2d_ds, make_analysis_config):
+    """Analyzer computes pixel area correctly."""
+    config = make_analysis_config()
+    analyzer = RadarCellAnalyzer(config)
+
+    area = analyzer._pixel_area_km2(simple_2d_ds)
+
+    assert area > 0

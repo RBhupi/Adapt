@@ -10,6 +10,8 @@ responsible for calling adapt.utils.time.normalize_time_scalar before
 returning a dataset to the context.
 """
 
+import contextlib
+
 import numpy as np
 import xarray as xr
 
@@ -41,10 +43,8 @@ def assert_time_normalized(ds: xr.Dataset) -> None:
         tv = raw.flat[0] if isinstance(raw, np.ndarray) and raw.ndim > 0 else raw
         # unwrap numpy scalar wrapper if needed
         if hasattr(tv, "item"):
-            try:
+            with contextlib.suppress(Exception):
                 tv = tv.item()
-            except Exception:
-                pass
         module = getattr(type(tv), "__module__", "")
         require(
             not module.startswith("cftime"),

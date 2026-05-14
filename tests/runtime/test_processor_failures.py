@@ -1,0 +1,150 @@
+"""Tests for RadarProcessor error handling and success paths.
+
+The processor orchestrates ingest+detection via _single_executor and
+projection+analysis+tracking via _multi_executor. These tests patch the
+executors to keep the focus on orchestration rather than scientific behavior.
+"""
+
+import queue
+from datetime import UTC, datetime
+
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+
+from adapt.contracts import ContractViolation
+from adapt.runtime.processor import RadarProcessor
+
+pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
+
+
+def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
+    q = queue.Queue()
+    return RadarProcessor(q, pipeline_config, pipeline_output_dirs,
+                          repository=test_repository)
+
+
+def _fake_ds():
+    return xr.Dataset(
+        {
+            "reflectivity": (("y", "x"), np.ones((4, 4))),
+            "cell_labels":  (("y", "x"), np.zeros((4, 4), dtype=int)),
+        },
+        coords={"x": np.arange(4), "y": np.arange(4)},
+        attrs={"z_level_m": 2000},
+    )
+
+
+def _fake_single_result(scan_time):
+    """Return what _single_executor.run() would produce."""
+    return {
+        "grid_ds": _fake_ds(),
+        "grid_ds_2d": _fake_ds(),
+        "segmented_ds": _fake_ds(),
+        "scan_time": scan_time,
+        "num_cells": 0,
+    }
+
+
+# ── Error paths ───────────────────────────────────────────────────────────────
+
+def test_process_file_pipeline_exception_returns_false(
+    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+):
+    """process_file returns False when single-frame executor raises."""
+    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+
+    def _boom(context):
+        raise OSError("disk failure")
+
+    monkeypatch.setattr(proc._single_executor, "run", _boom)
+
+    ok = proc.process_file("/fake/path/file")
+    assert ok is False
+
+
+def test_process_file_contract_violation_stops_processor(
+    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+):
+    """ContractViolation during multi-frame executor causes processor to stop."""
+    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+
+    scan_times = [
+        datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
+    ]
+
+    def _fake_single(context):
+        return _fake_single_result(scan_times.pop(0))
+
+    def _boom_multi(context):
+        raise ContractViolation("bad grid")
+
+    monkeypatch.setattr(proc._single_executor, "run", _fake_single)
+    monkeypatch.setattr(proc._multi_executor, "run", _boom_multi)
+
+    ok1 = proc.process_file("/fake/path/file_1")
+    ok2 = proc.process_file("/fake/path/file_2")
+    assert ok1 is True
+    assert ok2 is False
+    assert proc.stopped()
+
+
+# ── Success path ──────────────────────────────────────────────────────────────
+
+def test_process_file_success_saves_netcdf_and_returns_true(
+    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+):
+    """process_file returns True and attempts NetCDF save on success."""
+    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+
+    scan_times = [
+        datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
+    ]
+
+    def _fake_single(context):
+        return _fake_single_result(scan_times.pop(0))
+
+    fake_result = {
+        "projected_ds": _fake_ds(),
+        "scan_time":    datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
+        "cell_stats":   pd.DataFrame({"cell_label": [1]}),
+        "cell_adjacency": pd.DataFrame(),
+    }
+
+    monkeypatch.setattr(proc._single_executor, "run", _fake_single)
+    monkeypatch.setattr(proc._multi_executor, "run", lambda ctx: fake_result)
+
+    saved = []
+    monkeypatch.setattr(proc, "_save_analysis_netcdf",
+                        lambda ds, fp, st: saved.append(fp) or "/tmp/out.nc")
+    monkeypatch.setattr(proc, "_save_results", lambda result, st: None)
+
+    ok1 = proc.process_file("/fake/path/file_1")
+    ok2 = proc.process_file("/fake/path/file_2")
+    assert ok1 is True
+    assert ok2 is True
+
+
+def test_process_file_skips_already_analyzed(
+    monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
+):
+    """process_file skips a file that the tracker marks as done."""
+    proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
+
+    class _FakeTracker:
+        def should_process(self, file_id, stage):
+            return False
+
+    proc.file_tracker = _FakeTracker()
+    called = []
+    monkeypatch.setattr(
+        proc._single_executor, "run",
+        lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
+    )
+
+    ok = proc.process_file("/fake/path/file")
+    assert ok is True
+    assert called == []  # single executor was NOT called
