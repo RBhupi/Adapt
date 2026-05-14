@@ -23,6 +23,7 @@ convenience.
 
 import contextlib
 import copy
+import logging
 import os
 import shutil
 import subprocess
@@ -31,6 +32,8 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @contextlib.contextmanager
@@ -60,7 +63,7 @@ try:
     os.environ['PROJ_DATA'] = _pd
     os.environ['PROJ_LIB']  = _pd
 except Exception:
-    pass
+    logger.exception("Failed to configure PROJ environment variables")
 
 # ── Tkinter ───────────────────────────────────────────────────────────────────
 import tkinter as tk  # noqa: E402
@@ -136,7 +139,7 @@ def _cell_uid_disp(uid) -> str:
         if _pd.isna(uid):
             return '\u2014'
     except Exception:
-        pass
+        logger.exception("Failed to normalize cell UID display value")
     if uid is None:
         return '\u2014'
     return str(uid)[:4]
@@ -184,7 +187,7 @@ if HAS_MPL:
                     s = (f'x={x_km:.2f}  y={y_km:.2f}'
                          f'    {lat_v:.4f}\u00b0  {lon_v:.4f}\u00b0')
                 except Exception:
-                    pass
+                    logger.exception("Failed to update toolbar coordinate message")
             super().set_message(s)
 else:
     _CompactToolbar = None
@@ -276,6 +279,7 @@ def _pipeline_running() -> bool:
         os.kill(pid, 0)
         return True
     except Exception:
+        logger.exception("Failed to verify pipeline PID status")
         return False
 
 
@@ -296,7 +300,7 @@ def _list_radars(repo: Path) -> list:
         if radars:
             return sorted(radars)
     except Exception:
-        pass
+        logger.exception("Failed to list radars via DataClient; using filesystem fallback")
 
     # Fallback: filesystem scan for NEXRAD-style directories
     return sorted(
@@ -346,7 +350,7 @@ def _list_runs(repo: Path, radar: str = None) -> list:
                 runs.append(f'{run_id}  ({mtime})')
             return runs
     except Exception:
-        pass
+        logger.exception("Failed to list runs via DataClient; using filesystem fallback")
 
     # Fallback: filesystem scan for runtime_config_*.json
     configs = sorted(repo.glob('runtime_config_*.json'), reverse=True)
@@ -723,7 +727,7 @@ class AdaptDashboard(tk.Tk):
                 if latest_run and latest_run.get('radar') in radars:
                     latest_radar = latest_run['radar']
             except Exception:
-                pass
+                logger.exception("Failed to auto-select radar from latest run")
 
         if latest_radar:
             self._radar.set(latest_radar)
@@ -782,6 +786,7 @@ class AdaptDashboard(tk.Tk):
                 start_new_session=True,
             )
         except Exception as e:
+            logger.exception("Failed to launch pipeline subprocess: %s", cmd)
             messagebox.showerror('Launch failed', str(e), parent=self)
             return
 
@@ -917,11 +922,14 @@ class AdaptDashboard(tk.Tk):
                                 else:
                                     self._clear_time_series()
                             except Exception:
+                                logger.exception(
+                                    "Failed to refresh selected cell time series; clearing view"
+                                )
                                 self._clear_time_series()
                         else:
                             self._clear_time_series()
                     except Exception:
-                        pass
+                        logger.exception("Failed to auto-refresh current NC canvas")
                 else:
                     # Canvas was cleared externally; re-render
                     try:
@@ -930,7 +938,7 @@ class AdaptDashboard(tk.Tk):
                         self._last_rendered_nc = latest
                         self.scan_var.set(labels[-1] if labels else '')
                     except Exception:
-                        pass
+                        logger.exception("Failed to render latest NC file during auto-refresh")
 
         self._refresh_table()
         if self._nb.index('current') == 2:
@@ -1083,7 +1091,7 @@ class AdaptDashboard(tk.Tk):
                         return
                 conn.close()
             except Exception:
-                pass
+                logger.exception("Failed to load cells from SQLite catalog")
 
         # Fallback: parquet (may not contain cell_uid)
         pqs = sorted((Path(repo) / radar / 'analysis').glob('analysis2d_*.parquet'))
@@ -1092,7 +1100,7 @@ class AdaptDashboard(tk.Tk):
                 dfs = [pd.read_parquet(p) for p in pqs]
                 self._current_cell_df = pd.concat(dfs, ignore_index=True)
             except Exception:
-                pass
+                logger.exception("Failed to load fallback parquet cell data")
 
     # ── NC loop render (cycle through N frames) ───────────────────────────────
 
@@ -1359,7 +1367,7 @@ class AdaptDashboard(tk.Tk):
                             source=ctx.providers.OpenStreetMap.Mapnik,
                             alpha=0.6, attribution=False, zoom=8, zorder=0)
         except Exception as e:
-            print(f'Basemap error: {e}')
+            logger.warning("Basemap unavailable: %s", e)
 
 
     # ── Single update entry point ─────────────────────────────────────────────
@@ -1416,7 +1424,7 @@ class AdaptDashboard(tk.Tk):
                         r = matched.iloc[0]
                         cell_uid = r.get('cell_uid')
             except Exception:
-                pass
+                logger.exception("Failed to resolve cell UID from track store")
 
         # Fallback: search loaded cell df with 60-s time window
         if cell_uid is None:
@@ -1449,7 +1457,7 @@ class AdaptDashboard(tk.Tk):
                 ts_obj = TrackStore(db_path)
                 history_df = ts_obj.get_track_history(self._current_run_id, str(cell_uid))
             except Exception:
-                pass
+                logger.exception("Failed to load tracking history from track store")
 
         if history_df is None or history_df.empty:
             df = self._current_cell_df
@@ -1763,7 +1771,7 @@ class AdaptDashboard(tk.Tk):
                 self._hv[k].set(_em)
 
         except Exception:
-            pass
+            logger.exception("Failed to update hover stats values")
 
     # ── Cell statistics ───────────────────────────────────────────────────────
 
@@ -1790,6 +1798,7 @@ class AdaptDashboard(tk.Tk):
                 if rows:
                     df = pd.DataFrame([dict(r) for r in rows])
             except Exception:
+                logger.exception("DB stats query failed; falling back to parquet")
                 df = None
 
         # Fallback: parquet
@@ -1802,6 +1811,7 @@ class AdaptDashboard(tk.Tk):
                 dfs = [pd.read_parquet(p) for p in pqs]
                 df = pd.concat(dfs, ignore_index=True)
             except Exception as e:
+                logger.exception("Failed to load parquet files for stats table")
                 self.stats_lbl.config(text=f'Error: {e}')
                 return
 
@@ -1813,7 +1823,7 @@ class AdaptDashboard(tk.Tk):
             df['scan_time']  = pd.to_datetime(df['scan_time'], utc=True)
             df['time_label'] = df['scan_time'].dt.strftime('%H:%M:%S')
         except Exception:
-            pass
+            logger.exception("Failed to parse scan_time column for table display")
 
         # Update slider range bounds from data
         for col, (lo_v, hi_v) in self._flt.items():
