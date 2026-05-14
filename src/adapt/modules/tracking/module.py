@@ -45,7 +45,7 @@ from scipy.optimize import linear_sum_assignment
 
 from adapt.utils.time import normalize_time_scalar
 
-__all__ = ['RadarCellTracker']
+__all__ = ["RadarCellTracker"]
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +101,14 @@ def _track_signature_from_birth(
 def _cell_uid_from_signature(signature: str, width: int) -> str:
     digest = hashlib.blake2b(signature.encode("utf-8"), digest_size=8).digest()
     value64 = int.from_bytes(digest, byteorder="big", signed=False)
-    modulus = 36 ** width
+    modulus = 36**width
     return _encode_base36_fixed(value64 % modulus, width=width)
 
 
 # =============================================================================
 # Tracking Graph Structure
 # =============================================================================
+
 
 class TrackingGraph:
     """Directed graph storing cell tracking history and lineage.
@@ -221,12 +222,15 @@ class TrackingGraph:
         List[int]
             List of node IDs at this time
         """
-        return [n for n, d in self.graph.nodes(data=True) if d.get('time') == time]
+        return [n for n, d in self.graph.nodes(data=True) if d.get("time") == time]
 
     def get_track_nodes(self, track_index: int) -> list[int]:
         """Get all nodes belonging to a track, sorted by time."""
-        nodes = [(n, d['time']) for n, d in self.graph.nodes(data=True)
-                 if d.get('track_index') == track_index]
+        nodes = [
+            (n, d["time"])
+            for n, d in self.graph.nodes(data=True)
+            if d.get("track_index") == track_index
+        ]
         nodes.sort(key=lambda x: x[1])
         return [n for n, _ in nodes]
 
@@ -243,8 +247,10 @@ class TrackingGraph:
         List[Tuple[int, str]]
             List of (predecessor_node_id, edge_type) tuples
         """
-        return [(pred, self.graph.edges[pred, node_id]['edge_type'])
-                for pred in self.graph.predecessors(node_id)]
+        return [
+            (pred, self.graph.edges[pred, node_id]["edge_type"])
+            for pred in self.graph.predecessors(node_id)
+        ]
 
     def get_successors(self, node_id: int) -> list[tuple[int, str]]:
         """Get successor nodes with their edge types.
@@ -259,13 +265,16 @@ class TrackingGraph:
         List[Tuple[int, str]]
             List of (successor_node_id, edge_type) tuples
         """
-        return [(succ, self.graph.edges[node_id, succ]['edge_type'])
-                for succ in self.graph.successors(node_id)]
+        return [
+            (succ, self.graph.edges[node_id, succ]["edge_type"])
+            for succ in self.graph.successors(node_id)
+        ]
 
 
 # =============================================================================
 # Matching Engine
 # =============================================================================
+
 
 class MatchingEngine:
     """Cost matrix builder using projected masks (cell_projections[0] is already the hull)."""
@@ -291,12 +300,12 @@ class MatchingEngine:
         cost_matrix = np.full((n_prev, n_curr), dummy_cost, dtype=float)
 
         for prev_idx, prev_node in enumerate(prev_node_ids):
-            prev_cell_id = graph.get_node_attr(prev_node, 'cell_id')
-            proj_mask = (proj_labels == prev_cell_id)
+            prev_cell_id = graph.get_node_attr(prev_node, "cell_id")
+            proj_mask = proj_labels == prev_cell_id
             if not np.any(proj_mask):
                 continue  # cell left the frame
             for curr_idx, curr_cell in enumerate(curr_cells):
-                if np.any(proj_mask & curr_cell['mask']):
+                if np.any(proj_mask & curr_cell["mask"]):
                     cost_matrix[prev_idx, curr_idx] = self._compute_cost(
                         prev_node, graph, proj_mask, curr_cell
                     )
@@ -311,30 +320,30 @@ class MatchingEngine:
         curr_cell: dict,
     ) -> float:
         """5-term cost: 0.4*Dpos + 0.3*(1-IoU) + 0.15*|log(A2/A1)| + 0.1*|Z2-Z1|/50"""
-        prev_cx   = graph.get_node_attr(prev_node, 'centroid_x')
-        prev_cy   = graph.get_node_attr(prev_node, 'centroid_y')
-        prev_area = graph.get_node_attr(prev_node, 'area')
-        prev_refl = graph.get_node_attr(prev_node, 'mean_reflectivity')
+        prev_cx = graph.get_node_attr(prev_node, "centroid_x")
+        prev_cy = graph.get_node_attr(prev_node, "centroid_y")
+        prev_area = graph.get_node_attr(prev_node, "area")
+        prev_refl = graph.get_node_attr(prev_node, "mean_reflectivity")
 
-        curr_mask = curr_cell['mask']
-        H, W      = proj_mask.shape
-        diagonal  = np.sqrt(float(H**2 + W**2))
-        dist      = np.sqrt(
-            (curr_cell['centroid_x'] - prev_cx) ** 2 +
-            (curr_cell['centroid_y'] - prev_cy) ** 2
+        curr_mask = curr_cell["mask"]
+        H, W = proj_mask.shape
+        diagonal = np.sqrt(float(H**2 + W**2))
+        dist = np.sqrt(
+            (curr_cell["centroid_x"] - prev_cx) ** 2
+            + (curr_cell["centroid_y"] - prev_cy) ** 2
         )
         D_pos = dist / diagonal
 
         union = np.sum(proj_mask | curr_mask)
-        IoU   = float(np.sum(proj_mask & curr_mask)) / union if union > 0 else 0.0
+        IoU = float(np.sum(proj_mask & curr_mask)) / union if union > 0 else 0.0
 
-        curr_area = curr_cell['area']
+        curr_area = curr_cell["area"]
         area_diff = (
             float(np.abs(np.log(curr_area / prev_area)))
             if prev_area > 0 and curr_area > 0
             else 1.0
         )
-        refl_diff = float(np.abs(curr_cell['mean_reflectivity'] - prev_refl)) / 50.0
+        refl_diff = float(np.abs(curr_cell["mean_reflectivity"] - prev_refl)) / 50.0
 
         return 0.4 * D_pos + 0.3 * (1.0 - IoU) + 0.15 * area_diff + 0.1 * refl_diff
 
@@ -342,6 +351,7 @@ class MatchingEngine:
 # =============================================================================
 # Core Tracking Algorithm
 # =============================================================================
+
 
 class RadarCellTracker:
     """Track convective cells using projected masks, Hungarian matching, and
@@ -358,26 +368,29 @@ class RadarCellTracker:
     """
 
     def __init__(self, config):
-        self.match_cost    = config.match_cost
-        self.keep_cost     = config.keep_cost
-        self.unmatch_cost  = config.unmatch_cost
+        self.match_cost = config.match_cost
+        self.keep_cost = config.keep_cost
+        self.unmatch_cost = config.unmatch_cost
         self.split_overlap = config.split_overlap
         self.core_threshold = config.core_reflectivity_threshold
-        self.refl_var      = config.reflectivity_var
-        self.labels_var    = config.labels_var
-        self.uid_time_step_s     = config.uid_time_step_s
+        self.refl_var = config.reflectivity_var
+        self.labels_var = config.labels_var
+        self.uid_time_step_s = config.uid_time_step_s
         self.uid_latlon_step_deg = config.uid_latlon_step_deg
-        self.uid_area_step_km2   = config.uid_area_step_km2
-        self.uid_width           = config.uid_width
+        self.uid_area_step_km2 = config.uid_area_step_km2
+        self.uid_width = config.uid_width
 
-        self.graph          = TrackingGraph()
-        self.matcher        = MatchingEngine(config)
+        self.graph = TrackingGraph()
+        self.matcher = MatchingEngine(config)
         self._previous_scan: tuple | None = None  # (time, ds, node_ids)
         self._cell_identity: dict[int, tuple[str, str]] = {}
 
         logger.info(
             "RadarCellTracker initialized: match=%.2f keep=%.2f unmatch=%.2f overlap=%.2f",
-            self.match_cost, self.keep_cost, self.unmatch_cost, self.split_overlap,
+            self.match_cost,
+            self.keep_cost,
+            self.unmatch_cost,
+            self.split_overlap,
         )
 
     # ------------------------------------------------------------------
@@ -395,7 +408,7 @@ class RadarCellTracker:
         - tracked_cells_df: one row per cell observation in this scan
         - cell_events_df: explicit lineage/events (continue/split/merge/initiation/termination)
         """
-        current_time  = self._get_time(ds_projected)
+        current_time = self._get_time(ds_projected)
         cells_current = self._extract_cells_from_analyzer(ds_projected, cell_stats_df)
 
         events: list[dict] = []
@@ -407,14 +420,20 @@ class RadarCellTracker:
         else:
             prev_time, ds_prev, prev_node_ids = self._previous_scan
             events = self._track_frame_pair(
-                prev_time, ds_prev, prev_node_ids,
-                current_time, ds_projected, cells_current,
+                prev_time,
+                ds_prev,
+                prev_node_ids,
+                current_time,
+                ds_projected,
+                cells_current,
             )
-            current_node_ids    = self.graph.get_nodes_at_time(current_time)
+            current_node_ids = self.graph.get_nodes_at_time(current_time)
             self._previous_scan = (current_time, ds_projected, current_node_ids)
 
         current_node_ids = self.graph.get_nodes_at_time(current_time)
-        tracked_cells_df = self._build_tracked_cells_current(current_time, current_node_ids)
+        tracked_cells_df = self._build_tracked_cells_current(
+            current_time, current_node_ids
+        )
         cell_events_df = self._build_cell_events_dataframe(events)
         return tracked_cells_df, cell_events_df
 
@@ -451,23 +470,23 @@ class RadarCellTracker:
 
         cell_props_map: dict[int, dict] = {}
         for _, row in cell_stats_df.iterrows():
-            lbl = int(row['cell_label'])
+            lbl = int(row["cell_label"])
             cell_props_map[lbl] = {
-                'area':              float(row['cell_area_sqkm']),
-                'centroid_x':        float(row['cell_centroid_geom_x']),
-                'centroid_y':        float(row['cell_centroid_geom_y']),
-                'mean_reflectivity': float(row['radar_reflectivity_mean']),
-                'max_reflectivity':  float(row['radar_reflectivity_max']),
-                'time_volume_start': row['time_volume_start'],
-                'centroid_mass_lat': float(row['cell_centroid_mass_lat']),
-                'centroid_mass_lon': float(row['cell_centroid_mass_lon']),
-                'max_zdr': float(row['radar_differential_reflectivity_max']),
-                'area_40dbz_km2': float(row['area_40dbz_km2']),
+                "area": float(row["cell_area_sqkm"]),
+                "centroid_x": float(row["cell_centroid_geom_x"]),
+                "centroid_y": float(row["cell_centroid_geom_y"]),
+                "mean_reflectivity": float(row["radar_reflectivity_mean"]),
+                "max_reflectivity": float(row["radar_reflectivity_max"]),
+                "time_volume_start": row["time_volume_start"],
+                "centroid_mass_lat": float(row["cell_centroid_mass_lat"]),
+                "centroid_mass_lon": float(row["cell_centroid_mass_lon"]),
+                "max_zdr": float(row["radar_differential_reflectivity_max"]),
+                "area_40dbz_km2": float(row["area_40dbz_km2"]),
             }
 
-        refl           = ds[self.refl_var].values
-        dx             = float(np.abs(ds.x[1] - ds.x[0]))
-        dy             = float(np.abs(ds.y[1] - ds.y[0]))
+        refl = ds[self.refl_var].values
+        dx = float(np.abs(ds.x[1] - ds.x[0]))
+        dy = float(np.abs(ds.y[1] - ds.y[0]))
         pixel_area_km2 = (dx * dy) / 1e6
 
         cells: list[dict] = []
@@ -475,39 +494,45 @@ class RadarCellTracker:
             if cell_id == 0:
                 continue
             if cell_id not in cell_props_map:
-                logger.warning("Cell %d in labels but not in analyzer stats; skipping", cell_id)
+                logger.warning(
+                    "Cell %d in labels but not in analyzer stats; skipping", cell_id
+                )
                 continue
-            mask          = labels == cell_id
-            props         = cell_props_map[cell_id]
-            core_area_km2 = float(np.sum(mask & (refl > self.core_threshold)) * pixel_area_km2)
-            cells.append({
-                'cell_id':           int(cell_id),
-                'mask':              mask,
-                'area':              props['area'],
-                'centroid_x':        props['centroid_x'],
-                'centroid_y':        props['centroid_y'],
-                'mean_reflectivity': props['mean_reflectivity'],
-                'max_reflectivity':  props['max_reflectivity'],
-                'core_area':         core_area_km2,
-                'time_volume_start': props['time_volume_start'],
-                'centroid_mass_lat': props['centroid_mass_lat'],
-                'centroid_mass_lon': props['centroid_mass_lon'],
-                'max_zdr': props['max_zdr'],
-                'area_40dbz_km2': props['area_40dbz_km2'],
-            })
+            mask = labels == cell_id
+            props = cell_props_map[cell_id]
+            core_area_km2 = float(
+                np.sum(mask & (refl > self.core_threshold)) * pixel_area_km2
+            )
+            cells.append(
+                {
+                    "cell_id": int(cell_id),
+                    "mask": mask,
+                    "area": props["area"],
+                    "centroid_x": props["centroid_x"],
+                    "centroid_y": props["centroid_y"],
+                    "mean_reflectivity": props["mean_reflectivity"],
+                    "max_reflectivity": props["max_reflectivity"],
+                    "core_area": core_area_km2,
+                    "time_volume_start": props["time_volume_start"],
+                    "centroid_mass_lat": props["centroid_mass_lat"],
+                    "centroid_mass_lon": props["centroid_mass_lon"],
+                    "max_zdr": props["max_zdr"],
+                    "area_40dbz_km2": props["area_40dbz_km2"],
+                }
+            )
         return cells
 
     def _new_cell_identity(self, cell: dict) -> tuple[str, str]:
-        max_zdr = float(cell['max_zdr'])
+        max_zdr = float(cell["max_zdr"])
         if max_zdr < 0:
             max_zdr = 0.0
         signature = _track_signature_from_birth(
-            scan_start_time_epoch_s=self._to_epoch_seconds(cell['time_volume_start']),
-            centroid_lat_deg=float(cell['centroid_mass_lat']),
-            centroid_lon_deg=float(cell['centroid_mass_lon']),
-            max_dbz=float(cell['max_reflectivity']),
+            scan_start_time_epoch_s=self._to_epoch_seconds(cell["time_volume_start"]),
+            centroid_lat_deg=float(cell["centroid_mass_lat"]),
+            centroid_lon_deg=float(cell["centroid_mass_lon"]),
+            max_dbz=float(cell["max_reflectivity"]),
             max_zdr=max_zdr,
-            area40_km2=float(cell['area_40dbz_km2']),
+            area40_km2=float(cell["area_40dbz_km2"]),
             time_step_s=self.uid_time_step_s,
             latlon_step_deg=self.uid_latlon_step_deg,
             area_step_km2=self.uid_area_step_km2,
@@ -525,7 +550,9 @@ class RadarCellTracker:
             track_index = self.graph.get_new_track_index()
             cell_uid, track_signature = self._new_cell_identity(cell)
             self._cell_identity[track_index] = (cell_uid, track_signature)
-            node_ids.append(self._add_cell_node(time, cell, track_index, cell_uid, track_signature))
+            node_ids.append(
+                self._add_cell_node(time, cell, track_index, cell_uid, track_signature)
+            )
         logger.debug("Initialized %d paths at time %s", len(cells), time)
         return node_ids
 
@@ -541,14 +568,14 @@ class RadarCellTracker:
             cell_uid, track_signature = self.get_cell_identity(track_index)
         return self.graph.add_observation(
             time=time,
-            cell_id=cell['cell_id'],
+            cell_id=cell["cell_id"],
             track_index=track_index,
-            area=cell['area'],
-            centroid_x=cell['centroid_x'],
-            centroid_y=cell['centroid_y'],
-            mean_reflectivity=cell['mean_reflectivity'],
-            max_reflectivity=cell['max_reflectivity'],
-            core_area=cell['core_area'],
+            area=cell["area"],
+            centroid_x=cell["centroid_x"],
+            centroid_y=cell["centroid_y"],
+            mean_reflectivity=cell["mean_reflectivity"],
+            max_reflectivity=cell["max_reflectivity"],
+            core_area=cell["core_area"],
             cell_uid=cell_uid,
             track_signature=track_signature,
         )
@@ -582,9 +609,9 @@ class RadarCellTracker:
                 events.append(self._event_initiation(curr_time, node_id))
             return events
 
-        proj_labels = projections[0]   # registration frame: prev cells → curr coords
-        n_prev      = len(prev_node_ids)
-        n_curr      = len(curr_cells)
+        proj_labels = projections[0]  # registration frame: prev cells → curr coords
+        n_prev = len(prev_node_ids)
+        n_curr = len(curr_cells)
 
         if n_prev == 0:
             self._initialize_tracks(curr_time, curr_cells)
@@ -593,22 +620,28 @@ class RadarCellTracker:
             return events
         if n_curr == 0:
             for d_node in prev_node_ids:
-                events.append(self._event_termination(curr_time, d_node, target_node_id=None))
+                events.append(
+                    self._event_termination(curr_time, d_node, target_node_id=None)
+                )
             return events  # all prev cells dissipated — natural termination, no outgoing edges
 
         dummy_cost = self.unmatch_cost * 50.0
 
         # ── Step 1: raw cost matrix ────────────────────────────────────────
         raw = self.matcher.compute_cost_matrix(
-            prev_node_ids, self.graph, proj_labels, curr_cells, dummy_cost,
+            prev_node_ids,
+            self.graph,
+            proj_labels,
+            curr_cells,
+            dummy_cost,
         )
 
         # ── Step 2: pre-clamp ─────────────────────────────────────────────
-        raw[raw < self.match_cost]   = 0.0
+        raw[raw < self.match_cost] = 0.0
         raw[raw > self.unmatch_cost] = dummy_cost
 
         # ── Step 3: pad to square ─────────────────────────────────────────
-        n      = max(n_prev, n_curr)
+        n = max(n_prev, n_curr)
         square = np.full((n, n), dummy_cost, dtype=float)
         square[:n_prev, :n_curr] = raw
 
@@ -616,17 +649,19 @@ class RadarCellTracker:
         row_ind, col_ind = linear_sum_assignment(square)
 
         # ── Step 5: post-filter → CONTINUE / dissipated / born ───────────
-        matched_prev: dict[int, int] = {}   # prev_idx → new curr node_id
-        matched_curr: dict[int, int] = {}   # curr_idx → new curr node_id
+        matched_prev: dict[int, int] = {}  # prev_idx → new curr node_id
+        matched_curr: dict[int, int] = {}  # curr_idx → new curr node_id
         n_continue = 0
 
         for r, c in zip(row_ind, col_ind, strict=False):
             if r >= n_prev or c >= n_curr:
                 continue  # dummy slot
             if square[r, c] <= self.keep_cost:
-                prev_node   = prev_node_ids[r]
-                track_index  = self.graph.get_node_attr(prev_node, 'track_index')
-                curr_node   = self._add_cell_node(curr_time, curr_cells[c], int(track_index or 0))
+                prev_node = prev_node_ids[r]
+                track_index = self.graph.get_node_attr(prev_node, "track_index")
+                curr_node = self._add_cell_node(
+                    curr_time, curr_cells[c], int(track_index or 0)
+                )
                 self.graph.add_edge(
                     prev_node, curr_node, edge_type="CONTINUE", cost=float(square[r, c])
                 )
@@ -634,44 +669,54 @@ class RadarCellTracker:
                 matched_curr[c] = curr_node
                 n_continue += 1
                 events.append(
-                    self._event_continue(curr_time, prev_node, curr_node, float(square[r, c]))
+                    self._event_continue(
+                        curr_time, prev_node, curr_node, float(square[r, c])
+                    )
                 )
 
-        dissipated   = [prev_node_ids[i] for i in range(n_prev) if i not in matched_prev]
-        born_indices = [i for i in range(n_curr)  if i not in matched_curr]
+        dissipated = [prev_node_ids[i] for i in range(n_prev) if i not in matched_prev]
+        born_indices = [i for i in range(n_curr) if i not in matched_curr]
 
         # ── Step 6: split detection ───────────────────────────────────────
         # Born cell overlaps a CONTINUE parent's projected hull >= threshold
         split_born: set[int] = set()
         for b_idx in born_indices:
-            b_mask       = curr_cells[b_idx]['mask']
-            best_parent  = None
+            b_mask = curr_cells[b_idx]["mask"]
+            best_parent = None
             best_overlap = 0.0
             for prev_idx, curr_node in matched_prev.items():
-                prev_node    = prev_node_ids[prev_idx]
-                prev_cell_id = self.graph.get_node_attr(prev_node, 'cell_id')
-                proj_mask    = (proj_labels == prev_cell_id)
-                denom        = float(np.sum(proj_mask))
+                prev_node = prev_node_ids[prev_idx]
+                prev_cell_id = self.graph.get_node_attr(prev_node, "cell_id")
+                proj_mask = proj_labels == prev_cell_id
+                denom = float(np.sum(proj_mask))
                 if denom == 0:
                     continue
                 overlap_frac = float(np.sum(b_mask & proj_mask)) / denom
                 if overlap_frac >= self.split_overlap and overlap_frac > best_overlap:
-                    best_parent  = curr_node   # current-frame node of the continuing parent
+                    best_parent = (
+                        curr_node  # current-frame node of the continuing parent
+                    )
                     best_overlap = overlap_frac
             if best_parent is not None:
-                parent_track_index = self.graph.get_node_attr(best_parent, 'track_index')
-                new_index    = self.graph.get_new_track_index()
+                parent_track_index = self.graph.get_node_attr(
+                    best_parent, "track_index"
+                )
+                new_index = self.graph.get_new_track_index()
                 cell_uid, track_signature = self._new_cell_identity(curr_cells[b_idx])
                 self._cell_identity[new_index] = (cell_uid, track_signature)
-                child_node   = self._add_cell_node(
+                child_node = self._add_cell_node(
                     curr_time, curr_cells[b_idx], new_index, cell_uid, track_signature
                 )
-                self.graph.add_edge(best_parent, child_node, edge_type="SPLIT", cost=0.0)
+                self.graph.add_edge(
+                    best_parent, child_node, edge_type="SPLIT", cost=0.0
+                )
                 split_born.add(b_idx)
                 events.append(self._event_split(curr_time, best_parent, child_node))
                 logger.debug(
                     "SPLIT: track %d → new track %d (overlap=%.2f)",
-                    parent_track_index, new_index, best_overlap,
+                    parent_track_index,
+                    new_index,
+                    best_overlap,
                 )
 
         # ── Step 7: merge detection ───────────────────────────────────────
@@ -679,17 +724,19 @@ class RadarCellTracker:
         n_merge = 0
         merged_nodes: dict[int, int] = {}
         for d_node in dissipated:
-            d_cell_id = self.graph.get_node_attr(d_node, 'cell_id')
-            proj_mask = (proj_labels == d_cell_id)
-            denom     = float(np.sum(proj_mask))
+            d_cell_id = self.graph.get_node_attr(d_node, "cell_id")
+            proj_mask = proj_labels == d_cell_id
+            denom = float(np.sum(proj_mask))
             if denom == 0:
                 continue
-            best_target  = None
+            best_target = None
             best_overlap = 0.0
             for c_idx, curr_node in matched_curr.items():
-                overlap_frac = float(np.sum(proj_mask & curr_cells[c_idx]['mask'])) / denom
+                overlap_frac = (
+                    float(np.sum(proj_mask & curr_cells[c_idx]["mask"])) / denom
+                )
                 if overlap_frac >= self.split_overlap and overlap_frac > best_overlap:
-                    best_target  = curr_node
+                    best_target = curr_node
                     best_overlap = overlap_frac
             if best_target is not None:
                 self.graph.add_edge(d_node, best_target, edge_type="MERGE", cost=0.0)
@@ -698,8 +745,8 @@ class RadarCellTracker:
                 events.append(self._event_merge(curr_time, d_node, best_target))
                 logger.debug(
                     "MERGE: track %d → track %d (overlap=%.2f)",
-                    self.graph.get_node_attr(d_node, 'track_index'),
-                    self.graph.get_node_attr(best_target, 'track_index'),
+                    self.graph.get_node_attr(d_node, "track_index"),
+                    self.graph.get_node_attr(best_target, "track_index"),
                     best_overlap,
                 )
 
@@ -719,18 +766,28 @@ class RadarCellTracker:
         for d_node in dissipated:
             if d_node in merged_nodes:
                 events.append(
-                    self._event_termination(curr_time, d_node, target_node_id=merged_nodes[d_node])
+                    self._event_termination(
+                        curr_time, d_node, target_node_id=merged_nodes[d_node]
+                    )
                 )
             else:
-                events.append(self._event_termination(curr_time, d_node, target_node_id=None))
+                events.append(
+                    self._event_termination(curr_time, d_node, target_node_id=None)
+                )
 
-        n_split      = len(split_born)
+        n_split = len(split_born)
         n_dissipated = len(dissipated) - n_merge
-        n_alive      = n_continue + n_births + n_split   # == n_curr
+        n_alive = n_continue + n_births + n_split  # == n_curr
         logger.info(
             "Frame pair: prev=%d → continue=%d, dissipated=%d, merged=%d"
             " | born=%d, split=%d | alive=%d",
-            n_prev, n_continue, n_dissipated, n_merge, n_births, n_split, n_alive,
+            n_prev,
+            n_continue,
+            n_dissipated,
+            n_merge,
+            n_births,
+            n_split,
+            n_alive,
         )
         return events
 
@@ -784,16 +841,16 @@ class RadarCellTracker:
             if col not in df.columns:
                 df[col] = None
         df = df[cols]
-        df["time"] = df["time"].apply(
-            lambda t: pd.Timestamp(normalize_time_scalar(t))
-        )
+        df["time"] = df["time"].apply(lambda t: pd.Timestamp(normalize_time_scalar(t)))
         return df
 
     # ------------------------------------------------------------------
     # Event builders
     # ------------------------------------------------------------------
 
-    def _event_continue(self, time, prev_node_id: int, curr_node_id: int, cost: float) -> dict:
+    def _event_continue(
+        self, time, prev_node_id: int, curr_node_id: int, cost: float
+    ) -> dict:
         source_cell_uid = self.get_cell_identity(
             int(self.graph.get_node_attr(prev_node_id, "track_index"))
         )[0]
@@ -824,8 +881,12 @@ class RadarCellTracker:
             "event_type": "SPLIT",
             "source_cell_uid": parent_uid,
             "target_cell_uid": child_uid,
-            "source_cell_label": int(self.graph.get_node_attr(parent_node_id, "cell_id")),
-            "target_cell_label": int(self.graph.get_node_attr(child_node_id, "cell_id")),
+            "source_cell_label": int(
+                self.graph.get_node_attr(parent_node_id, "cell_id")
+            ),
+            "target_cell_label": int(
+                self.graph.get_node_attr(child_node_id, "cell_id")
+            ),
             "cost": None,
             "is_dominant": False,
             "event_group_id": f"{self._time_key(time)}:SPLIT:{parent_uid}",
@@ -840,8 +901,12 @@ class RadarCellTracker:
             "event_type": "MERGE",
             "source_cell_uid": self.get_cell_identity(source_path)[0],
             "target_cell_uid": target_uid,
-            "source_cell_label": int(self.graph.get_node_attr(source_node_id, "cell_id")),
-            "target_cell_label": int(self.graph.get_node_attr(target_node_id, "cell_id")),
+            "source_cell_label": int(
+                self.graph.get_node_attr(source_node_id, "cell_id")
+            ),
+            "target_cell_label": int(
+                self.graph.get_node_attr(target_node_id, "cell_id")
+            ),
             "cost": None,
             "is_dominant": False,
             "event_group_id": f"{self._time_key(time)}:MERGE:{target_uid}",
@@ -863,11 +928,14 @@ class RadarCellTracker:
             "event_group_id": f"{self._time_key(time)}:INITIATION:{target_uid}",
         }
 
-    def _event_termination(self, time, source_node_id: int, target_node_id: int | None) -> dict:
+    def _event_termination(
+        self, time, source_node_id: int, target_node_id: int | None
+    ) -> dict:
         source_path = int(self.graph.get_node_attr(source_node_id, "track_index"))
         target_path = (
             int(self.graph.get_node_attr(target_node_id, "track_index"))
-            if target_node_id is not None else None
+            if target_node_id is not None
+            else None
         )
         source_uid = self.get_cell_identity(source_path)[0]
         return {
@@ -875,16 +943,19 @@ class RadarCellTracker:
             "event_type": "TERMINATION",
             "source_cell_uid": source_uid,
             "target_cell_uid": (
-                self.get_cell_identity(target_path)[0] if target_path is not None else None
+                self.get_cell_identity(target_path)[0]
+                if target_path is not None
+                else None
             ),
-            "source_cell_label": int(self.graph.get_node_attr(source_node_id, "cell_id")),
+            "source_cell_label": int(
+                self.graph.get_node_attr(source_node_id, "cell_id")
+            ),
             "target_cell_label": (
                 int(self.graph.get_node_attr(target_node_id, "cell_id"))
-                if target_node_id is not None else None
+                if target_node_id is not None
+                else None
             ),
             "cost": None,
             "is_dominant": False,
             "event_group_id": f"{self._time_key(time)}:TERMINATION:{source_uid}",
         }
-
-

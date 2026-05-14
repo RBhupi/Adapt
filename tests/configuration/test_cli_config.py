@@ -48,11 +48,12 @@ def test_cli_to_internal_overrides_empty():
 
 
 def test_cli_config_accepts_base_dir():
-        """Test that base_dir is accepted and in overrides."""
-        cli = CLIConfig(base_dir="/path/to/output")
-        assert cli.base_dir == "/path/to/output"
-        overrides = cli.to_internal_overrides()
-        assert overrides["base_dir"] == "/path/to/output"
+    """Test that base_dir is accepted and in overrides."""
+    cli = CLIConfig(base_dir="/path/to/output")
+    assert cli.base_dir == "/path/to/output"
+    overrides = cli.to_internal_overrides()
+    assert overrides["base_dir"] == "/path/to/output"
+
 
 def test_cli_config_all_log_levels():
     """Test all valid log levels."""
@@ -80,10 +81,7 @@ def test_cli_infers_historical_mode_from_end_time():
 
 def test_cli_infers_historical_mode_from_both_times():
     """CLI automatically sets mode=historical if both times provided without explicit mode."""
-    cli = CLIConfig(
-        start_time="2024-01-01T00:00:00Z",
-        end_time="2024-01-01T23:59:59Z"
-    )
+    cli = CLIConfig(start_time="2024-01-01T00:00:00Z", end_time="2024-01-01T23:59:59Z")
     assert cli.mode == "historical"
     overrides = cli.to_internal_overrides()
     assert overrides["mode"] == "historical"
@@ -93,10 +91,7 @@ def test_cli_infers_historical_mode_from_both_times():
 
 def test_cli_explicit_mode_overrides_time_inference():
     """Explicit mode in CLI is not overridden by time inference."""
-    cli = CLIConfig(
-        mode="realtime",
-        start_time="2024-01-01T00:00:00Z"
-    )
+    cli = CLIConfig(mode="realtime", start_time="2024-01-01T00:00:00Z")
     # Explicit mode should be respected
     assert cli.mode == "realtime"
 
@@ -104,12 +99,9 @@ def test_cli_explicit_mode_overrides_time_inference():
 def test_cli_time_fields_in_overrides():
     """Test that start_time and end_time are included in overrides."""
     cli = CLIConfig(
-        start_time="2024-01-01T00:00:00Z",
-        end_time="2024-01-01T23:59:59Z",
-        radar="KMOB"
+        start_time="2024-01-01T00:00:00Z", end_time="2024-01-01T23:59:59Z", radar="KMOB"
     )
     overrides = cli.to_internal_overrides()
     assert overrides["downloader"]["start_time"] == "2024-01-01T00:00:00Z"
     assert overrides["downloader"]["end_time"] == "2024-01-01T23:59:59Z"
     assert overrides["downloader"]["radar"] == "KMOB"
-

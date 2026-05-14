@@ -35,7 +35,7 @@ from adapt import __version__
 
 logger = logging.getLogger(__name__)
 
-_PID_FILE = Path.home() / '.adapt' / 'pipeline.pid'
+_PID_FILE = Path.home() / ".adapt" / "pipeline.pid"
 
 
 def _check_single_instance() -> None:
@@ -45,8 +45,8 @@ def _check_single_instance() -> None:
     try:
         pid = int(_PID_FILE.read_text().strip())
         os.kill(pid, 0)  # signal 0 = existence check only
-        print(f'[adapt] Error: A pipeline is already running (PID {pid}).')
-        print(f'[adapt] Stop it first, or delete {_PID_FILE} if it is stale.')
+        print(f"[adapt] Error: A pipeline is already running (PID {pid}).")
+        print(f"[adapt] Stop it first, or delete {_PID_FILE} if it is stale.")
         sys.exit(1)
     except (ProcessLookupError, PermissionError):
         pass  # process gone — stale PID file
@@ -70,52 +70,65 @@ def _remove_pid() -> None:
 # Sub-command: run-nexrad
 # ---------------------------------------------------------------------------
 
+
 def _build_run_nexrad_parser(sub: argparse.ArgumentParser) -> None:
     """Add arguments for the run-nexrad sub-command."""
     sub.add_argument(
-        'config',
-        nargs='?',
+        "config",
+        nargs="?",
         default=None,
-        help='Path to config file (.yaml or .py with CONFIG dict). '
-             'Optional — falls back to expert defaults if omitted.',
+        help="Path to config file (.yaml or .py with CONFIG dict). "
+        "Optional — falls back to expert defaults if omitted.",
     )
-    sub.add_argument('--radar', help='Radar ID (e.g. KLOT, KDIX)')
+    sub.add_argument("--radar", help="Radar ID (e.g. KLOT, KDIX)")
     sub.add_argument(
-        '--mode',
-        choices=['realtime', 'historical'],
-        help='Processing mode',
+        "--mode",
+        choices=["realtime", "historical"],
+        help="Processing mode",
     )
-    sub.add_argument('--start-time', dest='start_time', help='Start time (ISO 8601)')
-    sub.add_argument('--end-time', dest='end_time', help='End time (ISO 8601)')
-    sub.add_argument('--base-dir', dest='base_dir', help='Repository output directory')
+    sub.add_argument("--start-time", dest="start_time", help="Start time (ISO 8601)")
+    sub.add_argument("--end-time", dest="end_time", help="End time (ISO 8601)")
+    sub.add_argument("--base-dir", dest="base_dir", help="Repository output directory")
     sub.add_argument(
-        '--run-id',
-        dest='run_id',
-        help='Continue with a run ID (format: YYYYMONDD-HHMM-RADAR, requires --base-dir)',
-    )
-    sub.add_argument(
-        '--max-runtime', dest='max_runtime', type=int,
-        help='Max runtime in minutes (realtime mode only)',
+        "--run-id",
+        dest="run_id",
+        help="Continue with a run ID (format: YYYYMONDD-HHMM-RADAR, requires --base-dir)",
     )
     sub.add_argument(
-        '--rerun', action='store_true',
-        help='Delete output directories before running',
+        "--max-runtime",
+        dest="max_runtime",
+        type=int,
+        help="Max runtime in minutes (realtime mode only)",
     )
     sub.add_argument(
-        '--no-plot', dest='no_plot', action='store_true',
-        help='Disable plot consumer thread',
+        "--rerun",
+        action="store_true",
+        help="Delete output directories before running",
     )
     sub.add_argument(
-        '--plot-interval', dest='plot_interval', type=float, default=2.0,
-        help='Plot polling interval in seconds (default: 2.0)',
+        "--no-plot",
+        dest="no_plot",
+        action="store_true",
+        help="Disable plot consumer thread",
     )
     sub.add_argument(
-        '--show-plots', dest='show_plots', action='store_true',
-        help='Display plots in a live window',
+        "--plot-interval",
+        dest="plot_interval",
+        type=float,
+        default=2.0,
+        help="Plot polling interval in seconds (default: 2.0)",
     )
     sub.add_argument(
-        '-v', '--verbose', action='store_true',
-        help='Enable DEBUG logging',
+        "--show-plots",
+        dest="show_plots",
+        action="store_true",
+        help="Display plots in a live window",
+    )
+    sub.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG logging",
     )
 
 
@@ -139,32 +152,30 @@ def _run_nexrad(args: argparse.Namespace) -> None:
         try:
             orch.stop()
         except Exception as exc:
-            print(f'[adapt] Stop cleanup error (ignored): {exc}')
+            print(f"[adapt] Stop cleanup error (ignored): {exc}")
 
-    def _run_orchestrator(orch: PipelineOrchestrator,
-                          max_runtime: int,
-                          done: threading.Event) -> None:
+    def _run_orchestrator(
+        orch: PipelineOrchestrator, max_runtime: int, done: threading.Event
+    ) -> None:
         try:
             orch.start(max_runtime=max_runtime)
         finally:
             done.set()
 
     def _handle_sigterm(signum, frame) -> None:
-        print('\n[adapt] SIGTERM received — stopping pipeline...')
+        print("\n[adapt] SIGTERM received — stopping pipeline...")
         stop_event.set()
-        threading.Thread(
-            target=_safe_stop, args=(orchestrator,), daemon=True
-        ).start()
+        threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     if args.no_plot:
-        print('Starting pipeline (plotting disabled)...')
+        print("Starting pipeline (plotting disabled)...")
 
     orchestrator_thread = threading.Thread(
         target=_run_orchestrator,
         args=(orchestrator, args.max_runtime, stop_event),
-        name='OrchestratorRunner',
+        name="OrchestratorRunner",
         daemon=False,
     )
     orchestrator_thread.start()
@@ -175,8 +186,9 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     plot_consumer = None
     if not args.no_plot and orchestrator.repository is not None:
         from adapt.visualization.plotter import PlotConsumer
+
         radar = args.radar or config.downloader.radar
-        plot_output_dir = Path(config.output_dirs['base']) / radar / 'plots'
+        plot_output_dir = Path(config.output_dirs["base"]) / radar / "plots"
         plot_consumer = PlotConsumer(
             repository=orchestrator.repository,
             stop_event=stop_event,
@@ -184,30 +196,30 @@ def _run_nexrad(args: argparse.Namespace) -> None:
             config=config,
             poll_interval=args.plot_interval,
             show_live=args.show_plots,
-            name='PlotConsumer',
+            name="PlotConsumer",
         )
         plot_consumer.start()
 
     try:
         orchestrator_thread.join()
     except KeyboardInterrupt:
-        print('\nShutdown signal received — stopping pipeline...')
+        print("\nShutdown signal received — stopping pipeline...")
         # orchestrator runs in a non-main thread so it never sees KeyboardInterrupt;
         # call stop() explicitly so _main_loop breaks on the next iteration.
         threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
         orchestrator_thread.join(timeout=20)
         if orchestrator_thread.is_alive():
-            print('Warning: orchestrator did not stop within 20 s')
+            print("Warning: orchestrator did not stop within 20 s")
     finally:
         stop_event.set()
         if plot_consumer is not None and plot_consumer.is_alive():
-            print('Waiting for plot consumer to finish...')
+            print("Waiting for plot consumer to finish...")
             plot_consumer.join(timeout=10)
             if plot_consumer.is_alive():
-                print('Warning: Plot consumer did not stop cleanly')
+                print("Warning: Plot consumer did not stop cleanly")
         orchestrator.close_repository()
         _remove_pid()
-        print('Pipeline shutdown complete.')
+        print("Pipeline shutdown complete.")
 
 
 # ---------------------------------------------------------------------------
@@ -274,11 +286,11 @@ max_projection_steps: 5
 
 def _build_config_parser(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
-        'output',
-        nargs='?',
+        "output",
+        nargs="?",
         default=None,
-        help='Path where config.yaml will be written. '
-             'Defaults to ./config.yaml in the current directory.',
+        help="Path where config.yaml will be written. "
+        "Defaults to ./config.yaml in the current directory.",
     )
 
 
@@ -309,43 +321,46 @@ def _config_cmd(args: argparse.Namespace) -> None:
         out = cwd / "config.yaml"
 
     if out.is_dir():
-        out = out / 'config.yaml'
+        out = out / "config.yaml"
 
     if out.exists():
-        print(f'[adapt config] File already exists: {out}')
-        answer = input('Overwrite? [y/N] ').strip().lower()
-        if answer != 'y':
-            print('Aborted.')
+        print(f"[adapt config] File already exists: {out}")
+        answer = input("Overwrite? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
             return
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     base_dir = str(out.parent.resolve())
     out.write_text(_CONFIG_TEMPLATE.format(timestamp=timestamp, base_dir=base_dir))
-    print(f'Config written: {out}')
-    print(f'Edit it, then run:  adapt run-nexrad {out} --radar KLOT')
+    print(f"Config written: {out}")
+    print(f"Edit it, then run:  adapt run-nexrad {out} --radar KLOT")
 
 
 # ---------------------------------------------------------------------------
 # Sub-command: dashboard  (GUI)
 # ---------------------------------------------------------------------------
 
+
 def _build_dashboard_parser(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
-        '--repo',
+        "--repo",
         default=None,
-        help='Path to the Adapt output repository (pre-populates the repo field).',
+        help="Path to the Adapt output repository (pre-populates the repo field).",
     )
 
 
 def _dashboard_cmd(args: argparse.Namespace) -> None:
     """Launch the Adapt GUI dashboard."""
     import os
+
     try:
         os.getcwd()
     except FileNotFoundError:
         os.chdir(os.path.expanduser("~"))
     from adapt.gui import main
+
     main(repo=args.repo)
 
 
@@ -353,47 +368,48 @@ def _dashboard_cmd(args: argparse.Namespace) -> None:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """Top-level CLI dispatcher."""
     parser = argparse.ArgumentParser(
-        prog='adapt',
+        prog="adapt",
         description=(
-            'Adapt - Real-Time data processing for informed adaptive scanning '
-            'of ARM weather radars.'
+            "Adapt - Real-Time data processing for informed adaptive scanning "
+            "of ARM weather radars."
         ),
     )
-    
+
     # Add version argument
     adapt_module_path = Path(__file__).parent
     parser.add_argument(
-        '--version',
-        action='version',
-        version=f'%(prog)s {__version__}\nInstalled at: {adapt_module_path}',
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}\nInstalled at: {adapt_module_path}",
     )
-    
-    subparsers = parser.add_subparsers(dest='command', metavar='COMMAND')
+
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     subparsers.required = True
 
     run_nexrad_parser = subparsers.add_parser(
-        'run-nexrad',
-        help='Run the NEXRAD processing pipeline.',
-        description='Download and process NEXRAD Level-II data.',
+        "run-nexrad",
+        help="Run the NEXRAD processing pipeline.",
+        description="Download and process NEXRAD Level-II data.",
     )
     _build_run_nexrad_parser(run_nexrad_parser)
     run_nexrad_parser.set_defaults(func=_run_nexrad)
 
     config_parser = subparsers.add_parser(
-        'config',
-        help='Generate a config.yaml template.',
-        description='Write a commented YAML configuration template.',
+        "config",
+        help="Generate a config.yaml template.",
+        description="Write a commented YAML configuration template.",
     )
     _build_config_parser(config_parser)
     config_parser.set_defaults(func=_config_cmd)
 
     dashboard_parser = subparsers.add_parser(
-        'dashboard',
-        help='Open the GUI dashboard.',
-        description='Launch the Adapt radar dashboard (read-only consumer).',
+        "dashboard",
+        help="Open the GUI dashboard.",
+        description="Launch the Adapt radar dashboard (read-only consumer).",
     )
     _build_dashboard_parser(dashboard_parser)
     dashboard_parser.set_defaults(func=_dashboard_cmd)
@@ -402,5 +418,5 @@ def main() -> None:
     args.func(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

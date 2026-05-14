@@ -25,24 +25,26 @@ def test_availability_check_warns_when_radar_explicitly_not_found(caplog, temp_d
     config.downloader.start_time = None
     config.downloader.end_time = None
     config.downloader.min_file_size = 1024
-    
+
     fake_conn = MagicMock()
     fake_conn.get_avail_radars.return_value = ["KDFW", "KLBB"]  # KOHX not in list
-    
+
     downloader = AwsNexradDownloader(
         config=config,
         output_dir=temp_dir,
         conn=fake_conn,
     )
-    
+
     start = datetime(2025, 12, 18, tzinfo=UTC)
     end = datetime(2025, 12, 18, tzinfo=UTC)
-    
+
     with caplog.at_level(logging.WARNING):
         downloader._check_radar_available(start, end)
-    
+
     # Should warn because check succeeded but radar not found
-    assert any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
+    assert any(
+        "Radar KOHX not found in AWS" in record.message for record in caplog.records
+    )
 
 
 def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
@@ -55,24 +57,26 @@ def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
     config.downloader.start_time = None
     config.downloader.end_time = None
     config.downloader.min_file_size = 1024
-    
+
     fake_conn = MagicMock()
     fake_conn.get_avail_radars.side_effect = Exception("AWS unavailable")
-    
+
     downloader = AwsNexradDownloader(
         config=config,
         output_dir=temp_dir,
         conn=fake_conn,
     )
-    
+
     start = datetime(2025, 12, 18, tzinfo=UTC)
     end = datetime(2025, 12, 18, tzinfo=UTC)
-    
+
     with caplog.at_level(logging.WARNING):
         downloader._check_radar_available(start, end)
-    
+
     # Should NOT warn because check failed (exception)
-    assert not any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
+    assert not any(
+        "Radar KOHX not found in AWS" in record.message for record in caplog.records
+    )
 
 
 def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
@@ -85,21 +89,27 @@ def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
     config.downloader.start_time = None
     config.downloader.end_time = None
     config.downloader.min_file_size = 1024
-    
+
     fake_conn = MagicMock()
-    fake_conn.get_avail_radars.return_value = ["KDFW", "KOHX", "KLBB"]  # KOHX IS in list
-    
+    fake_conn.get_avail_radars.return_value = [
+        "KDFW",
+        "KOHX",
+        "KLBB",
+    ]  # KOHX IS in list
+
     downloader = AwsNexradDownloader(
         config=config,
         output_dir=temp_dir,
         conn=fake_conn,
     )
-    
+
     start = datetime(2025, 12, 18, tzinfo=UTC)
     end = datetime(2025, 12, 18, tzinfo=UTC)
-    
+
     with caplog.at_level(logging.WARNING):
         downloader._check_radar_available(start, end)
-    
+
     # Should NOT warn because radar was found
-    assert not any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
+    assert not any(
+        "Radar KOHX not found in AWS" in record.message for record in caplog.records
+    )

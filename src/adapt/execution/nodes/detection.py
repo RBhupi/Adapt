@@ -31,7 +31,7 @@ class DetectModule(BaseModule):
     name = "detection"
     inputs = ["grid_ds_2d", "detection_config"]
     outputs = ["segmented_ds", "num_cells"]
-    input_contracts  = {"grid_ds_2d": check_grid_ds_2d}
+    input_contracts = {"grid_ds_2d": check_grid_ds_2d}
     output_contracts = {"segmented_ds": check_segmented_ds}
 
     def __init__(self) -> None:

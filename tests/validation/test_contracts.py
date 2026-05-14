@@ -171,74 +171,90 @@ class TestAnalysisContract:
 
     def test_analysis_contract_passes_with_valid_dataframe(self):
         """Analysis contract passes with valid output DataFrame."""
-        df = pd.DataFrame({
-            "cell_label": [1, 2],
-            "cell_area_sqkm": [1.5, 2.5],
-            "time": pd.to_datetime(["2025-01-01", "2025-01-01"]),
-            "time_volume_start": ["2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"],
-            "cell_centroid_mass_lat": [35.0, 35.1],
-            "cell_centroid_mass_lon": [-97.0, -97.1],
-            "radar_reflectivity_max": [45.0, 50.0],
-            "radar_differential_reflectivity_max": [1.0, 1.5],
-            "area_40dbz_km2": [1.0, 2.0],
-        })
+        df = pd.DataFrame(
+            {
+                "cell_label": [1, 2],
+                "cell_area_sqkm": [1.5, 2.5],
+                "time": pd.to_datetime(["2025-01-01", "2025-01-01"]),
+                "time_volume_start": [
+                    "2025-01-01T00:00:00+00:00",
+                    "2025-01-01T00:00:00+00:00",
+                ],
+                "cell_centroid_mass_lat": [35.0, 35.1],
+                "cell_centroid_mass_lon": [-97.0, -97.1],
+                "radar_reflectivity_max": [45.0, 50.0],
+                "radar_differential_reflectivity_max": [1.0, 1.5],
+                "area_40dbz_km2": [1.0, 2.0],
+            }
+        )
         # Should not raise
         assert_analysis_output(df)
 
     def test_analysis_contract_passes_with_empty_dataframe(self):
         """Analysis contract passes with empty DataFrame (no cells detected)."""
-        df = pd.DataFrame({
-            "cell_label": [],
-            "cell_area_sqkm": [],
-            "time": [],
-            "time_volume_start": [],
-            "cell_centroid_mass_lat": [],
-            "cell_centroid_mass_lon": [],
-            "radar_reflectivity_max": [],
-            "radar_differential_reflectivity_max": [],
-            "area_40dbz_km2": [],
-        })
+        df = pd.DataFrame(
+            {
+                "cell_label": [],
+                "cell_area_sqkm": [],
+                "time": [],
+                "time_volume_start": [],
+                "cell_centroid_mass_lat": [],
+                "cell_centroid_mass_lon": [],
+                "radar_reflectivity_max": [],
+                "radar_differential_reflectivity_max": [],
+                "area_40dbz_km2": [],
+            }
+        )
         # Should not raise
         assert_analysis_output(df)
 
     def test_analysis_contract_fails_with_missing_cell_label(self):
         """Analysis contract fails when cell_label column is missing."""
-        df = pd.DataFrame({
-            "cell_area_sqkm": [1.5],
-            "time": pd.to_datetime(["2025-01-01"]),
-        })
+        df = pd.DataFrame(
+            {
+                "cell_area_sqkm": [1.5],
+                "time": pd.to_datetime(["2025-01-01"]),
+            }
+        )
         with pytest.raises(ContractViolation, match="cell_label"):
             assert_analysis_output(df)
 
     def test_analysis_contract_fails_with_zero_cell_label(self):
         """Analysis contract fails when cell_label is 0 or negative."""
-        df = pd.DataFrame({
-            "cell_label": [0, 1],
-            "cell_area_sqkm": [1.5, 2.5],
-            "time": pd.to_datetime(["2025-01-01", "2025-01-01"]),
-            "time_volume_start": ["2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"],
-            "cell_centroid_mass_lat": [35.0, 35.1],
-            "cell_centroid_mass_lon": [-97.0, -97.1],
-            "radar_reflectivity_max": [45.0, 50.0],
-            "radar_differential_reflectivity_max": [1.0, 1.5],
-            "area_40dbz_km2": [1.0, 2.0],
-        })
+        df = pd.DataFrame(
+            {
+                "cell_label": [0, 1],
+                "cell_area_sqkm": [1.5, 2.5],
+                "time": pd.to_datetime(["2025-01-01", "2025-01-01"]),
+                "time_volume_start": [
+                    "2025-01-01T00:00:00+00:00",
+                    "2025-01-01T00:00:00+00:00",
+                ],
+                "cell_centroid_mass_lat": [35.0, 35.1],
+                "cell_centroid_mass_lon": [-97.0, -97.1],
+                "radar_reflectivity_max": [45.0, 50.0],
+                "radar_differential_reflectivity_max": [1.0, 1.5],
+                "area_40dbz_km2": [1.0, 2.0],
+            }
+        )
         with pytest.raises(ContractViolation, match="cell_label must be > 0"):
             assert_analysis_output(df)
 
     def test_analysis_contract_fails_with_insufficient_rows(self):
         """Analysis contract fails when row count below minimum."""
-        df = pd.DataFrame({
-            "cell_label": [1],
-            "cell_area_sqkm": [1.5],
-            "time": pd.to_datetime(["2025-01-01"]),
-            "time_volume_start": ["2025-01-01T00:00:00+00:00"],
-            "cell_centroid_mass_lat": [35.0],
-            "cell_centroid_mass_lon": [-97.0],
-            "radar_reflectivity_max": [45.0],
-            "radar_differential_reflectivity_max": [1.0],
-            "area_40dbz_km2": [1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "cell_label": [1],
+                "cell_area_sqkm": [1.5],
+                "time": pd.to_datetime(["2025-01-01"]),
+                "time_volume_start": ["2025-01-01T00:00:00+00:00"],
+                "cell_centroid_mass_lat": [35.0],
+                "cell_centroid_mass_lon": [-97.0],
+                "radar_reflectivity_max": [45.0],
+                "radar_differential_reflectivity_max": [1.0],
+                "area_40dbz_km2": [1.0],
+            }
+        )
         with pytest.raises(ContractViolation, match="expected >= 5"):
             assert_analysis_output(df, min_expected_rows=5)
 

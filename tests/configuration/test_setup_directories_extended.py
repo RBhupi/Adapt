@@ -45,7 +45,9 @@ def test_get_plot_path_reflectivity(tmp_path):
     dirs = setup_output_directories(tmp_path)
     scan_time = datetime(2024, 1, 15, 12, 30, tzinfo=UTC)
 
-    plot_path = get_plot_path(dirs, radar="KMOB", plot_type="reflectivity", scan_time=scan_time)
+    plot_path = get_plot_path(
+        dirs, radar="KMOB", plot_type="reflectivity", scan_time=scan_time
+    )
 
     assert plot_path is not None
     assert "20240115" in str(plot_path)
@@ -56,7 +58,9 @@ def test_get_plot_path_cells(tmp_path):
     dirs = setup_output_directories(tmp_path)
     scan_time = datetime(2024, 1, 15, 12, 30, tzinfo=UTC)
 
-    plot_path = get_plot_path(dirs, radar="KMOB", plot_type="cells", scan_time=scan_time)
+    plot_path = get_plot_path(
+        dirs, radar="KMOB", plot_type="cells", scan_time=scan_time
+    )
 
     assert plot_path is not None
     assert "KMOB" in str(plot_path)

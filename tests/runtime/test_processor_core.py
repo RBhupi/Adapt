@@ -21,7 +21,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
     return RadarProcessor(
-        queue.Queue(), pipeline_config, pipeline_output_dirs,
+        queue.Queue(),
+        pipeline_config,
+        pipeline_output_dirs,
         repository=test_repository,
     )
 
@@ -107,5 +109,6 @@ def test_processor_close_database_returns_none(
 def test_processor_requires_repository(pipeline_config, pipeline_output_dirs):
     """RadarProcessor raises ValueError when repository is None."""
     with pytest.raises(ValueError, match="DataRepository is required"):
-        RadarProcessor(queue.Queue(), pipeline_config, pipeline_output_dirs,
-                       repository=None)
+        RadarProcessor(
+            queue.Queue(), pipeline_config, pipeline_output_dirs, repository=None
+        )

@@ -18,7 +18,8 @@ extensions = [
 ]
 
 autodoc_mock_imports = [
-    "pyart", "arm_pyart",
+    "pyart",
+    "arm_pyart",
     "cv2",
     "cartopy",
     "contextily",

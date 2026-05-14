@@ -32,17 +32,14 @@ def pipeline_config(temp_dir) -> InternalConfig:
     """InternalConfig for pipeline tests."""
     param = ParamConfig()
     # For tests, provide defaults since radar_id and base_dir are required at runtime
-    user = UserConfig(
-        radar="TEST_RADAR",
-        base_dir=str(temp_dir)
-    )
+    user = UserConfig(radar="TEST_RADAR", base_dir=str(temp_dir))
     config_dict = resolve_config(param, user, None).model_dump()
-    
+
     # Add required fields for new architecture
     output_dirs = setup_output_directories(str(temp_dir))
     config_dict["output_dirs"] = {k: str(v) for k, v in output_dirs.items()}
     config_dict["run_id"] = DataRepository.generate_run_id("TEST")
-    
+
     return InternalConfig.model_validate(config_dict)
 
 
@@ -72,9 +69,4 @@ def processor_queues():
 def test_repository(temp_dir):
     """DataRepository for processor tests."""
     run_id = DataRepository.generate_run_id("TEST")
-    return DataRepository(
-        run_id=run_id,
-        base_dir=temp_dir,
-        radar="TEST_RADAR"
-    )
-
+    return DataRepository(run_id=run_id, base_dir=temp_dir, radar="TEST_RADAR")

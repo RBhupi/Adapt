@@ -34,7 +34,10 @@ class AnalysisModule(BaseModule):
     name = "analysis"
     inputs = ["projected_ds", "analysis_config", "scan_time"]
     outputs = ["cell_stats", "cell_adjacency"]
-    output_contracts = {"cell_stats": check_cell_stats, "cell_adjacency": check_cell_adjacency}
+    output_contracts = {
+        "cell_stats": check_cell_stats,
+        "cell_adjacency": check_cell_adjacency,
+    }
 
     def __init__(self) -> None:
         self._analyzer = None

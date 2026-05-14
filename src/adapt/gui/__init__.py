@@ -25,4 +25,4 @@ Features
 
 from adapt.gui.dashboard import AdaptDashboard, main
 
-__all__ = ['main', 'AdaptDashboard']
+__all__ = ["main", "AdaptDashboard"]

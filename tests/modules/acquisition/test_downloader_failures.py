@@ -15,15 +15,13 @@ def test_download_failure_does_not_queue(tmp_path, fake_scan, make_config):
 
         def download(self, *a, **k):
             class R:
-                def iter_success(self): return []
+                def iter_success(self):
+                    return []
+
             return R()
 
     config = make_config()
-    d = AwsNexradDownloader(
-        config,
-        output_dir=tmp_path,
-        conn=FailingConn()
-    )
+    d = AwsNexradDownloader(config, output_dir=tmp_path, conn=FailingConn())
 
     downloads = d._download_realtime()
     assert downloads == []
@@ -35,11 +33,7 @@ def test_fetch_scans_exception_returns_empty(tmp_path, make_config):
             raise RuntimeError("AWS down")
 
     config = make_config()
-    d = AwsNexradDownloader(
-        config,
-        output_dir=tmp_path,
-        conn=ExplodingConn()
-    )
+    d = AwsNexradDownloader(config, output_dir=tmp_path, conn=ExplodingConn())
 
     scans = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))
     assert scans == []

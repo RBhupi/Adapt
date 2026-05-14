@@ -16,6 +16,7 @@ from adapt.modules.base import BaseModule
 # Stub modules for testing
 # ---------------------------------------------------------------------------
 
+
 class StubModule(BaseModule):
     """A configurable stub module that records execution order."""
 
@@ -49,15 +50,18 @@ _execution_order = []
 
 def _make_tracking_module(name, inputs, outputs):
     """Create a stub that appends its name to _execution_order when run."""
+
     def run_fn(ctx):
         _execution_order.append(name)
         return {k: f"{name}_result" for k in outputs}
+
     return StubModule(name, inputs, outputs, side_effect=run_fn)
 
 
 # ---------------------------------------------------------------------------
 # Node tests
 # ---------------------------------------------------------------------------
+
 
 class TestNode:
 
@@ -89,6 +93,7 @@ class TestNode:
 # ---------------------------------------------------------------------------
 # GraphBuilder tests
 # ---------------------------------------------------------------------------
+
 
 class TestGraphBuilder:
 
@@ -122,7 +127,9 @@ class TestGraphBuilder:
         consumer1 = StubModule("consumer1", ["data"], ["out1"])
         consumer2 = StubModule("consumer2", ["data"], ["out2"])
 
-        nodes = {n.name: n for n in GraphBuilder([source, consumer1, consumer2]).build()}
+        nodes = {
+            n.name: n for n in GraphBuilder([source, consumer1, consumer2]).build()
+        }
 
         assert nodes["source"] in nodes["consumer1"].dependencies
         assert nodes["source"] in nodes["consumer2"].dependencies
@@ -164,6 +171,7 @@ class TestGraphBuilder:
 # ---------------------------------------------------------------------------
 # GraphExecutor tests
 # ---------------------------------------------------------------------------
+
 
 class TestGraphExecutor:
 
@@ -249,7 +257,9 @@ class TestGraphExecutor:
     @pytest.mark.unit
     def test_executor_single_node(self):
         """Single node with no deps runs and returns output."""
-        mod = StubModule("solo", [], ["result"], side_effect=lambda ctx: {"result": "done"})
+        mod = StubModule(
+            "solo", [], ["result"], side_effect=lambda ctx: {"result": "done"}
+        )
         nodes = GraphBuilder([mod]).build()
         ctx = GraphExecutor(nodes).run({})
         assert ctx["result"] == "done"
@@ -259,24 +269,37 @@ class TestGraphExecutor:
 # GraphExecutor contract enforcement tests
 # ---------------------------------------------------------------------------
 
+
 class _ContractStub(BaseModule):
     """Minimal BaseModule subclass with configurable contracts for testing."""
 
-    def __init__(self, name, inputs, outputs, run_fn=None,
-                 input_contracts=None, output_contracts=None):
+    def __init__(
+        self,
+        name,
+        inputs,
+        outputs,
+        run_fn=None,
+        input_contracts=None,
+        output_contracts=None,
+    ):
         self._name = name
         self._inputs = inputs
         self._outputs = outputs
         self._run_fn = run_fn or (lambda ctx: {k: f"{name}_out" for k in outputs})
-        self.input_contracts  = input_contracts or {}
+        self.input_contracts = input_contracts or {}
         self.output_contracts = output_contracts or {}
 
     @property
-    def name(self):  return self._name
+    def name(self):
+        return self._name
+
     @property
-    def inputs(self):  return self._inputs
+    def inputs(self):
+        return self._inputs
+
     @property
-    def outputs(self):  return self._outputs
+    def outputs(self):
+        return self._outputs
 
     def run(self, context):
         return self._run_fn(context)
@@ -296,8 +319,9 @@ class TestGraphExecutorContracts:
             call_order.append("run")
             return {"out": 1}
 
-        mod = _ContractStub("m", ["inp"], ["out"], run_fn=_run,
-                             input_contracts={"inp": _validate})
+        mod = _ContractStub(
+            "m", ["inp"], ["out"], run_fn=_run, input_contracts={"inp": _validate}
+        )
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({"inp": "value"})
 
@@ -315,8 +339,9 @@ class TestGraphExecutorContracts:
         def _validate(val):
             call_order.append("validate")
 
-        mod = _ContractStub("m", [], ["out"], run_fn=_run,
-                             output_contracts={"out": _validate})
+        mod = _ContractStub(
+            "m", [], ["out"], run_fn=_run, output_contracts={"out": _validate}
+        )
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({})
 
@@ -325,11 +350,13 @@ class TestGraphExecutorContracts:
     @pytest.mark.unit
     def test_input_contract_violation_propagates(self):
         """ContractViolation raised by input validator propagates out of executor."""
+
         def _bad_validator(val):
             raise ContractViolation("input contract broken")
 
-        mod = _ContractStub("m", ["inp"], ["out"],
-                             input_contracts={"inp": _bad_validator})
+        mod = _ContractStub(
+            "m", ["inp"], ["out"], input_contracts={"inp": _bad_validator}
+        )
         nodes = GraphBuilder([mod]).build()
 
         with pytest.raises(ContractViolation, match="input contract broken"):
@@ -338,11 +365,11 @@ class TestGraphExecutorContracts:
     @pytest.mark.unit
     def test_output_contract_violation_propagates(self):
         """ContractViolation raised by output validator propagates out of executor."""
+
         def _bad_validator(val):
             raise ContractViolation("output contract broken")
 
-        mod = _ContractStub("m", [], ["out"],
-                             output_contracts={"out": _bad_validator})
+        mod = _ContractStub("m", [], ["out"], output_contracts={"out": _bad_validator})
         nodes = GraphBuilder([mod]).build()
 
         with pytest.raises(ContractViolation, match="output contract broken"):
@@ -356,11 +383,13 @@ class TestGraphExecutorContracts:
         from context (guarded by 'if key in context:'). After the fix, it raises
         immediately with a clear message.
         """
+
         def _validate(val):
             pass  # should never be called — key is absent
 
-        mod = _ContractStub("m", ["required_key"], ["out"],
-                             input_contracts={"required_key": _validate})
+        mod = _ContractStub(
+            "m", ["required_key"], ["out"], input_contracts={"required_key": _validate}
+        )
         nodes = GraphBuilder([mod]).build()
 
         with pytest.raises(ContractViolation, match="required_key"):
@@ -374,8 +403,7 @@ class TestGraphExecutorContracts:
         def _capture(val):
             received.append(val)
 
-        mod = _ContractStub("m", ["x"], ["out"],
-                             input_contracts={"x": _capture})
+        mod = _ContractStub("m", ["x"], ["out"], input_contracts={"x": _capture})
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({"x": 99})
 
@@ -389,9 +417,13 @@ class TestGraphExecutorContracts:
         def _capture(val):
             received.append(val)
 
-        mod = _ContractStub("m", [], ["result"],
-                             run_fn=lambda ctx: {"result": "hello"},
-                             output_contracts={"result": _capture})
+        mod = _ContractStub(
+            "m",
+            [],
+            ["result"],
+            run_fn=lambda ctx: {"result": "hello"},
+            output_contracts={"result": _capture},
+        )
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({})
 
@@ -402,6 +434,7 @@ class TestGraphExecutorContracts:
 # Branch-coverage gap tests (executor lines 82, 100→106, 102→101 and
 # builder branches 71→73, 73→68)
 # ---------------------------------------------------------------------------
+
 
 class TestExecutorBranchGaps:
     """Targeted tests for executor branches not reachable by the main suite."""
@@ -415,8 +448,12 @@ class TestExecutorBranchGaps:
         iteration A is already in `completed` — the `continue` on line 82 fires.
         """
         order = []
-        A = StubModule("a", [], ["x"], side_effect=lambda ctx: (order.append("a") or {"x": 1}))
-        B = StubModule("b", ["x"], ["y"], side_effect=lambda ctx: (order.append("b") or {"y": 2}))
+        A = StubModule(
+            "a", [], ["x"], side_effect=lambda ctx: (order.append("a") or {"x": 1})
+        )
+        B = StubModule(
+            "b", ["x"], ["y"], side_effect=lambda ctx: (order.append("b") or {"y": 2})
+        )
         # Reverse order: B first, then A
         nodes = GraphBuilder([B, A]).build()
         result = GraphExecutor(nodes).run({})
@@ -445,7 +482,9 @@ class TestExecutorBranchGaps:
 
         # Module declares contract for "missing_key" but only returns "real_key"
         mod = _ContractStub(
-            "m", [], ["real_key"],
+            "m",
+            [],
+            ["real_key"],
             run_fn=lambda ctx: {"real_key": "ok"},
             output_contracts={"missing_key": _validator},
         )

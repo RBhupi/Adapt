@@ -14,14 +14,18 @@ def test_validate_requires_two_datasets(simple_labeled_ds_pair, make_projection_
         proj.project(simple_labeled_ds_pair[:1])
 
 
-def test_projection_skipped_if_time_gap_too_large(simple_labeled_ds_pair, make_projection_config):
+def test_projection_skipped_if_time_gap_too_large(
+    simple_labeled_ds_pair, make_projection_config
+):
     """Projection skipped when time gap exceeds max interval."""
     from adapt.configuration.schemas.user import UserProjectorConfig
-    config = make_projection_config(projector=UserProjectorConfig(max_time_interval_minutes=1))
+
+    config = make_projection_config(
+        projector=UserProjectorConfig(max_time_interval_minutes=1)
+    )
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)
 
     # No projections added
     assert "cell_projections" not in out
-

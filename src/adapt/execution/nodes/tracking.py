@@ -35,8 +35,11 @@ class TrackingModule(BaseModule):
     name = "tracking"
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
     outputs = ["tracked_cells", "cell_events"]
-    input_contracts  = {"projected_ds": check_projected_ds}
-    output_contracts = {"tracked_cells": check_tracked_cells, "cell_events": check_cell_events}
+    input_contracts = {"projected_ds": check_projected_ds}
+    output_contracts = {
+        "tracked_cells": check_tracked_cells,
+        "cell_events": check_cell_events,
+    }
 
     def __init__(self) -> None:
         self._tracker = None

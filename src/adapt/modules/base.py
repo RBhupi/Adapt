@@ -49,7 +49,7 @@ class BaseModule(ABC):
     name: ClassVar[str] = ""
     inputs: ClassVar[list[str]] = []
     outputs: ClassVar[list[str]] = []
-    input_contracts:  ClassVar[dict[str, object]] = {}
+    input_contracts: ClassVar[dict[str, object]] = {}
     output_contracts: ClassVar[dict[str, object]] = {}
 
     @abstractmethod

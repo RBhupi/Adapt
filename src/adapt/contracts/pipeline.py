@@ -21,6 +21,7 @@ class ContractViolation(RuntimeError):
     - ContractViolation: Pipeline bug (programmer error)
     - Exception: Recoverable science issues (try/except in algorithms)
     """
+
     pass
 
 

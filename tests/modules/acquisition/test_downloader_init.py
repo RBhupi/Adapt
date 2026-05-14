@@ -9,6 +9,7 @@ pytestmark = pytest.mark.unit
 def test_init_custom_config(make_config, radar_output_dirs):
     """Downloader initializes with custom config."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
+
     config = make_config(
         downloader=UserDownloaderConfig(radar="KDIX", latest_files=5, latest_minutes=60)
     )
@@ -30,6 +31,7 @@ def test_stop_sets_event(radar_config, radar_output_dirs):
 def test_historical_mode_from_config(make_config, radar_output_dirs):
     """Downloader detects historical mode from config.downloader.mode."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
+
     config = make_config(
         downloader=UserDownloaderConfig(
             start_time="2024-01-01T00:00:00Z",
@@ -47,6 +49,7 @@ def test_historical_mode_from_config(make_config, radar_output_dirs):
 def test_parse_time_range(make_config, radar_output_dirs):
     """Downloader parses time range correctly."""
     from adapt.configuration.schemas.user import UserDownloaderConfig
+
     config = make_config(
         downloader=UserDownloaderConfig(
             start_time="2024-01-01T00:00:00Z",
@@ -85,11 +88,13 @@ from datetime import datetime  # noqa: E402
 
 def test_get_local_path(make_config, radar_output_dirs):
     """Downloader generates correct local file paths with new structure."""
+
     class FakeScan:
         key = "foo/bar/testfile"
         scan_time = datetime(2024, 1, 1)
 
     from adapt.configuration.schemas.user import UserDownloaderConfig
+
     config = make_config(downloader=UserDownloaderConfig(radar="KDIX"))
     # Use output_dirs for new path structure (RADAR_ID/nexrad/YYYYMMDD/)
     d = AwsNexradDownloader(config, output_dirs=radar_output_dirs)
@@ -104,11 +109,13 @@ def test_get_local_path(make_config, radar_output_dirs):
 
 def test_get_local_path_legacy(make_config, radar_output_dirs):
     """Downloader generates correct local file paths with legacy output_dir."""
+
     class FakeScan:
         key = "foo/bar/testfile"
         scan_time = datetime(2024, 1, 1)
 
     from adapt.configuration.schemas.user import UserDownloaderConfig
+
     config = make_config(downloader=UserDownloaderConfig(radar="KDIX"))
     # Use legacy output_dir parameter
     d = AwsNexradDownloader(config, output_dir=radar_output_dirs["nexrad"])

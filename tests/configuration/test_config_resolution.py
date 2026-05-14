@@ -20,6 +20,7 @@ class TestConfigResolution:
         """Resolving with no user/CLI overrides fails due to missing required fields."""
         import pytest
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             resolve_config(ParamConfig(), None, None)
 
@@ -40,11 +41,7 @@ class TestConfigResolution:
     def test_precedence_param_user(self):
         """Full precedence: User > Param."""
         param = ParamConfig()
-        user = UserConfig(
-            threshold=40,
-            radar="KDLH",
-            base_dir="/tmp"
-        )
+        user = UserConfig(threshold=40, radar="KDLH", base_dir="/tmp")
         config = resolve_config(param, user, None)
 
         # User won on threshold
@@ -56,6 +53,7 @@ class TestConfigResolution:
         """Empty UserConfig() doesn't override anything, fails if required fields missing."""
         import pytest
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             resolve_config(ParamConfig(), UserConfig(), None)
 
@@ -63,6 +61,7 @@ class TestConfigResolution:
         """None UserConfig doesn't override anything, but still fails if required fields missing."""
         import pytest
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             resolve_config(ParamConfig(), None, None)
 
@@ -111,7 +110,7 @@ class TestUserConfigAliases:
             base_dir="/tmp",
             radar="KHTX",
             threshold=30,
-            segmenter=UserSegmenterConfig(threshold=40)
+            segmenter=UserSegmenterConfig(threshold=40),
         )
         config = resolve_config(ParamConfig(), user, None)
 
@@ -140,7 +139,9 @@ class TestTypeCoercion:
 
     def test_method_normalized_to_lowercase(self):
         """Method names are normalized to lowercase."""
-        user = UserConfig(base_dir="/tmp", radar="KHTX", segmentation_method="THRESHOLD")
+        user = UserConfig(
+            base_dir="/tmp", radar="KHTX", segmentation_method="THRESHOLD"
+        )
         config = resolve_config(ParamConfig(), user, None)
 
         assert config.segmenter.method == "threshold"
@@ -183,7 +184,9 @@ class TestEdgeCases:
 
     def test_incomplete_param_config_dict_rejected(self):
         """Incomplete dict raises validation error."""
-        with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError or TypeError
+        with pytest.raises(
+            Exception
+        ):  # noqa: B017 — Pydantic ValidationError or TypeError
             resolve_config({"incomplete": "dict"}, None, None)
 
     def test_internal_config_is_complete(self):
@@ -245,8 +248,12 @@ class TestConfigValidation:
         with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
             resolve_config(
                 ParamConfig(),
-                UserConfig(segmentation_method="invalid_method_xyz", base_dir="/tmp", radar="KHTX"),
-                None
+                UserConfig(
+                    segmentation_method="invalid_method_xyz",
+                    base_dir="/tmp",
+                    radar="KHTX",
+                ),
+                None,
             )
 
     def test_negative_threshold_rejected(self):
@@ -265,11 +272,7 @@ class TestConfigValidation:
 
     def test_valid_field_accepted(self):
         """Valid fields in user config are accepted."""
-        user_dict = {
-            "threshold": 35,
-            "radar": "KDIX",
-            "base_dir": "/tmp"
-        }
+        user_dict = {"threshold": 35, "radar": "KDIX", "base_dir": "/tmp"}
         config = resolve_config(ParamConfig(), user_dict, None)
         assert config.segmenter.threshold == 35.0
         assert config.downloader.radar == "KDIX"
@@ -288,9 +291,7 @@ class TestIntegration:
             start_time="2024-01-01T00:00:00Z",
             end_time="2024-01-01T12:00:00Z",
             max_projection_steps=3,
-            segmenter=UserSegmenterConfig(
-                filter_by_size=False
-            )
+            segmenter=UserSegmenterConfig(filter_by_size=False),
         )
         config = resolve_config(ParamConfig(), user, None)
 
@@ -309,7 +310,7 @@ class TestIntegration:
             base_dir="/tmp",
             threshold=40,
             reflectivity_var="reflectivity_dbz",
-            min_cellsize_gridpoint=20
+            min_cellsize_gridpoint=20,
         )
         config = resolve_config(ParamConfig(), user, None)
 
@@ -329,8 +330,8 @@ class TestIntegration:
                     "winsize": 15,
                     "iterations": 5,
                     "poly_n": 7,
-                }
-            )
+                },
+            ),
         )
         config = resolve_config(ParamConfig(), user, None)
 
@@ -344,22 +345,20 @@ class TestIntegration:
         # Get default excludes from ParamConfig
         param = ParamConfig()
         default_excludes = set(param.analyzer.exclude_fields)
-        
+
         # User adds additional excludes
         user = UserConfig(
             base_dir="/tmp",
             radar="KHTX",
-            analyzer=UserAnalyzerConfig(
-                exclude_fields=["new_field1", "new_field2"]
-            )
+            analyzer=UserAnalyzerConfig(exclude_fields=["new_field1", "new_field2"]),
         )
-        
+
         config = resolve_config(param, user, None)
-        
+
         # Result should include both defaults AND user additions
         actual_excludes = set(config.analyzer.exclude_fields)
         expected_excludes = default_excludes | {"new_field1", "new_field2"}
-        
+
         assert actual_excludes == expected_excludes
         assert "new_field1" in config.analyzer.exclude_fields
         assert "new_field2" in config.analyzer.exclude_fields
@@ -369,122 +368,118 @@ class TestIntegration:
 
     def test_analyzer_exclude_fields_via_top_level_alias(self):
         """analyzer.exclude_fields union also works via top-level UserConfig alias."""
-        param = ParamConfig() 
+        param = ParamConfig()
         default_excludes = set(param.analyzer.exclude_fields)
-        
+
         # User sets exclude_fields at top level (alias)
         user = UserConfig(
-            base_dir="/tmp", 
-            radar="KHTX",
-            exclude_fields=["top_level_exclude"]
+            base_dir="/tmp", radar="KHTX", exclude_fields=["top_level_exclude"]
         )
-        
+
         config = resolve_config(param, user, None)
-        
+
         actual_excludes = set(config.analyzer.exclude_fields)
         expected_excludes = default_excludes | {"top_level_exclude"}
-        
+
         assert actual_excludes == expected_excludes
 
 
 class TestDeepMergeSemantics:
     """Test deep_merge behavior for lists, dicts, and values."""
-    
+
     def test_deep_merge_list_behavior_replacement(self):
         """Lists should be replaced entirely, not concatenated."""
-        base = {
-            "list_field": ["a", "b", "c"],
-            "other_field": "base_value"
-        }
-        override = {
-            "list_field": ["x", "y"],
-            "new_field": "override_value"
-        }
-        
+        base = {"list_field": ["a", "b", "c"], "other_field": "base_value"}
+        override = {"list_field": ["x", "y"], "new_field": "override_value"}
+
         result = deep_merge(base, override)
-        
+
         # List should be completely replaced, not merged/concatenated
         assert result["list_field"] == ["x", "y"]
         assert result["other_field"] == "base_value"
         assert result["new_field"] == "override_value"
-    
+
     def test_deep_merge_nested_dict_behavior(self):
         """Nested dicts should merge recursively."""
         base = {
-            "nested": {
-                "keep_this": "base_value",
-                "override_this": "old_value"
-            },
-            "top_level": "base"
+            "nested": {"keep_this": "base_value", "override_this": "old_value"},
+            "top_level": "base",
         }
-        override = {
-            "nested": {
-                "override_this": "new_value", 
-                "add_this": "added"
-            }
-        }
-        
+        override = {"nested": {"override_this": "new_value", "add_this": "added"}}
+
         result = deep_merge(base, override)
-        
+
         # Nested dict should merge, not replace
         assert result["nested"]["keep_this"] == "base_value"
         assert result["nested"]["override_this"] == "new_value"
         assert result["nested"]["add_this"] == "added"
         assert result["top_level"] == "base"
-        
+
     def test_deep_merge_multiple_overrides(self):
         """Multiple overrides should apply in order."""
         base = {"field": "base"}
         override1 = {"field": "middle"}
         override2 = {"field": "final"}
-        
+
         result = deep_merge(base, override1, override2)
-        
+
         assert result["field"] == "final"
 
 
 class TestParamConfigCompleteness:
     """Test ParamConfig provides all runtime-critical defaults."""
-    
+
     def test_paramconfig_completeness(self):
         """ParamConfig should provide all required fields for runtime."""
         param = ParamConfig()
         param_dict = param.model_dump()
-        
+
         # Critical runtime fields that must be present
-        required_top_level = ["mode", "global_", "downloader", "regridder", 
-                             "segmenter", "analyzer", "projector"]
-        
+        required_top_level = [
+            "mode",
+            "global_",
+            "downloader",
+            "regridder",
+            "segmenter",
+            "analyzer",
+            "projector",
+        ]
+
         for field in required_top_level:
             assert field in param_dict, f"Missing required top-level field: {field}"
             assert param_dict[field] is not None, f"Field {field} is None"
-        
+
         # Critical downloader fields
-        downloader = param_dict["downloader"] 
-        downloader_required = ["output_dir", "latest_files", "latest_minutes", "poll_interval_sec"]
+        downloader = param_dict["downloader"]
+        downloader_required = [
+            "output_dir",
+            "latest_files",
+            "latest_minutes",
+            "poll_interval_sec",
+        ]
         for field in downloader_required:
             assert field in downloader, f"Missing downloader field: {field}"
-        
+
         # Critical segmenter fields
         segmenter = param_dict["segmenter"]
         segmenter_required = ["method", "threshold", "min_cellsize_gridpoint"]
         for field in segmenter_required:
             assert field in segmenter, f"Missing segmenter field: {field}"
             assert segmenter[field] is not None, f"Segmenter field {field} is None"
-        
+
         # Critical regridder fields
         regridder = param_dict["regridder"]
         regridder_required = ["grid_shape", "grid_limits", "weighting_function"]
         for field in regridder_required:
             assert field in regridder, f"Missing regridder field: {field}"
             assert regridder[field] is not None, f"Regridder field {field} is None"
-    
+
     def test_paramconfig_can_instantiate_without_errors(self):
         """ParamConfig should instantiate successfully with no validation errors."""
         # This should not raise any ValidationError
         param = ParamConfig()
         assert param is not None
-        
+
         # Should be able to convert to dict
         param_dict = param.model_dump()
         assert isinstance(param_dict, dict)

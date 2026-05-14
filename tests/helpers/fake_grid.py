@@ -36,17 +36,21 @@ def make_fake_grid_ds(
 
     return ds
 
-def make_fake_grid_ds_with_labels():
-    data = {
-        "reflectivity": (("y", "x"), np.ones((4, 4)))
-    }
 
-    data["cell_labels"] = (("y", "x"), np.array([
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 0, 2, 2],
-        [0, 0, 2, 2],
-    ]))
+def make_fake_grid_ds_with_labels():
+    data = {"reflectivity": (("y", "x"), np.ones((4, 4)))}
+
+    data["cell_labels"] = (
+        ("y", "x"),
+        np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 2, 2],
+                [0, 0, 2, 2],
+            ]
+        ),
+    )
 
     ds = xr.Dataset(
         data,
@@ -54,6 +58,6 @@ def make_fake_grid_ds_with_labels():
             "x": np.arange(4),
             "y": np.arange(4),
         },
-        attrs={"z_level_m": 2000}
+        attrs={"z_level_m": 2000},
     )
     return ds

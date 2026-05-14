@@ -21,15 +21,16 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
     q = queue.Queue()
-    return RadarProcessor(q, pipeline_config, pipeline_output_dirs,
-                          repository=test_repository)
+    return RadarProcessor(
+        q, pipeline_config, pipeline_output_dirs, repository=test_repository
+    )
 
 
 def _fake_ds():
     return xr.Dataset(
         {
             "reflectivity": (("y", "x"), np.ones((4, 4))),
-            "cell_labels":  (("y", "x"), np.zeros((4, 4), dtype=int)),
+            "cell_labels": (("y", "x"), np.zeros((4, 4), dtype=int)),
         },
         coords={"x": np.arange(4), "y": np.arange(4)},
         attrs={"z_level_m": 2000},
@@ -48,6 +49,7 @@ def _fake_single_result(scan_time):
 
 
 # ── Error paths ───────────────────────────────────────────────────────────────
+
 
 def test_process_file_pipeline_exception_returns_false(
     monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
@@ -93,6 +95,7 @@ def test_process_file_contract_violation_stops_processor(
 
 # ── Success path ──────────────────────────────────────────────────────────────
 
+
 def test_process_file_success_saves_netcdf_and_returns_true(
     monkeypatch, pipeline_config, pipeline_output_dirs, test_repository
 ):
@@ -109,8 +112,8 @@ def test_process_file_success_saves_netcdf_and_returns_true(
 
     fake_result = {
         "projected_ds": _fake_ds(),
-        "scan_time":    datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
-        "cell_stats":   pd.DataFrame({"cell_label": [1]}),
+        "scan_time": datetime(2024, 1, 1, 12, 5, 0, tzinfo=UTC),
+        "cell_stats": pd.DataFrame({"cell_label": [1]}),
         "cell_adjacency": pd.DataFrame(),
     }
 
@@ -118,8 +121,11 @@ def test_process_file_success_saves_netcdf_and_returns_true(
     monkeypatch.setattr(proc._multi_executor, "run", lambda ctx: fake_result)
 
     saved = []
-    monkeypatch.setattr(proc, "_save_analysis_netcdf",
-                        lambda ds, fp, st: saved.append(fp) or "/tmp/out.nc")
+    monkeypatch.setattr(
+        proc,
+        "_save_analysis_netcdf",
+        lambda ds, fp, st: saved.append(fp) or "/tmp/out.nc",
+    )
     monkeypatch.setattr(proc, "_save_results", lambda result, st: None)
 
     ok1 = proc.process_file("/fake/path/file_1")
@@ -141,7 +147,8 @@ def test_process_file_skips_already_analyzed(
     proc.file_tracker = _FakeTracker()
     called = []
     monkeypatch.setattr(
-        proc._single_executor, "run",
+        proc._single_executor,
+        "run",
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
     )
 

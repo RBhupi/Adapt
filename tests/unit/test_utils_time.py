@@ -51,6 +51,7 @@ class TestNormalizeTimeScalar:
         """cftime objects are converted to Python datetime with UTC timezone."""
         pytest.importorskip("cftime")
         import cftime
+
         cf = cftime.DatetimeGregorian(2025, 6, 15, 10, 30, 0)
         result = normalize_time_scalar(cf)
         assert isinstance(result, datetime)
@@ -62,8 +63,10 @@ class TestNormalizeTimeScalar:
 
     def test_numpy_scalar_without_item_method(self):
         """Objects without .item() are returned as-is."""
+
         class FakeScalar:
             pass
+
         obj = FakeScalar()
         result = normalize_time_scalar(obj)
         assert result is obj

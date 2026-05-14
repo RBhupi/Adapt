@@ -6,7 +6,9 @@ from adapt.modules.acquisition.module import AwsNexradDownloader
 pytestmark = pytest.mark.unit
 
 
-def test_run_exits_after_historical_complete(tmp_path, fake_scan, fake_aws_conn, make_config):
+def test_run_exits_after_historical_complete(
+    tmp_path, fake_scan, fake_aws_conn, make_config
+):
     scans = [fake_scan("one")]
 
     config = make_config(

@@ -20,6 +20,7 @@ from adapt.configuration.schemas.base import AdaptBaseModel
 
 class UserSegmenterConfig(AdaptBaseModel):
     """User-facing segmentation config with aliases."""
+
     method: str | None = None
     threshold: float | None = None
     min_cellsize_gridpoint: int | None = None
@@ -47,6 +48,7 @@ class UserSegmenterConfig(AdaptBaseModel):
 
 class UserGlobalConfig(AdaptBaseModel):
     """User-facing global config."""
+
     z_level: float | None = None
     var_names: dict[str, str] | None = None
     coord_names: dict[str, str] | None = None
@@ -62,6 +64,7 @@ class UserGlobalConfig(AdaptBaseModel):
 
 class UserProjectorConfig(AdaptBaseModel):
     """User-facing projector config."""
+
     method: str | None = None
     max_time_interval_minutes: int | None = None
     max_projection_steps: int | None = None
@@ -81,8 +84,11 @@ class UserProjectorConfig(AdaptBaseModel):
 
 class UserRegridderConfig(AdaptBaseModel):
     """User-facing regridder config."""
+
     grid_shape: tuple[int, int, int] | None = None
-    grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None = None
+    grid_limits: (
+        tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None
+    ) = None
     roi_func: str | None = None
     min_radius: float | None = None
     weighting_function: str | None = None
@@ -91,6 +97,7 @@ class UserRegridderConfig(AdaptBaseModel):
 
 class UserDownloaderConfig(AdaptBaseModel):
     """User-facing downloader config."""
+
     radar: str | None = None
     output_dir: str | None = None
     latest_files: int | None = None
@@ -102,6 +109,7 @@ class UserDownloaderConfig(AdaptBaseModel):
 
 class UserAnalyzerConfig(AdaptBaseModel):
     """User-facing analyzer config."""
+
     radar_variables: list[str] | None = None
     exclude_fields: list[str] | None = None
 
@@ -143,9 +151,9 @@ class UserConfig(AdaptBaseModel):
 
     # Grid settings (flat aliases)
     grid_shape: tuple[int, int, int] | None = Field(None, alias="GRID_SHAPE")
-    grid_limits: tuple[
-        tuple[float, float], tuple[float, float], tuple[float, float]
-    ] | None = Field(None, alias="GRID_LIMITS")
+    grid_limits: (
+        tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None
+    ) = Field(None, alias="GRID_LIMITS")
 
     # Segmentation settings (flat aliases)
     z_level: float | None = Field(None, alias="Z_LEVEL")
@@ -184,7 +192,10 @@ class UserConfig(AdaptBaseModel):
         """
         if self.mode is None and (
             (self.start_time and self.end_time)
-            or (self.downloader and (self.downloader.start_time and self.downloader.end_time))
+            or (
+                self.downloader
+                and (self.downloader.start_time and self.downloader.end_time)
+            )
         ):
             self.mode = "historical"
 

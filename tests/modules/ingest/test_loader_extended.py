@@ -1,6 +1,5 @@
 """Extended tests for RadarDataLoader functionality."""
 
-
 import pytest
 
 from adapt.modules.ingest.module import RadarDataLoader

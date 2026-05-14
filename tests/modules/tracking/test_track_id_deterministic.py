@@ -1,6 +1,9 @@
 import pytest
 
-from adapt.modules.tracking.module import _cell_uid_from_signature, _track_signature_from_birth
+from adapt.modules.tracking.module import (
+    _cell_uid_from_signature,
+    _track_signature_from_birth,
+)
 
 pytestmark = pytest.mark.unit
 

@@ -30,7 +30,7 @@ from scipy.ndimage import label
 from skimage.morphology import h_maxima
 from skimage.segmentation import watershed
 
-__all__ = ['RadarCellSegmenter']
+__all__ = ["RadarCellSegmenter"]
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _label_maxtree(binary: np.ndarray, field: np.ndarray, h: float = 5.0) -> np.
     """
     fp = np.where(binary, field, 0.0)
     peaks = h_maxima(fp, h=h)
-    seeds, n_seeds = label(peaks)          # label from scipy.ndimage
+    seeds, n_seeds = label(peaks)  # label from scipy.ndimage
     if n_seeds == 0:
         return np.zeros(binary.shape, dtype=np.int32)
     ws = watershed(-fp, seeds, mask=binary)
@@ -67,53 +67,53 @@ def _label_maxtree(binary: np.ndarray, field: np.ndarray, h: float = 5.0) -> np.
 
 class RadarCellSegmenter:
     """Threshold-based cell detection and labeling for 2D radar reflectivity.
-    
+
     This class applies a series of image processing steps to identify and label
     convective cells:
-    
+
     1. **Binary thresholding**: Mark reflectivity > threshold as cell candidates
     2. **Morphological closing**: Fill small holes within cells (tunable)
     3. **Connected component labeling**: Assign unique IDs (1, 2, 3, ...)
     4. **Size filtering**: Remove cells smaller than min_gridpoints or larger
        than max_gridpoints (optional)
     5. **Relabeling by size**: Largest cell gets label 1, second-largest gets 2, etc.
-    
+
     The output is a labeled image (xarray.DataArray) with integer cell IDs.
     Cell ID = 0 means no cell; cell ID > 0 means part of that cell.
-    
+
     Configuration
     ==============
     Expects config dict with:
-    
+
     - `method` : str, optional (default: "threshold")
         Segmentation algorithm. Currently only "threshold" is supported.
-    
+
     - `threshold` : float, default 30
         Reflectivity threshold in dBZ. Cells have reflectivity > threshold.
         Typical: 30 dBZ for convection, 20 dBZ for weaker features.
-    
+
     - `closing_kernel` : tuple of int, default (1, 1)
         Size of morphological closing footprint. (1, 1) means no closing.
         (3, 3) or (5, 5) fill small holes.
-    
+
     - `filter_by_size` : bool, default True
         Whether to apply cell size filtering.
-    
+
     - `min_cellsize_gridpoint` : int, default 5
         Minimum cell size in grid points. Smaller cells are removed.
         Typical: 5-20 points (1-4 km at 200 m spacing).
-    
+
     - `max_cellsize_gridpoint` : int or None, default None
         Maximum cell size in grid points. Larger cells are removed.
         If None, no upper limit.
-    
+
     - `global` : dict, optional
         Sub-dict with variable/coordinate naming:
-        
+
         - `var_names` : dict, optional
             - `reflectivity` : str, name of reflectivity variable (default: "reflectivity")
             - `cell_labels` : str, name for output labels (default: "cell_labels")
-    
+
     Notes
     -----
     - Input dataset must be 2D (already sliced at a fixed altitude by processor)
@@ -121,7 +121,7 @@ class RadarCellSegmenter:
     - Processing time: 50-200 ms per frame (depends on cell count)
     - Cell numbering is deterministic: largest cells always get lower IDs
     - Closing kernel of (1,1) means no morphological processing
-    
+
     Examples
     --------
     >>> config = {
@@ -138,18 +138,18 @@ class RadarCellSegmenter:
 
     def __init__(self, config):
         """Initialize segmenter with validated configuration.
-        
+
         Parameters
         ----------
         config : InternalConfig
             Fully validated runtime configuration.
-        
+
         Notes
         -----
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-        
+
         Examples
         --------
         >>> from adapt.configuration.schemas import resolve_config, ParamConfig
@@ -167,17 +167,20 @@ class RadarCellSegmenter:
         self.labels_name = config.labels_var
         self.z_level = config.z_level
 
-        logger.info("RadarCellSegmenter initialized: method=%s, threshold=%s", 
-                    self.method, self.threshold)
+        logger.info(
+            "RadarCellSegmenter initialized: method=%s, threshold=%s",
+            self.method,
+            self.threshold,
+        )
 
     def segment(self, ds: xr.Dataset) -> xr.Dataset:
         """Segment 2D reflectivity and return dataset with cell labels.
-        
+
         Dispatches to appropriate segmentation method (currently only threshold).
         The input dataset should be 2D (reflectivity at a fixed altitude).
         The output dataset is a copy of the input with an additional
         "cell_labels" variable containing integer cell IDs.
-        
+
         Parameters
         ----------
         ds : xr.Dataset
@@ -185,14 +188,14 @@ class RadarCellSegmenter:
             Expected dimensions: (y, x)
             Expected data variables: reflectivity (or custom name via config)
             Expected attributes: z_level_m (altitude in meters, set by processor)
-        
+
         Returns
         -------
         xr.Dataset
             Copy of input dataset with added cell_labels variable.
             Dataset attributes are preserved; cell_labels attributes
             include segmentation metadata (threshold, z-level, method, etc.).
-        
+
 
         Notes
         -----
@@ -201,7 +204,7 @@ class RadarCellSegmenter:
         - Cell labels are stored as int32 (0 = background, 1+ = cell IDs)
         - Cells are numbered in decreasing order of size (largest = 1)
         - Processing time: ~50-200 ms per frame
-        
+
         Examples
         --------
         >>> segmenter = RadarCellSegmenter(config)
@@ -213,7 +216,7 @@ class RadarCellSegmenter:
 
     def _segment2D_threshold(self, ds: xr.Dataset) -> xr.Dataset:
         """Apply threshold and morphology to detect cells (internal method).
-        
+
         Steps:
         1. Extract reflectivity field (must be 2D: already sliced by processor)
         2. Apply binary threshold (reflectivity > threshold)
@@ -222,13 +225,13 @@ class RadarCellSegmenter:
         5. Filter cells by size (min/max grid points)
         6. Relabel by decreasing size (largest cell = 1)
         7. Attach labels to dataset and return
-        
+
         Parameters
         ----------
         ds : xr.Dataset
             2D xarray.Dataset with reflectivity at fixed z-level.
             Expected to be pre-sliced at a single altitude by processor.
-        
+
         Returns
         -------
         xr.Dataset
@@ -240,14 +243,14 @@ class RadarCellSegmenter:
             - z_level_m: altitude of this slice (from ds.attrs)
             - min_cellsize_gridpoint: minimum size filter
             - max_cellsize_gridpoint: maximum size filter (if set)
-        
+
         Notes
         -----
         - Expects 2D input (if 3D, slicing is caller's responsibility)
         - Variable names (reflectivity, cell_labels) are read from config
         - Logging includes cell count, filtering results
         - Processing time: typically 50-200 ms
-        
+
         Examples
         --------
         >>> # Not typically called directly; use segment() instead
@@ -279,10 +282,7 @@ class RadarCellSegmenter:
             attrs["max_cellsize_gridpoint"] = self.max_gridpoints
 
         labels_da = xr.DataArray(
-            labels,
-            dims=("y", "x"),
-            coords={"y": ds.y, "x": ds.x},
-            attrs=attrs
+            labels, dims=("y", "x"), coords={"y": ds.y, "x": ds.x}, attrs=attrs
         )
 
         # we attach labels to original dataset
@@ -295,9 +295,13 @@ class RadarCellSegmenter:
         return ds_out
 
     def _binary_to_labels(
-        self, binary_mask: np.ndarray, field: np.ndarray,
-        kernel_size: tuple, filter_by_size: bool,
-        min_gridpoints: int, max_gridpoints: int,
+        self,
+        binary_mask: np.ndarray,
+        field: np.ndarray,
+        kernel_size: tuple,
+        filter_by_size: bool,
+        min_gridpoints: int,
+        max_gridpoints: int,
     ) -> np.ndarray:
         """Morphology, detect cells, filter."""
         from skimage.morphology import closing, footprint_rectangle
@@ -314,21 +318,26 @@ class RadarCellSegmenter:
 
         return labels.astype(np.int32)
 
-    def _filter_and_relabel(self, labels: np.ndarray, filter_by_size: bool,
-                             min_gridpoints: int, max_gridpoints: int) -> np.ndarray:
+    def _filter_and_relabel(
+        self,
+        labels: np.ndarray,
+        filter_by_size: bool,
+        min_gridpoints: int,
+        max_gridpoints: int,
+    ) -> np.ndarray:
         """Filter, renumber by size."""
         labels_unique, counts = np.unique(labels, return_counts=True)
         keep_mask = labels_unique > 0
 
         if filter_by_size:
             if min_gridpoints > 1:
-                keep_mask &= (counts >= min_gridpoints)
+                keep_mask &= counts >= min_gridpoints
                 num_small = np.sum((labels_unique > 0) & (counts < min_gridpoints))
                 if num_small > 0:
                     logger.debug(f"Removed {num_small} small (< {min_gridpoints})")
 
             if max_gridpoints is not None:
-                keep_mask &= (counts <= max_gridpoints)
+                keep_mask &= counts <= max_gridpoints
                 num_large = np.sum((labels_unique > 0) & (counts > max_gridpoints))
                 if num_large > 0:
                     logger.debug(f"Removed {num_large} large (> {max_gridpoints})")

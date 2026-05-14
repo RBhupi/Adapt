@@ -51,7 +51,10 @@ def assert_analysis_output(df: pd.DataFrame, min_expected_rows: int = 0) -> None
         f"Analysis contract violated: output is {type(df)}, expected DataFrame",
     )
     for col in _REQUIRED_STATS_COLS:
-        require(col in df.columns, f"Analysis contract violated: missing required column '{col}'")
+        require(
+            col in df.columns,
+            f"Analysis contract violated: missing required column '{col}'",
+        )
     if len(df) > 0:
         require(
             (df["cell_label"] > 0).all(),

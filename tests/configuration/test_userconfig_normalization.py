@@ -1,4 +1,3 @@
-
 from adapt.configuration.schemas.user import UserConfig
 
 

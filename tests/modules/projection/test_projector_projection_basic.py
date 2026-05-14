@@ -5,10 +5,15 @@ from adapt.modules.projection.module import RadarCellProjector
 pytestmark = pytest.mark.unit
 
 
-def test_projection_adds_expected_variables(simple_labeled_ds_pair, make_projection_config):
+def test_projection_adds_expected_variables(
+    simple_labeled_ds_pair, make_projection_config
+):
     """Projector adds expected projection variables."""
     from adapt.configuration.schemas.user import UserProjectorConfig
-    config = make_projection_config(projector=UserProjectorConfig(max_projection_steps=1))
+
+    config = make_projection_config(
+        projector=UserProjectorConfig(max_projection_steps=1)
+    )
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)
@@ -21,7 +26,10 @@ def test_projection_adds_expected_variables(simple_labeled_ds_pair, make_project
 def test_projection_dimensions(simple_labeled_ds_pair, make_projection_config):
     """Projection output has correct dimensions."""
     from adapt.configuration.schemas.user import UserProjectorConfig
-    config = make_projection_config(projector=UserProjectorConfig(max_projection_steps=2))
+
+    config = make_projection_config(
+        projector=UserProjectorConfig(max_projection_steps=2)
+    )
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)

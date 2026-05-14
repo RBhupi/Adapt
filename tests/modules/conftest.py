@@ -66,17 +66,18 @@ def simple_2d_ds():
     """
     2D reflectivity field with one clear cell.
     """
-    data = np.array([
-        [10, 10, 10, 10],
-        [10, 40, 40, 10],
-        [10, 40, 40, 10],
-        [10, 10, 10, 10],
-    ], dtype=np.float32)
+    data = np.array(
+        [
+            [10, 10, 10, 10],
+            [10, 40, 40, 10],
+            [10, 40, 40, 10],
+            [10, 10, 10, 10],
+        ],
+        dtype=np.float32,
+    )
 
     ds = xr.Dataset(
-        {
-            "reflectivity": (("y", "x"), data)
-        },
+        {"reflectivity": (("y", "x"), data)},
         coords={
             "y": np.arange(data.shape[0]),
             "x": np.arange(data.shape[1]),
@@ -105,12 +106,15 @@ def two_cell_ds():
     """
     Two separate cells of different sizes.
     """
-    data = np.array([
-        [50, 50,  0,  0,  0],
-        [50, 50,  0, 30, 30],
-        [ 0,  0,  0, 30, 30],
-        [ 0,  0,  0,  0,  0],
-    ], dtype=np.float32)
+    data = np.array(
+        [
+            [50, 50, 0, 0, 0],
+            [50, 50, 0, 30, 30],
+            [0, 0, 0, 30, 30],
+            [0, 0, 0, 0, 0],
+        ],
+        dtype=np.float32,
+    )
 
     return xr.Dataset(
         {"reflectivity": (("y", "x"), data)},
@@ -170,6 +174,7 @@ def close_cells_ds():
 
 # For testing motion projection
 
+
 @pytest.fixture
 def simple_labeled_ds_pair():
     """
@@ -179,19 +184,25 @@ def simple_labeled_ds_pair():
     - valid time coordinate
     Zero motion between frames.
     """
-    data = np.array([
-        [0, 40, 40, 0],
-        [0, 40, 40, 0],
-        [0,  0,  0, 0],
-        [0,  0,  0, 0],
-    ], dtype=np.float32)
+    data = np.array(
+        [
+            [0, 40, 40, 0],
+            [0, 40, 40, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.float32,
+    )
 
-    labels = np.array([
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-    ], dtype=np.int32)
+    labels = np.array(
+        [
+            [0, 1, 1, 0],
+            [0, 1, 1, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.int32,
+    )
 
     t0 = np.datetime64("2024-01-01T00:00")
     t1 = np.datetime64("2024-01-01T00:05")
@@ -229,24 +240,27 @@ def labeled_ds_with_extras(simple_2d_ds):
     """
     ds = simple_2d_ds.copy()
 
-    labels = np.array([
-        [0, 0, 0, 0],
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 0, 0, 0],
-    ], dtype=np.int32)
+    labels = np.array(
+        [
+            [0, 0, 0, 0],
+            [0, 1, 1, 0],
+            [0, 1, 1, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.int32,
+    )
 
     ds["cell_labels"] = (("y", "x"), labels)
 
     ds["heading_x"] = (("y", "x"), np.ones_like(labels, dtype=np.float32))
     ds["heading_y"] = (("y", "x"), np.zeros_like(labels, dtype=np.float32))
-    ds["differential_reflectivity"] = (("y", "x"), np.full_like(labels, 1.0, dtype=np.float32))
+    ds["differential_reflectivity"] = (
+        ("y", "x"),
+        np.full_like(labels, 1.0, dtype=np.float32),
+    )
 
     projections = np.stack([labels, labels], axis=0)
-    ds["cell_projections"] = (
-        ("frame_offset", "y", "x"),
-        projections
-    )
+    ds["cell_projections"] = (("frame_offset", "y", "x"), projections)
 
     ds = ds.assign_coords(frame_offset=[0, 1])
     ds = ds.assign_coords(time=np.datetime64("2024-01-01T00:00"))
@@ -290,5 +304,3 @@ def radar_output_dirs(temp_dir):
     dirs["analysis"] = dirs["base"]
     dirs["plots"] = dirs["base"]
     return dirs
-
-

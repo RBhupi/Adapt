@@ -19,6 +19,7 @@ def config():
     d = tempfile.mkdtemp()
     try:
         import shutil
+
         param = ParamConfig()
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
@@ -52,7 +53,12 @@ def test_extract_adjacency_simple_touch(config):
     ds = _ds_with_labels(np.datetime64("2024-01-01T00:00:00"), labels)
     df = analyzer.extract_adjacency(ds)
 
-    assert list(df.columns) == ["time", "cell_label_a", "cell_label_b", "touching_boundary_pixels"]
+    assert list(df.columns) == [
+        "time",
+        "cell_label_a",
+        "cell_label_b",
+        "touching_boundary_pixels",
+    ]
     assert len(df) == 1
     assert int(df.iloc[0]["cell_label_a"]) == 1
     assert int(df.iloc[0]["cell_label_b"]) == 2

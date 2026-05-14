@@ -15,7 +15,7 @@ from pathlib import Path
 
 from nexradaws import NexradAwsInterface
 
-__all__ = ['AwsNexradDownloader']
+__all__ = ["AwsNexradDownloader"]
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class AwsNexradDownloader(threading.Thread):
         file_tracker=None,
         conn=None,
         clock=None,
-        sleeper=None
+        sleeper=None,
     ):
         """Initialize downloader.
 
@@ -156,13 +156,13 @@ class AwsNexradDownloader(threading.Thread):
 
     def stop(self):
         """Signal the downloader thread to stop gracefully.
-        
+
         Calling this method sets the internal stop event, which causes the
         `run()` main loop to exit. The thread will finish its current download
         task before stopping (not immediate).
-        
+
         Safe to call from any thread. Can be called multiple times.
-        
+
         Examples
         --------
         >>> downloader = AwsNexradDownloader(config, queue)
@@ -175,18 +175,18 @@ class AwsNexradDownloader(threading.Thread):
 
     def stopped(self) -> bool:
         """Check if a stop request has been issued.
-        
+
         Returns
         -------
         bool
             True if `stop()` has been called, False otherwise.
-        
+
         Notes
         -----
         This is non-blocking and reflects whether the stop event has been set.
         The thread may still be running even if this returns True (it finishes
         its current task before exiting).
-        
+
         Examples
         --------
         >>> if downloader.stopped():
@@ -196,21 +196,21 @@ class AwsNexradDownloader(threading.Thread):
 
     def is_historical_complete(self) -> bool:
         """Check if historical download has finished.
-        
+
         In historical mode, this indicates whether all scans in the time range
         have been downloaded and queued. In realtime mode, this always returns False.
-        
+
         Returns
         -------
         bool
             True if all available scans in the start_time to end_time range
             have been processed.
-        
+
         Notes
         -----
         "Complete" means scans have been QUEUED, not necessarily processed
         by the pipeline. The main loop will exit automatically when this is True.
-        
+
         Examples
         --------
         >>> while not downloader.is_historical_complete():
@@ -220,24 +220,24 @@ class AwsNexradDownloader(threading.Thread):
 
     def get_historical_progress(self) -> tuple:
         """Get progress of historical download as (processed, expected) counts.
-        
+
         Returns
         -------
         tuple of (int, int)
             First element: number of scans successfully processed/queued.
             Second element: total number of scans expected in time range.
-        
+
         Notes
         -----
         Only meaningful in historical mode. In realtime mode, expected is always 0.
         Progress is (processed, expected) where processed <= expected.
         This can be used to display download progress to the user.
-        
+
         Examples
         --------
         >>> processed, expected = downloader.get_historical_progress()
         >>> print(f"Downloaded {processed}/{expected} scans")
-        
+
         >>> while not downloader.is_historical_complete():
         ...     processed, expected = downloader.get_historical_progress()
         ...     print(f"Progress: {processed}/{expected}")
@@ -247,10 +247,10 @@ class AwsNexradDownloader(threading.Thread):
 
     def run(self):
         """Main thread loop - automatically invoked when thread starts.
-        
+
         This is the primary execution method called by threading.Thread.start().
         Do NOT call directly; use thread.start() instead.
-        
+
         Behavior:
             1. Logs startup with mode (realtime or historical)
             2. Repeatedly calls download_task() at intervals
@@ -258,7 +258,7 @@ class AwsNexradDownloader(threading.Thread):
             4. In historical mode: exits automatically when complete
             5. In realtime mode: runs until stop() is called
             6. Performs interruptible sleep between iterations (can exit quickly)
-        
+
         Notes
         -----
         - Running in a background daemon thread (set at __init__)
@@ -266,7 +266,7 @@ class AwsNexradDownloader(threading.Thread):
         - Sleep is interruptible: responds to stop() and historical completion
           within 2 seconds (default is 2-second sleep chunks)
         - Thread-safe: can call stop() from another thread
-        
+
         Examples
         --------
         >>> downloader = AwsNexradDownloader(config, queue)
@@ -282,7 +282,10 @@ class AwsNexradDownloader(threading.Thread):
                 logger.exception("Download task failed")
 
             # Historical: exit after completion
-            if self.config.downloader.mode == "historical" and self.is_historical_complete():
+            if (
+                self.config.downloader.mode == "historical"
+                and self.is_historical_complete()
+            ):
                 logger.info("Historical download complete")
                 break
 
@@ -296,10 +299,12 @@ class AwsNexradDownloader(threading.Thread):
         for _ in range(seconds // 2):
             if self.stopped():
                 break
-            if self.config.downloader.mode == "historical" and self.is_historical_complete():
+            if (
+                self.config.downloader.mode == "historical"
+                and self.is_historical_complete()
+            ):
                 break
             self._sleep(2)
-
 
     # ========================================================================
     # Download task - dispatches to realtime or historical
@@ -307,18 +312,18 @@ class AwsNexradDownloader(threading.Thread):
 
     def _download_task(self) -> list:
         """Execute a single download iteration (realtime or historical).
-        
+
         Dispatches to appropriate download strategy based on mode:
         - Historical: downloads scans in specified date range (one batch)
         - Realtime: downloads latest scans within rolling time window
-        
+
         Returns
         -------
         list of Path
             Paths to newly downloaded files (files that didn't exist before
             this call). Existing files already in the output directory are
             queued but not included in return list.
-        
+
         Notes
         -----
         - Typically called repeatedly in the run() loop
@@ -355,7 +360,9 @@ class AwsNexradDownloader(threading.Thread):
         end = self._clock()
         start = end - timedelta(minutes=self.latest_minutes)
 
-        logger.debug("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
+        logger.debug(
+            "Realtime: last %d min (%s to %s)", self.latest_minutes, start, end
+        )
 
         # Use the full realtime window for availability checks. This avoids
         # false "not found" warnings around UTC midnight when the window spans
@@ -403,13 +410,13 @@ class AwsNexradDownloader(threading.Thread):
 
     def _check_radar_available(self, start: datetime, end: datetime) -> None:
         """Check radar availability and log warnings (best-effort).
-        
+
         Checks if radar is listed in AWS inventory for the given date range.
         This is informational only — it does not block downloads.
-        
+
         For a single date (start == end): checks that date.
         For a date range: checks each day, warns only if explicitly not found on any day.
-        
+
         Uses `self.conn.get_avail_radars(year, month, day)` from NexradAwsInterface.
         Exceptions are silently ignored (inventory may be temporarily unavailable).
         Only warns if we successfully checked and radar is explicitly not present.
@@ -479,7 +486,9 @@ class AwsNexradDownloader(threading.Thread):
             if self._file_exists(local_path):
                 with self._known_files_lock:
                     if local_path not in self._known_files:
-                        self._notify_queue(local_path, scan.scan_time, is_new, download_seconds)
+                        self._notify_queue(
+                            local_path, scan.scan_time, is_new, download_seconds
+                        )
                         self._known_files.add(local_path)
                         queued += 1
             else:
@@ -509,7 +518,9 @@ class AwsNexradDownloader(threading.Thread):
         date_str = scan.scan_time.strftime("%Y%m%d")
 
         if self.output_dirs:
-            return self.output_dirs["base"] / self.radar / "nexrad" / date_str / filename
+            return (
+                self.output_dirs["base"] / self.radar / "nexrad" / date_str / filename
+            )
 
         # Legacy fallback
         return (self.output_dir / date_str / self.radar / filename).resolve()
@@ -547,8 +558,13 @@ class AwsNexradDownloader(threading.Thread):
             logger.error("Download failed: %s - %s", scan.key, e)
             return False
 
-    def _notify_queue(self, path: Path, scan_time: datetime, is_new: bool,
-                     download_seconds: float = None):
+    def _notify_queue(
+        self,
+        path: Path,
+        scan_time: datetime,
+        is_new: bool,
+        download_seconds: float = None,
+    ):
         """Put file notification in result queue."""
         # Keep the original behavior: if there is no result_queue, we don't
         # queue items or attempt to register/mark the file with the tracker.
@@ -562,9 +578,13 @@ class AwsNexradDownloader(threading.Thread):
             if tracker:
                 tracker.register_file(file_id, self.radar, scan_time, path)
                 timings = (
-                    {"download_seconds": download_seconds} if download_seconds is not None else None
+                    {"download_seconds": download_seconds}
+                    if download_seconds is not None
+                    else None
                 )
-                tracker.mark_stage_complete(file_id, "downloaded", path=path, timings=timings)
+                tracker.mark_stage_complete(
+                    file_id, "downloaded", path=path, timings=timings
+                )
 
             self.result_queue.put(
                 {

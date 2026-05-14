@@ -16,5 +16,12 @@ def test_radar_catalog_initializes_track_tables(tmp_path):
     conn.close()
     catalog.close()
 
-    assert {"items", "progress", "schemas", "scans",
-            "cells_by_scan", "cell_events", "cell_tracks"}.issubset(tables)
+    assert {
+        "items",
+        "progress",
+        "schemas",
+        "scans",
+        "cells_by_scan",
+        "cell_events",
+        "cell_tracks",
+    }.issubset(tables)

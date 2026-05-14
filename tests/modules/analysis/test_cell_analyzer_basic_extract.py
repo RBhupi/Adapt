@@ -17,7 +17,9 @@ def test_extract_single_cell(labeled_ds_with_extras, make_analysis_config):
     assert df.iloc[0]["cell_label"] == 1
 
 
-def test_extract_produces_required_columns(labeled_ds_with_extras, make_analysis_config):
+def test_extract_produces_required_columns(
+    labeled_ds_with_extras, make_analysis_config
+):
     """Analyzer produces required output columns."""
     config = make_analysis_config()
     analyzer = RadarCellAnalyzer(config)

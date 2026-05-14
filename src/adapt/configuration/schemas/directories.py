@@ -15,10 +15,10 @@ from pathlib import Path
 
 def setup_output_directories(base_dir: str) -> dict[str, Path]:
     """Setup output directory structure.
-    
+
     Creates the standard Adapt directory layout under base_dir.
     Radar-specific subdirectories are created dynamically as needed.
-    
+
     Structure:
         base_dir/
         ├── catalog/          # SQLite catalog database
@@ -28,18 +28,18 @@ def setup_output_directories(base_dir: str) -> dict[str, Path]:
             ├── gridnc/       # Gridded NetCDF files
             ├── analysis/     # Cell analysis results (Parquet/DB)
             └── plots/        # Visualization outputs
-    
+
     Parameters
     ----------
     base_dir : str
         Base directory for all outputs
-        
+
     Returns
     -------
     Dict[str, Path]
         Dictionary with keys: base, catalog, logs
         Radar-specific paths created dynamically by other functions
-        
+
     Examples
     --------
     >>> dirs = setup_output_directories("/tmp/adapt_output")
@@ -49,20 +49,19 @@ def setup_output_directories(base_dir: str) -> dict[str, Path]:
     /tmp/adapt_output/logs
     """
     base_path = Path(base_dir)
-    
+
     # Create base and root-level directories
     dirs = {
         "base": base_path,
         "catalog": base_path / "catalog",
         "logs": base_path / "logs",
     }
-    
+
     # Create directories
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
-    
-    return dirs
 
+    return dirs
 
 
 def get_plot_path(
@@ -70,12 +69,12 @@ def get_plot_path(
     radar: str,
     plot_type: str = None,
     scan_time: datetime = None,
-    filename: str = None
+    filename: str = None,
 ) -> Path:
     """Get path for plot/visualization file.
-    
+
     Pattern: base_dir/RADAR_ID/plots/YYYYMMDD/filename
-    
+
     Parameters
     ----------
     output_dirs : Dict[str, Path]
@@ -88,7 +87,7 @@ def get_plot_path(
         Scan timestamp for date-based organization
     filename : str, optional
         Plot filename (e.g., "reflectivity_KDIX_123045.png")
-        
+
     Returns
     -------
     Path
@@ -101,7 +100,7 @@ def get_plot_path(
     else:
         base_dir = output_dirs["base"] / radar / "plots"
     base_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if filename:
         return base_dir / filename
     elif plot_type and scan_time:
@@ -111,8 +110,7 @@ def get_plot_path(
         return base_dir
 
 
-
 __all__ = [
-    'setup_output_directories',
-    'get_plot_path',
+    "setup_output_directories",
+    "get_plot_path",
 ]

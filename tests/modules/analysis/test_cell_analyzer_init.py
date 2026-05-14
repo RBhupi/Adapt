@@ -17,9 +17,9 @@ def test_init_with_default_config(make_analysis_config):
 def test_init_custom_config(make_analysis_config):
     """Analyzer initializes with custom config."""
     from adapt.configuration.schemas.user import UserProjectorConfig
+
     config = make_analysis_config(
-        reflectivity_var="dbz",
-        projector=UserProjectorConfig(max_projection_steps=2)
+        reflectivity_var="dbz", projector=UserProjectorConfig(max_projection_steps=2)
     )
     analyzer = RadarCellAnalyzer(config)
 

@@ -31,11 +31,7 @@ def temp_base_dir():
 @pytest.fixture
 def repository(temp_base_dir):
     """Create DataRepository instance."""
-    repo = DataRepository(
-        run_id="test1234",
-        base_dir=temp_base_dir,
-        radar="KDIX"
-    )
+    repo = DataRepository(run_id="test1234", base_dir=temp_base_dir, radar="KDIX")
     yield repo
     repo.close()
 
@@ -43,26 +39,30 @@ def repository(temp_base_dir):
 @pytest.fixture
 def sample_dataset():
     """Create a sample xarray Dataset."""
-    return xr.Dataset({
-        'reflectivity': xr.DataArray(
-            np.random.randn(10, 10).astype(np.float32),
-            dims=['y', 'x'],
-            coords={
-                'y': np.arange(10) * 1000.0,
-                'x': np.arange(10) * 1000.0,
-            }
-        )
-    })
+    return xr.Dataset(
+        {
+            "reflectivity": xr.DataArray(
+                np.random.randn(10, 10).astype(np.float32),
+                dims=["y", "x"],
+                coords={
+                    "y": np.arange(10) * 1000.0,
+                    "x": np.arange(10) * 1000.0,
+                },
+            )
+        }
+    )
 
 
 @pytest.fixture
 def sample_dataframe():
     """Create a sample DataFrame."""
-    return pd.DataFrame({
-        'cell_label': [1, 2, 3],
-        'cell_area_sqkm': [100.0, 200.0, 150.0],
-        'reflectivity_max': [45.5, 52.3, 48.1],
-    })
+    return pd.DataFrame(
+        {
+            "cell_label": [1, 2, 3],
+            "cell_area_sqkm": [100.0, 200.0, 150.0],
+            "reflectivity_max": [45.5, 52.3, 48.1],
+        }
+    )
 
 
 # =========================================================================
@@ -125,7 +125,7 @@ class TestArtifactRegistration:
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
             producer="test",
             parent_ids=[],
-            metadata={"test": True}
+            metadata={"test": True},
         )
 
         assert len(artifact_id) == 16
@@ -139,7 +139,7 @@ class TestArtifactRegistration:
             product_type=ProductType.CELLS_DB,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         assert len(artifact_id) == 16
@@ -153,12 +153,12 @@ class TestArtifactRegistration:
             product_type=ProductType.GRIDDED_NC,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         results = repository.query(product_type=ProductType.GRIDDED_NC)
         assert len(results) == 1
-        assert results[0]['artifact_id'] == artifact_id
+        assert results[0]["artifact_id"] == artifact_id
 
     def test_query_by_time_range(self, repository, temp_base_dir):
         """Should filter by time range."""
@@ -171,21 +171,21 @@ class TestArtifactRegistration:
             product_type=ProductType.GRIDDED_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         repository.register_artifact(
             product_type=ProductType.GRIDDED_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 14, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         results = repository.query(
             product_type=ProductType.GRIDDED_NC,
             time_range=(
                 datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-                datetime(2026, 2, 11, 16, 0, 0, tzinfo=UTC)
-            )
+                datetime(2026, 2, 11, 16, 0, 0, tzinfo=UTC),
+            ),
         )
         assert len(results) == 1
 
@@ -198,13 +198,13 @@ class TestArtifactRegistration:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="processor"
+            producer="processor",
         )
 
         artifact = repository.get_artifact(artifact_id)
         assert artifact is not None
-        assert artifact['product_type'] == ProductType.ANALYSIS_NC
-        assert artifact['producer'] == "processor"
+        assert artifact["product_type"] == ProductType.ANALYSIS_NC
+        assert artifact["producer"] == "processor"
 
     def test_get_artifact_file_path_is_absolute(self, repository, temp_base_dir):
         """Returned artifact file_path should be absolute."""
@@ -215,11 +215,11 @@ class TestArtifactRegistration:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         artifact = repository.get_artifact(artifact_id)
-        assert Path(artifact['file_path']).is_absolute()
+        assert Path(artifact["file_path"]).is_absolute()
 
 
 # =========================================================================
@@ -236,14 +236,14 @@ class TestWriteOperations:
             ds=sample_dataset,
             product_type=ProductType.ANALYSIS_NC,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         artifact = repository.get_artifact(artifact_id)
         assert artifact is not None
-        assert Path(artifact['file_path']).exists()
+        assert Path(artifact["file_path"]).exists()
 
-        filename = Path(artifact['file_path']).name
+        filename = Path(artifact["file_path"]).name
         assert "test1234" in filename  # run_id
         assert "analysis" in filename
         assert filename.endswith(".nc")
@@ -254,11 +254,11 @@ class TestWriteOperations:
             ds=sample_dataset,
             product_type=ProductType.GRIDDED_NC,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="loader"
+            producer="loader",
         )
 
         artifact = repository.get_artifact(artifact_id)
-        file_path = Path(artifact['file_path'])
+        file_path = Path(artifact["file_path"])
 
         assert "KDIX" in str(file_path)
         assert "gridnc" in str(file_path)
@@ -271,37 +271,34 @@ class TestWriteOperations:
             df=sample_dataframe,
             product_type=ProductType.CELLS_PARQUET,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         artifact = repository.get_artifact(artifact_id)
         assert artifact is not None
-        assert Path(artifact['file_path']).exists()
+        assert Path(artifact["file_path"]).exists()
 
-        metadata = json.loads(artifact['metadata'])
-        assert metadata['row_count'] == 3
+        metadata = json.loads(artifact["metadata"])
+        assert metadata["row_count"] == 3
 
     def test_get_or_create_cells_db(self, repository):
         """Should create cells database."""
         artifact_id = repository.get_or_create_cells_db(
-            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="processor"
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC), producer="processor"
         )
 
         artifact = repository.get_artifact(artifact_id)
         assert artifact is not None
-        assert artifact['product_type'] == ProductType.CELLS_DB
-        assert Path(artifact['file_path']).exists()
+        assert artifact["product_type"] == ProductType.CELLS_DB
+        assert Path(artifact["file_path"]).exists()
 
     def test_get_or_create_cells_db_reuse(self, repository):
         """Should reuse existing cells database."""
         id1 = repository.get_or_create_cells_db(
-            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="processor"
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC), producer="processor"
         )
         id2 = repository.get_or_create_cells_db(
-            scan_time=datetime(2026, 2, 11, 13, 0, 0, tzinfo=UTC),
-            producer="processor"
+            scan_time=datetime(2026, 2, 11, 13, 0, 0, tzinfo=UTC), producer="processor"
         )
 
         assert id1 == id2
@@ -309,18 +306,15 @@ class TestWriteOperations:
     def test_write_sqlite_table(self, repository, sample_dataframe):
         """Should write DataFrame to SQLite table."""
         db_artifact_id = repository.get_or_create_cells_db(
-            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="processor"
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC), producer="processor"
         )
 
         repository.write_sqlite_table(
-            df=sample_dataframe,
-            table_name='cells',
-            artifact_id=db_artifact_id
+            df=sample_dataframe, table_name="cells", artifact_id=db_artifact_id
         )
 
         artifact = repository.get_artifact(db_artifact_id)
-        with sqlite3.connect(artifact['file_path']) as conn:
+        with sqlite3.connect(artifact["file_path"]) as conn:
             df_read = pd.read_sql("SELECT * FROM cells", conn)
             assert len(df_read) == 3
 
@@ -339,11 +333,11 @@ class TestDataAccess:
             ds=sample_dataset,
             product_type=ProductType.ANALYSIS_NC,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         opened_ds = repository.open_dataset(artifact_id)
-        assert 'reflectivity' in opened_ds.data_vars
+        assert "reflectivity" in opened_ds.data_vars
         opened_ds.close()
 
     def test_open_dataset_invalid_type(self, repository, temp_base_dir):
@@ -355,7 +349,7 @@ class TestDataAccess:
             product_type=ProductType.CELLS_DB,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         with pytest.raises(ValueError, match="Cannot open as dataset"):
@@ -367,26 +361,23 @@ class TestDataAccess:
             df=sample_dataframe,
             product_type=ProductType.CELLS_PARQUET,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         opened_df = repository.open_table(artifact_id)
         assert len(opened_df) == 3
-        assert 'cell_label' in opened_df.columns
+        assert "cell_label" in opened_df.columns
 
     def test_open_table_sqlite(self, repository, sample_dataframe):
         """Should open SQLite table as DataFrame."""
         db_artifact_id = repository.get_or_create_cells_db(
-            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="processor"
+            scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC), producer="processor"
         )
         repository.write_sqlite_table(
-            df=sample_dataframe,
-            table_name='cells',
-            artifact_id=db_artifact_id
+            df=sample_dataframe, table_name="cells", artifact_id=db_artifact_id
         )
 
-        opened_df = repository.open_table(db_artifact_id, table_name='cells')
+        opened_df = repository.open_table(db_artifact_id, table_name="cells")
         assert len(opened_df) == 3
 
     def test_open_nonexistent_artifact(self, repository):
@@ -415,9 +406,7 @@ class TestLifecycle:
     def test_context_manager(self, temp_base_dir):
         """Should work as context manager."""
         with DataRepository(
-            run_id="ctx12345",
-            base_dir=temp_base_dir,
-            radar="KHTX"
+            run_id="ctx12345", base_dir=temp_base_dir, radar="KHTX"
         ) as repo:
             assert repo.run_id == "ctx12345"
 
@@ -426,7 +415,7 @@ class TestLifecycle:
         run_id = DataRepository.generate_run_id("KBOX")
         assert re.match(
             r"^\d{4}(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}-\d{4}-KBOX$",
-            run_id
+            run_id,
         )
 
 
@@ -442,7 +431,7 @@ class TestPathGeneration:
         """Should generate correct plot path."""
         path = repository.generate_plot_path(
             plot_type="reflectivity",
-            scan_time=datetime(2026, 2, 11, 12, 30, 45, tzinfo=UTC)
+            scan_time=datetime(2026, 2, 11, 12, 30, 45, tzinfo=UTC),
         )
 
         assert "KDIX" in str(path)
@@ -476,12 +465,12 @@ class TestGetLatest:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file_path,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         result = repository.get_latest(ProductType.ANALYSIS_NC)
         assert result is not None
-        assert result['artifact_id'] == artifact_id
+        assert result["artifact_id"] == artifact_id
 
     def test_get_latest_returns_most_recent(self, repository, temp_base_dir):
         """Should return artifact with most recent scan_time."""
@@ -496,23 +485,23 @@ class TestGetLatest:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         latest_id = repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 14, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file3,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         result = repository.get_latest(ProductType.ANALYSIS_NC)
-        assert result['artifact_id'] == latest_id
+        assert result["artifact_id"] == latest_id
 
     def test_get_latest_filters_by_product_type(self, repository, temp_base_dir):
         """Should only return artifacts of requested type."""
@@ -525,18 +514,18 @@ class TestGetLatest:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         repository.register_artifact(
             product_type=ProductType.GRIDDED_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 14, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         result = repository.get_latest(ProductType.ANALYSIS_NC)
-        assert result['artifact_id'] == analysis_id
-        assert result['product_type'] == ProductType.ANALYSIS_NC
+        assert result["artifact_id"] == analysis_id
+        assert result["product_type"] == ProductType.ANALYSIS_NC
 
 
 class TestGetAllSince:
@@ -553,13 +542,13 @@ class TestGetAllSince:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         results = repository.get_all_since(ProductType.ANALYSIS_NC)
@@ -578,24 +567,26 @@ class TestGetAllSince:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         id2 = repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         id3 = repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file3,
             scan_time=datetime(2026, 2, 11, 14, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
-        results = repository.get_all_since(ProductType.ANALYSIS_NC, since_artifact_id=id1)
+        results = repository.get_all_since(
+            ProductType.ANALYSIS_NC, since_artifact_id=id1
+        )
         assert len(results) == 2
-        result_ids = [r['artifact_id'] for r in results]
+        result_ids = [r["artifact_id"] for r in results]
         assert id2 in result_ids
         assert id3 in result_ids
         assert id1 not in result_ids
@@ -613,23 +604,23 @@ class TestGetAllSince:
             product_type=ProductType.ANALYSIS_NC,
             file_path=file1,
             scan_time=datetime(2026, 2, 11, 10, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         id2 = repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file2,
             scan_time=datetime(2026, 2, 11, 14, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
         id3 = repository.register_artifact(
             product_type=ProductType.ANALYSIS_NC,
             file_path=file3,
             scan_time=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
-            producer="test"
+            producer="test",
         )
 
         results = repository.get_all_since(ProductType.ANALYSIS_NC)
         # Should be in chronological order: id1 (10h), id3 (12h), id2 (14h)
-        assert results[0]['artifact_id'] == id1
-        assert results[1]['artifact_id'] == id3
-        assert results[2]['artifact_id'] == id2
+        assert results[0]["artifact_id"] == id1
+        assert results[1]["artifact_id"] == id3
+        assert results[2]["artifact_id"] == id2

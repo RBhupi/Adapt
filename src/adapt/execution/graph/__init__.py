@@ -7,4 +7,4 @@ from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.graph.node import Node
 
-__all__ = ['Node', 'GraphBuilder', 'GraphExecutor']
+__all__ = ["Node", "GraphBuilder", "GraphExecutor"]

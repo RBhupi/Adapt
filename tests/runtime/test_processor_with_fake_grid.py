@@ -22,7 +22,7 @@ def _fake_ds():
     return xr.Dataset(
         {
             "reflectivity": (("y", "x"), np.ones((4, 4))),
-            "cell_labels":  (("y", "x"), np.zeros((4, 4), dtype=int)),
+            "cell_labels": (("y", "x"), np.zeros((4, 4), dtype=int)),
         },
         coords={"x": np.arange(4), "y": np.arange(4)},
         attrs={"z_level_m": 2000},
@@ -34,8 +34,9 @@ def test_processor_accepts_fake_grid(
 ):
     """Processor handles a successful 2-frame pipeline result correctly."""
     in_q = queue.Queue()
-    proc = RadarProcessor(in_q, pipeline_config, pipeline_output_dirs,
-                          repository=test_repository)
+    proc = RadarProcessor(
+        in_q, pipeline_config, pipeline_output_dirs, repository=test_repository
+    )
 
     scan_times = [
         datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),
@@ -53,7 +54,7 @@ def test_processor_accepts_fake_grid(
 
     fake_multi_result = {
         "projected_ds": _fake_ds(),
-        "cell_stats":   pd.DataFrame(),
+        "cell_stats": pd.DataFrame(),
         "cell_adjacency": pd.DataFrame(),
     }
 

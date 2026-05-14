@@ -18,16 +18,17 @@ from adapt.configuration.schemas.user import UserConfig
 # Configuration Fixtures (Pydantic-based)
 # =============================================================================
 
+
 @pytest.fixture
 def param_config():
     """Expert configuration with all defaults.
-    
+
     Use this as the base for all test configs. Override specific values
     using user_config or by creating custom UserConfig instances.
     """
     # For tests, provide a default radar_id since it's required at runtime
     from adapt.configuration.schemas.param import ParamConfig as PC
-    
+
     config = PC()
     # Override radar with a test default (field name is 'radar', not 'radar_id')
     config.downloader.radar = "TEST_RADAR"
@@ -37,10 +38,10 @@ def param_config():
 @pytest.fixture
 def internal_config(param_config, temp_dir):
     """Fully validated runtime configuration (no overrides).
-    
+
     Use this when tests don't care about specific config values and just
     need a valid InternalConfig to pass to constructors.
-    
+
     Examples
     --------
     >>> def test_segmenter_init(internal_config):
@@ -54,10 +55,10 @@ def internal_config(param_config, temp_dir):
 @pytest.fixture
 def make_config(param_config, temp_dir):
     """Factory fixture for creating custom test configs.
-    
+
     Use this when you need to override specific values for a test.
     Returns a callable that accepts UserConfig-compatible kwargs.
-    
+
     Examples
     --------
     >>> def test_custom_threshold(make_config):
@@ -65,21 +66,23 @@ def make_config(param_config, temp_dir):
     ...     seg = RadarCellSegmenter(config)
     ...     assert seg.threshold == 35.0
     """
+
     def _make(**user_overrides):
         """Create InternalConfig with user overrides."""
         # Ensure base_dir is always present in tests
         if "base_dir" not in user_overrides:
             user_overrides["base_dir"] = str(temp_dir)
-            
+
         user = UserConfig(**user_overrides)
         return resolve_config(param_config, user, None)
-    
+
     return _make
 
 
 # =============================================================================
 # Directory Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def temp_dir():
@@ -92,6 +95,7 @@ def temp_dir():
 # =============================================================================
 # Per-Module Config Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def detection_module_config(internal_config):
@@ -122,6 +126,7 @@ def ingest_module_config(internal_config):
 def make_detection_config(make_config):
     def _make(**kw):
         return materialize_module_configs(make_config(**kw))["detection_config"]
+
     return _make
 
 
@@ -129,6 +134,7 @@ def make_detection_config(make_config):
 def make_analysis_config(make_config):
     def _make(**kw):
         return materialize_module_configs(make_config(**kw))["analysis_config"]
+
     return _make
 
 
@@ -136,6 +142,7 @@ def make_analysis_config(make_config):
 def make_projection_config(make_config):
     def _make(**kw):
         return materialize_module_configs(make_config(**kw))["projection_config"]
+
     return _make
 
 
@@ -143,6 +150,7 @@ def make_projection_config(make_config):
 def make_tracking_config(make_config):
     def _make(**kw):
         return materialize_module_configs(make_config(**kw))["tracking_config"]
+
     return _make
 
 
@@ -150,13 +158,14 @@ def make_tracking_config(make_config):
 def make_ingest_config(make_config):
     def _make(**kw):
         return materialize_module_configs(make_config(**kw))["ingest_config"]
+
     return _make
 
 
 @pytest.fixture
 def output_dirs(temp_dir):
     """Standard Adapt output directory structure.
-    
+
     Returns dict with keys: nexrad, gridnc, analysis, plots, logs
     All directories are created and cleaned up automatically.
     """
@@ -168,8 +177,8 @@ def output_dirs(temp_dir):
         "plots": temp_dir / "plots",
         "logs": temp_dir / "logs",
     }
-    
+
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
-    
+
     return dirs

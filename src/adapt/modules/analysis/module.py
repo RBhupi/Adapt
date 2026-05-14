@@ -33,13 +33,14 @@ from skimage.measure import regionprops
 
 from adapt.utils.time import normalize_time_scalar
 
-__all__ = ['RadarCellAnalyzer']
+__all__ = ["RadarCellAnalyzer"]
 
 logger = logging.getLogger(__name__)
 
 # Suppress HDF5 diagnostic error messages
 try:
     import h5py
+
     h5py._errors.silence_errors()
 except (ImportError, AttributeError):
     pass
@@ -47,57 +48,57 @@ except (ImportError, AttributeError):
 
 class RadarCellAnalyzer:
     """Extract geometric and statistical properties from segmented radar cells.
-    
+
     This class computes per-cell statistics from segmented radar data to create
     a DataFrame suitable for machine learning, statistical analysis, or database
     storage. Input is a 2D xarray.Dataset with cell labels and radar fields;
     output is a Pandas DataFrame with one row per cell.
-    
+
     Features computed per cell:
-    
+
     1. **Geometric Centroids** (in both pixel and geographic coordinates):
        - Geometric: center-of-mass of binary cell mask
        - Mass-weighted: reflectivity-weighted centroid
        - Max reflectivity: location of highest reflectivity
        - Projection: forward-projected motion centroids (0-5 steps)
-    
+
     2. **Area and Size**:
        - Cell area in km2 (computed from grid spacing)
        - Grid point count
-    
+
     3. **Radar Statistics** (per variable):
        - Mean, std, min, max, median
        - 25th/75th percentiles
        - Variables: reflectivity, velocity, spectrum width, differential phase, etc.
-    
+
     4. **Cell Motion**:
        - Heading vectors (from projector) within cell region
        - Heading direction and speed statistics
-    
+
     5. **Metadata**:
        - Scan time, z-level (altitude)
        - Dataset attributes preservation
-    
+
     Configuration
     ==============
     Config dict structure:
-    
+
     - `global` : dict, optional
         - `var_names` : dict
             Variable naming mapping (reflectivity, cell_labels, etc.)
-    
+
     - `radar_variables` : list, optional
         Whitelist of variables to analyze (default: common radar fields).
         Only variables in this list AND present in dataset are included.
-    
+
     - `exclude_fields` : list, optional
         Variables to skip (metadata, projection, etc.). Takes precedence over
         whitelist.
-    
+
     - `projector` : dict, optional
         - `max_projection_steps` : int, default 5
             Number of forward projections to extract
-    
+
     Notes
     -----
     - Not thread-safe; create separate instances for concurrent processing
@@ -106,7 +107,7 @@ class RadarCellAnalyzer:
     - Centroid naming is systematic: cell_centroid_<type>_{x,y,lat,lon}
     - Returns empty DataFrame if no cells found (all labels = 0)
     - All centroid coordinates are preserved in both coordinate systems
-    
+
     Examples
     --------
     >>> config = {"radar_variables": ["reflectivity", "velocity"]}
@@ -115,21 +116,21 @@ class RadarCellAnalyzer:
     >>> print(df.columns)  # centroid locations, area, reflectivity stats, etc.
     >>> print(len(df))  # number of cells in this frame
     """
-    
+
     def __init__(self, config):
         """Initialize analyzer with validated configuration.
-        
+
         Parameters
         ----------
         config : InternalConfig
             Fully validated runtime configuration.
-        
+
         Notes
         -----
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-        
+
         Examples
         --------
         >>> from adapt.configuration.schemas import resolve_config, ParamConfig
@@ -145,12 +146,12 @@ class RadarCellAnalyzer:
 
     def extract(self, ds: xr.Dataset, z_level: int = None) -> pd.DataFrame:
         """Extract geometric and statistical properties from all labeled cells.
-        
+
         Computes per-cell statistics including centroids (geometric, mass-weighted,
         max reflectivity, projected), area, and multi-variable radar statistics.
         Output is a Pandas DataFrame suitable for machine learning, statistical
         analysis, or database insertion (one row = one cell).
-        
+
         Parameters
         ----------
         ds : xr.Dataset
@@ -160,44 +161,44 @@ class RadarCellAnalyzer:
             - Coordinates: x, y (pixel coordinates)
             - Optional coordinates: lat, lon (geographic)
             - Attributes: z_level_m (altitude), time, radar metadata
-        
+
         z_level : int, optional
             Unused; kept for API compatibility with older versions.
-        
+
         Returns
         -------
         pd.DataFrame
             One row per cell (cells with label > 0). Columns include:
-            
+
             - **Cell Identity**:
               - `cell_label` : int, unique cell ID
-            
+
             - **Geometric Centroids** (all in both pixel and geographic coords):
               - `cell_centroid_geom_{x,y,lat,lon}` : Geometric centroid
               - `cell_centroid_mass_{x,y,lat,lon}` : Reflectivity-weighted
               - `cell_centroid_maxdbz_{x,y,lat,lon}` : Max reflectivity location
               - `cell_centroid_projection_0_{x,y,lat,lon}` to `_4_...` : Projections
-            
+
             - **Size**:
               - `cell_area_sqkm` : Cell area in square kilometers
               - `cell_area_npixels` : Number of grid points
-            
+
             - **Radar Statistics** (per variable: reflectivity, velocity, etc.):
               - `radar_<variable>_mean`, `_std`, `_min`, `_max`, `_median` : Aggregate stats
               - `radar_<variable>_p25`, `_p75` : Percentiles
-            
+
             - **Motion** (if heading vectors present):
               - `cell_heading_<stat>` : Direction/speed statistics
-            
+
             - **Metadata**:
               - `time` : Timestamp of radar scan
               - `z_level_m` : Altitude of this slice
-            
+
         Raises
         ------
         ValueError
             If cell_labels variable is not present in dataset.
-        
+
         Notes
         -----
         - Processing time: 100-500 ms per frame (depends on cell count)
@@ -207,7 +208,7 @@ class RadarCellAnalyzer:
         - All centroid coordinates are in both pixel (x, y) and geographic
           (latitude, longitude) systems for flexibility
         - Suitable for direct insertion into SQL database via to_sql()
-        
+
         Examples
         --------
         >>> analyzer = RadarCellAnalyzer(config)
@@ -235,8 +236,14 @@ class RadarCellAnalyzer:
                 continue
 
             props = self._extract_region_props(
-                region, label_array, refl, lat_grid, lon_grid,
-                ds, data_vars, pixel_area_km2
+                region,
+                label_array,
+                refl,
+                lat_grid,
+                lon_grid,
+                ds,
+                data_vars,
+                pixel_area_km2,
             )
             results.append(props)
 
@@ -271,7 +278,9 @@ class RadarCellAnalyzer:
                 f"Missing required labels variable '{labels_name}' for adjacency extraction"
             )
         if "time" not in ds.coords:
-            raise ValueError("Missing required coordinate 'time' for adjacency extraction")
+            raise ValueError(
+                "Missing required coordinate 'time' for adjacency extraction"
+            )
 
         labels = ds[labels_name].values
         if labels.ndim != 2:
@@ -281,19 +290,27 @@ class RadarCellAnalyzer:
 
         scan_time = str(ds.time.values)
         adjacency = self._compute_boundary_adjacency(
-            labels=labels, min_touching_pixels=int(self._adjacency_min_touching),
+            labels=labels,
+            min_touching_pixels=int(self._adjacency_min_touching),
         )
 
         if adjacency.empty:
             return pd.DataFrame(
-                columns=["time", "cell_label_a", "cell_label_b", "touching_boundary_pixels"]
+                columns=[
+                    "time",
+                    "cell_label_a",
+                    "cell_label_b",
+                    "touching_boundary_pixels",
+                ]
             )
 
         adjacency.insert(0, "time", scan_time)
         return adjacency
 
     @staticmethod
-    def _compute_boundary_adjacency(labels: np.ndarray, min_touching_pixels: int) -> pd.DataFrame:
+    def _compute_boundary_adjacency(
+        labels: np.ndarray, min_touching_pixels: int
+    ) -> pd.DataFrame:
         """Compute direct boundary adjacency between positive labels.
 
         Counts touching boundary pixel-edges using 4-neighborhood comparisons
@@ -301,7 +318,9 @@ class RadarCellAnalyzer:
         (a < b).
         """
         if min_touching_pixels < 1:
-            raise ValueError(f"min_touching_pixels must be >= 1, got {min_touching_pixels}")
+            raise ValueError(
+                f"min_touching_pixels must be >= 1, got {min_touching_pixels}"
+            )
 
         labels = labels.astype(np.int64, copy=False)
         counts: dict[tuple[int, int], int] = {}
@@ -358,12 +377,13 @@ class RadarCellAnalyzer:
 
     def _get_lat_lon_grids(self, ds):
         """Get lat/lon grids from dataset.
-        
+
         Returns lat/lon grids if available, otherwise returns placeholder grids
         of zeros (valid for in-memory analysis, invalid for geographic output).
         """
-        if (("lat" in ds.coords and "lon" in ds.coords)
-                or ("lat" in ds.data_vars and "lon" in ds.data_vars)):
+        if ("lat" in ds.coords and "lon" in ds.coords) or (
+            "lat" in ds.data_vars and "lon" in ds.data_vars
+        ):
             return ds["lat"].values, ds["lon"].values
         else:
             # No lat/lon available - use placeholder zeros
@@ -374,20 +394,26 @@ class RadarCellAnalyzer:
 
     def _get_valid_data_vars(self, ds):
         """Get list of radar variables suitable for statistics analysis.
-        
+
         Uses whitelist approach: only variables in radar_variables config
         that are actually present in the dataset are analyzed.
         """
         available_vars = []
         for var in self.radar_variables:
-            if (var in ds.data_vars and var not in self.exclude_fields
-                    and (ds[var].dims[-2:] == ("y", "x") or ds[var].dims[-3:] == ("z", "y", "x"))):
+            if (
+                var in ds.data_vars
+                and var not in self.exclude_fields
+                and (
+                    ds[var].dims[-2:] == ("y", "x")
+                    or ds[var].dims[-3:] == ("z", "y", "x")
+                )
+            ):
                 available_vars.append(var)
         return available_vars
 
     def _compute_geometric_centroid(self, mask, lat_grid=None, lon_grid=None):
         """Compute geometric centroid (center of mass) of cell region.
-        
+
         Parameters
         ----------
         mask : np.ndarray
@@ -396,7 +422,7 @@ class RadarCellAnalyzer:
             Latitude grid for geographic coordinates
         lon_grid : np.ndarray, optional
             Longitude grid for geographic coordinates
-            
+
         Returns
         -------
         dict
@@ -405,17 +431,17 @@ class RadarCellAnalyzer:
         centroid_y, centroid_x = center_of_mass(mask.astype(float))
         centroid_x = int(np.round(centroid_x))
         centroid_y = int(np.round(centroid_y))
-        
+
         result = {
             "centroid_x": centroid_x,
             "centroid_y": centroid_y,
         }
-        
+
         if lat_grid is not None and lon_grid is not None:
             lat, lon = self.get_lat_lon(centroid_x, centroid_y, lat_grid, lon_grid)
             result["centroid_lat"] = float(lat)
             result["centroid_lon"] = float(lon)
-        
+
         return result
 
     def _extract_field_values(self, ds, var, mask):
@@ -423,21 +449,30 @@ class RadarCellAnalyzer:
         data = ds[var].values
         return data[mask]
 
-    def _extract_region_props(self, region, label_array, refl, lat_grid, lon_grid,
-                              ds, data_vars, pixel_area_km2):
+    def _extract_region_props(
+        self,
+        region,
+        label_array,
+        refl,
+        lat_grid,
+        lon_grid,
+        ds,
+        data_vars,
+        pixel_area_km2,
+    ):
         """Extract properties for a single cell region.
-        
+
         Naming convention - ALL centroids stored in both XY and lat/lon:
         - cell_centroid_<type>_x, cell_centroid_<type>_y: Pixel coordinates
         - cell_centroid_<type>_lat, cell_centroid_<type>_lon: Geographic coordinates
-        
+
         Centroid types:
         - geom: Geometric centroid (center of mass of binary mask)
         - mass: Mass-weighted centroid (reflectivity weighted)
         - maxdbz: Maximum reflectivity centroid
         - registration_<idx>: Registration/projection centroids (index 0 = registration)
         - projection_<idx>: Forward projection centroids (indices 1+)
-        
+
         Other naming:
         - cell_heading_<stat>: Heading vector statistics within cell
         - radar_<variable>_<stat>: Radar variable statistics
@@ -456,7 +491,7 @@ class RadarCellAnalyzer:
 
         # === GEOMETRIC CENTROID (center of mass of binary mask) ===
         geom_props = self._compute_geometric_centroid(mask, lat_grid, lon_grid)
-        
+
         # === MAX REFLECTIVITY CENTROID ===
         centroid_maxdbz_y = int(np.round(max_coord[0]))
         centroid_maxdbz_x = int(np.round(max_coord[1]))
@@ -470,10 +505,14 @@ class RadarCellAnalyzer:
             valid_mask = np.isfinite(refl_cell)
             if np.any(valid_mask):
                 centroid_mass_y = int(
-                    np.round(np.average(y_indices[valid_mask], weights=refl_cell[valid_mask]))
+                    np.round(
+                        np.average(y_indices[valid_mask], weights=refl_cell[valid_mask])
+                    )
                 )
                 centroid_mass_x = int(
-                    np.round(np.average(x_indices[valid_mask], weights=refl_cell[valid_mask]))
+                    np.round(
+                        np.average(x_indices[valid_mask], weights=refl_cell[valid_mask])
+                    )
                 )
             else:
                 centroid_mass_y = int(np.round(geom_props["centroid_y"]))
@@ -482,7 +521,9 @@ class RadarCellAnalyzer:
             centroid_mass_y = int(np.round(geom_props["centroid_y"]))
             centroid_mass_x = int(np.round(geom_props["centroid_x"]))
 
-        lat_mass, lon_mass = self.get_lat_lon(centroid_mass_x, centroid_mass_y, lat_grid, lon_grid)
+        lat_mass, lon_mass = self.get_lat_lon(
+            centroid_mass_x, centroid_mass_y, lat_grid, lon_grid
+        )
 
         # Build properties dict with ALL centroids in both XY and lat/lon
         props = {
@@ -527,7 +568,7 @@ class RadarCellAnalyzer:
                 projections = ds["cell_projections"].values
                 if projections.ndim == 3:  # (offset, y, x)
                     projection_centroids = []
-                    
+
                     # Extract centroids for each projection step
                     for step_idx in range(
                         min(projections.shape[0], self.max_projection_steps + 1)
@@ -547,14 +588,24 @@ class RadarCellAnalyzer:
                         # Index 0 = Registration centroid (projection from previous to current)
                         if projection_centroids[0] is not None:
                             reg_cent = projection_centroids[0]
-                            props["cell_centroid_registration_x"] = reg_cent["centroid_x"]
-                            props["cell_centroid_registration_y"] = reg_cent["centroid_y"]
+                            props["cell_centroid_registration_x"] = reg_cent[
+                                "centroid_x"
+                            ]
+                            props["cell_centroid_registration_y"] = reg_cent[
+                                "centroid_y"
+                            ]
                             if "centroid_lat" in reg_cent:
-                                props["cell_centroid_registration_lat"] = reg_cent["centroid_lat"]
-                                props["cell_centroid_registration_lon"] = reg_cent["centroid_lon"]
+                                props["cell_centroid_registration_lat"] = reg_cent[
+                                    "centroid_lat"
+                                ]
+                                props["cell_centroid_registration_lon"] = reg_cent[
+                                    "centroid_lon"
+                                ]
 
                         # Indices 1+ = Forward projection centroids
-                        for proj_idx, proj_cent in enumerate(projection_centroids[1:], start=1):
+                        for proj_idx, proj_cent in enumerate(
+                            projection_centroids[1:], start=1
+                        ):
                             if proj_cent is not None:
                                 props[f"cell_centroid_projection{proj_idx}_x"] = (
                                     proj_cent["centroid_x"]
@@ -571,15 +622,21 @@ class RadarCellAnalyzer:
                                     )
 
                         # Also store full projection centroids as JSON for compact storage
-                        props["cell_projection_centroids_json"] = json.dumps([
-                            (
-                                {
-                                    k: v for k, v in c.items()
-                                    if c and not (isinstance(v, float) and np.isnan(v))
-                                } if c else None
-                            )
-                            for c in projection_centroids
-                        ])
+                        props["cell_projection_centroids_json"] = json.dumps(
+                            [
+                                (
+                                    {
+                                        k: v
+                                        for k, v in c.items()
+                                        if c
+                                        and not (isinstance(v, float) and np.isnan(v))
+                                    }
+                                    if c
+                                    else None
+                                )
+                                for c in projection_centroids
+                            ]
+                        )
             except Exception as e:
                 logger.debug("Could not extract projection centroids: %s", e)
 
@@ -599,7 +656,7 @@ class RadarCellAnalyzer:
     @staticmethod
     def get_lat_lon(ix, iy, lat_grid, lon_grid):
         """Extract lat–lon coordinates using integer pixel indices.
-        
+
         Parameters
         ----------
         ix : int
@@ -610,24 +667,24 @@ class RadarCellAnalyzer:
             2D latitude array [y, x]
         lon_grid : np.ndarray
             2D longitude array [y, x]
-            
+
         Returns
         -------
         tuple
             (lat, lon) as floats, or (np.nan, np.nan) if out of bounds or invalid
         """
         H, W = lat_grid.shape
-        
+
         # Validate bounds
         if not (0 <= ix < W and 0 <= iy < H):
             return np.nan, np.nan
-        
+
         # Extract lat/lon
         lat = lat_grid[iy, ix]
         lon = lon_grid[iy, ix]
-        
+
         # Check for masked or fill values
         if not (np.isfinite(lat) and np.isfinite(lon)):
             return np.nan, np.nan
-        
+
         return float(lat), float(lon)

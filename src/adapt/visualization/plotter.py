@@ -19,13 +19,14 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import contextlib
 
 import matplotlib.pyplot as plt
 
 try:
     import contextily as ctx
+
     CONTEXTILY_AVAILABLE = True
 except ImportError:
     CONTEXTILY_AVAILABLE = False
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
     from adapt.persistence import DataRepository
 
-__all__ = ['RadarPlotter', 'PlotterThread', 'PlotConsumer']
+__all__ = ["RadarPlotter", "PlotterThread", "PlotConsumer"]
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class RadarPlotter:
         )
         print(f"Plot saved to {plot_path}")
     """
-    
+
     def __init__(self, config: "InternalConfig" = None, show_plots: bool = False):
         """Initialize plotter.
 
@@ -97,24 +98,24 @@ class RadarPlotter:
         """
 
         self.config = config
-        
+
         if config:
             # Plot configuration
             self.dpi = config.visualization.dpi
             self.figsize = config.visualization.figsize
             self.output_format = config.visualization.output_format
-            
+
             # Basemap configuration
             self.use_basemap = config.visualization.use_basemap
             self.basemap_alpha = config.visualization.basemap_alpha
-            
+
             # Style configuration
             self.seg_linewidth = config.visualization.seg_linewidth
             self.proj_linewidth = config.visualization.proj_linewidth
             self.proj_alpha = config.visualization.proj_alpha
             self.flow_scale = config.visualization.flow_scale
             self.flow_subsample = config.visualization.flow_subsample
-            
+
             # Reflectivity thresholds
             self.min_refl = config.visualization.min_reflectivity
             self.vmin = config.visualization.refl_vmin
@@ -134,13 +135,15 @@ class RadarPlotter:
             self.min_refl = 0
             self.vmin = 10
             self.vmax = 50
-        
+
         if self.use_basemap and not CONTEXTILY_AVAILABLE:
             logger.warning("Basemap requested but contextily not installed")
             self.use_basemap = False
-        
-        logger.info(f"RadarPlotter initialized (format={self.output_format}, dpi={self.dpi})")
-    
+
+        logger.info(
+            f"RadarPlotter initialized (format={self.output_format}, dpi={self.dpi})"
+        )
+
     def _get_var_name(self, var_key: str, default: str) -> str:
         """Get variable name from config."""
         if self.config:
@@ -149,7 +152,7 @@ class RadarPlotter:
             elif var_key == "cell_labels":
                 return self.config.global_.var_names.cell_labels
         return default
-    
+
     def _get_coord_name(self, coord_key: str, default: str) -> str:
         """Get coordinate name from config."""
         if self.config:
@@ -161,50 +164,46 @@ class RadarPlotter:
             }
             return coord_map.get(coord_key, default)
         return default
-    
+
     def _extract_timestamp(self, ds: xr.Dataset) -> datetime:
         """Extract timestamp from dataset."""
-        if 'time' not in ds.coords:
+        if "time" not in ds.coords:
             return datetime.now(UTC)
-        
+
         try:
-            time_val = ds.coords['time'].values
+            time_val = ds.coords["time"].values
             if np.ndim(time_val) == 0:
                 return pd.Timestamp(time_val).to_pydatetime()
             else:
                 return pd.Timestamp(time_val[0]).to_pydatetime()
         except Exception:
             return datetime.now(UTC)
-    
+
     def _get_coordinates_km(self, ds: xr.Dataset) -> tuple[np.ndarray, np.ndarray]:
         """Get x, y coordinates in km."""
         y_name = self._get_coord_name("y", "y")
         x_name = self._get_coord_name("x", "x")
-        
+
         y_coords = ds[y_name].values / 1000  # Convert m to km
         x_coords = ds[x_name].values / 1000
-        
+
         return x_coords, y_coords
-    
+
     def _mask_reflectivity(self, refl: np.ndarray) -> np.ma.MaskedArray:
         """Apply thresholding to reflectivity."""
         refl_float = refl.astype(float)
         return np.ma.masked_where(
-            (refl_float < self.min_refl) | np.isnan(refl_float),
-            refl_float
+            (refl_float < self.min_refl) | np.isnan(refl_float), refl_float
         )
-    
+
     def _setup_figure(self) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
         """Create figure with two subplots."""
-        fig, (ax1, ax2) = plt.subplots(
-            1, 2,
-            figsize=self.figsize,
-            dpi=self.dpi
-        )
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=self.figsize, dpi=self.dpi)
         return fig, ax1, ax2
-    
+
     def _get_radar_location(self, ds: xr.Dataset) -> tuple[float, float]:
         """Extract radar lat/lon from dataset."""
+
         def extract_float(val):
             """Convert various types to Python float scalar."""
             if val is None:
@@ -223,7 +222,7 @@ class RadarPlotter:
                 elif len(val) > 0:
                     return float(val[0])
                 return 0.0
-            if hasattr(val, 'item'):
+            if hasattr(val, "item"):
                 return float(val.item())
             try:
                 return float(val)
@@ -231,266 +230,260 @@ class RadarPlotter:
                 return 0.0
 
         # Try multiple attribute names for latitude
-        lat_val = (ds.attrs.get('radar_latitude') or
-                   ds.attrs.get('origin_latitude') or
-                   ds.coords.get('radar_latitude'))
+        lat_val = (
+            ds.attrs.get("radar_latitude")
+            or ds.attrs.get("origin_latitude")
+            or ds.coords.get("radar_latitude")
+        )
         lat = extract_float(lat_val)
 
         # Try multiple attribute names for longitude
-        lon_val = (ds.attrs.get('radar_longitude') or
-                   ds.attrs.get('origin_longitude') or
-                   ds.coords.get('radar_longitude'))
+        lon_val = (
+            ds.attrs.get("radar_longitude")
+            or ds.attrs.get("origin_longitude")
+            or ds.coords.get("radar_longitude")
+        )
         lon = extract_float(lon_val)
 
         return lat, lon
-    
+
     def _add_basemap(
         self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
     ) -> None:
         """Add OpenStreetMap basemap to axis."""
         if not self.use_basemap or not CONTEXTILY_AVAILABLE:
             return
-        
+
         try:
             radar_lat, radar_lon = self._get_radar_location(ds)
-            
+
             # Set CRS for azimuthal equidistant (km units)
             crs_str = (
                 f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} "
                 "+x_0=0 +y_0=0 +datum=WGS84 +units=km"
             )
-            
+
             ax.set_xlim(x_coords.min(), x_coords.max())
             ax.set_ylim(y_coords.min(), y_coords.max())
-            
+
             ctx.add_basemap(
                 ax,
                 crs=crs_str,
                 source=ctx.providers.OpenStreetMap.Mapnik,
                 alpha=self.basemap_alpha,
                 attribution=False,
-                zoom='auto'
+                zoom="auto",
             )
         except Exception as e:
             logger.warning(f"Could not add basemap: {e}")
-    
+
     def _plot_reflectivity_field(
         self,
         ax: plt.Axes,
         refl: np.ma.MaskedArray,
         x_coords: np.ndarray,
-        y_coords: np.ndarray
+        y_coords: np.ndarray,
     ) -> matplotlib.image.AxesImage:
         """Plot reflectivity pcolormesh."""
         return ax.pcolormesh(
             x_coords,
             y_coords,
             refl,
-            cmap='ChaseSpectral',
+            cmap="ChaseSpectral",
             vmin=self.vmin,
             vmax=self.vmax,
-            shading='auto',
-            zorder=1
+            shading="auto",
+            zorder=1,
         )
-    
+
     def _add_colorbar(self, ax: plt.Axes, im: matplotlib.image.AxesImage) -> None:
         """Add colorbar to axis."""
-        plt.colorbar(im, ax=ax, label='Reflectivity (dBZ)', fraction=0.046, pad=0.04)
-    
+        plt.colorbar(im, ax=ax, label="Reflectivity (dBZ)", fraction=0.046, pad=0.04)
+
     def _plot_heading_yectors(
-        self,
-        ax: plt.Axes,
-        ds: xr.Dataset,
-        x_coords: np.ndarray,
-        y_coords: np.ndarray
+        self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
     ) -> bool:
         """Plot optical flow arrows on Panel 1."""
         heading_x_name = self._get_var_name("heading_x", "heading_x")
         heading_y_name = self._get_var_name("heading_y", "heading_y")
-        
+
         if heading_x_name not in ds.data_vars or heading_y_name not in ds.data_vars:
             return False
-        
+
         heading_x = ds[heading_x_name].values
         heading_y = ds[heading_y_name].values
-        
+
         if np.all(np.isnan(heading_x)):
             logger.debug("Optical flow not plotted (all NaN - first frame)")
             return False
-        
+
         # Subsample for clarity
         y_indices = np.arange(0, len(y_coords), self.flow_subsample)
         x_indices = np.arange(0, len(x_coords), self.flow_subsample)
-        
+
         Y_sub = y_coords[y_indices]
         X_sub = x_coords[x_indices]
         U_sub = heading_x[np.ix_(y_indices, x_indices)]
         V_sub = heading_y[np.ix_(y_indices, x_indices)]
-        
+
         X_mesh, Y_mesh = np.meshgrid(X_sub, Y_sub)
-        
+
         ax.quiver(
-            X_mesh, Y_mesh,
-            U_sub, V_sub,
-            color='#333333',
+            X_mesh,
+            Y_mesh,
+            U_sub,
+            V_sub,
+            color="#333333",
             alpha=0.7,
             scale=self.flow_scale,
-            scale_units='xy',
+            scale_units="xy",
             width=0.002,
             headwidth=3,
             headlength=4,
-            zorder=45
+            zorder=45,
         )
-        
+
         logger.info(
             f"Plotted optical flow field ({len(y_indices)}x{len(x_indices)} vectors, "
             f"scale={self.flow_scale})"
         )
         return True
-    
+
     def _plot_segmentation_contours(
         self,
         ax: plt.Axes,
         labels: xr.DataArray,
         x_coords: np.ndarray,
-        y_coords: np.ndarray
+        y_coords: np.ndarray,
     ) -> None:
         """Plot thin black contours for segmented cells."""
         labels_data = labels.values
         unique_labels = np.unique(labels_data)
         unique_labels = unique_labels[unique_labels > 0]
-        
+
         if len(unique_labels) == 0:
             return
-        
-        y_grid, x_grid = np.meshgrid(y_coords, x_coords, indexing='ij')
-        
+
+        y_grid, x_grid = np.meshgrid(y_coords, x_coords, indexing="ij")
+
         # Plot each cell individually with binary mask for clean contours
         for cell_id in unique_labels:
             cell_mask = (labels_data == cell_id).astype(float)
             ax.contour(
-                x_grid, y_grid,
+                x_grid,
+                y_grid,
                 cell_mask,
                 levels=[0.5],
-                colors='black',
+                colors="black",
                 linewidths=self.seg_linewidth,
                 alpha=0.9,
-                zorder=50
+                zorder=50,
             )
-    
+
     def _plot_projection_contours(
-        self,
-        ax: plt.Axes,
-        ds: xr.Dataset,
-        x_coords: np.ndarray,
-        y_coords: np.ndarray
+        self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
     ) -> None:
         """Plot thin transparent gray contours for projections."""
         proj_name = self._get_var_name("cell_projections", "cell_projections")
         frame_offset_name = self._get_coord_name("frame_offset", "frame_offset")
-        
+
         if proj_name not in ds.data_vars:
             return
-        
+
         proj_da = ds[proj_name]
         if frame_offset_name not in proj_da.dims:
             return
-        
-        y_grid, x_grid = np.meshgrid(y_coords, x_coords, indexing='ij')
-        
-        linestyles = ['dashed', 'dashdot', 'dotted']
+
+        y_grid, x_grid = np.meshgrid(y_coords, x_coords, indexing="ij")
+
+        linestyles = ["dashed", "dashdot", "dotted"]
         base_width = self.proj_linewidth
-        
+
         num_frames = len(proj_da[frame_offset_name])
-        
+
         # Skip frame_offset=0 (registration), plot future projections
         for proj_idx in range(1, num_frames):
             labels_proj = proj_da.isel({frame_offset_name: proj_idx}).values
-            
+
             if np.all(np.isnan(labels_proj)):
                 continue
-            
+
             unique_proj = np.unique(labels_proj)
             unique_proj = unique_proj[unique_proj > 0]
-            
+
             if len(unique_proj) == 0:
                 continue
-            
+
             style_idx = (proj_idx - 1) % len(linestyles)
             linewidth = base_width * (1 - 0.1 * (proj_idx - 1))
-            
+
             # Plot each cell individually to avoid matplotlib contour quirks
             for cell_id in unique_proj:
                 # Create binary mask for this specific cell
                 cell_mask = (labels_proj == cell_id).astype(float)
-                
+
                 # Plot single contour at 0.5 level (boundary of cell)
                 ax.contour(
-                    x_grid, y_grid,
+                    x_grid,
+                    y_grid,
                     cell_mask,
                     levels=[0.5],
-                    colors='#555555',
+                    colors="#555555",
                     linewidths=linewidth,
                     linestyles=linestyles[style_idx],
                     alpha=self.proj_alpha,
-                    zorder=40
+                    zorder=40,
                 )
-    
+
     def _format_axis(
-        self,
-        ax: plt.Axes,
-        title: str,
-        timestamp: datetime,
-        radar: str
+        self, ax: plt.Axes, title: str, timestamp: datetime, radar: str
     ) -> None:
         """Format axis with labels and title."""
-        ax.set_xlabel('Distance from Radar - X (km)', fontsize=11)
-        ax.set_ylabel('Distance from Radar - Y (km)', fontsize=11)
-        ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.5)
-        
-        time_str = timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+        ax.set_xlabel("Distance from Radar - X (km)", fontsize=11)
+        ax.set_ylabel("Distance from Radar - Y (km)", fontsize=11)
+        ax.grid(True, alpha=0.2, linestyle=":", linewidth=0.5)
+
+        time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
         ax.set_title(
-            f'{radar} {title}\n{time_str}',
-            fontsize=12,
-            fontweight='bold',
-            pad=10
+            f"{radar} {title}\n{time_str}", fontsize=12, fontweight="bold", pad=10
         )
-    
+
     def _add_flow_legend(self, ax: plt.Axes) -> None:
         """Add legend for optical flow vectors."""
         from matplotlib.lines import Line2D
-        
+
         legend_elements = [
-            Line2D([0], [0], marker='>', color='#333333',
-                   linewidth=0, markersize=4, alpha=0.7,
-                   label='Flow')
+            Line2D(
+                [0],
+                [0],
+                marker=">",
+                color="#333333",
+                linewidth=0,
+                markersize=4,
+                alpha=0.7,
+                label="Flow",
+            )
         ]
         ax.legend(
-            handles=legend_elements,
-            loc='upper right',
-            fontsize=10,
-            framealpha=0.9
+            handles=legend_elements, loc="upper right", fontsize=10, framealpha=0.9
         )
-    
+
     def _save_figure(self, fig: plt.Figure, output_path: Path) -> str:
         """Save figure in configured format."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Ensure correct extension
-        output_file = output_path.with_suffix(f'.{self.output_format}')
-        
+        output_file = output_path.with_suffix(f".{self.output_format}")
+
         fig.savefig(
-            output_file,
-            dpi=self.dpi,
-            bbox_inches='tight',
-            format=self.output_format
+            output_file, dpi=self.dpi, bbox_inches="tight", format=self.output_format
         )
-        
+
         plt.close(fig)
         logger.info(f"Plot saved: {output_file}")
-        
+
         return str(output_file)
-    
+
     def plot_reflectivity_with_cells(
         self,
         ds: xr.Dataset,
@@ -547,70 +540,72 @@ class RadarPlotter:
         File size: typically 200-500 KB per PNG at default DPI.
         """
         # Extract metadata
-        radar = ds.attrs.get('radar', 'RADAR')
+        radar = ds.attrs.get("radar", "RADAR")
         timestamp = self._extract_timestamp(ds)
-        
+
         # Get reflectivity
         refl_name = self._get_var_name("reflectivity", "reflectivity")
         refl = ds[refl_name].values
         refl_masked = self._mask_reflectivity(refl)
-        
+
         # Get coordinates
         x_coords, y_coords = self._get_coordinates_km(ds)
-        
+
         # Get labels
         labels_name = self._get_var_name("cell_labels", "cell_labels")
         labels = ds[labels_name]
-        
+
         # Create figure
         fig, ax1, ax2 = self._setup_figure()
-        
+
         # ============================================================
         # PANEL 1: Full Reflectivity + Flow Vectors
         # ============================================================
         im1 = self._plot_reflectivity_field(ax1, refl_masked, x_coords, y_coords)
         self._add_colorbar(ax1, im1)
         self._add_basemap(ax1, ds, x_coords, y_coords)
-        
+
         flow_plotted = self._plot_heading_yectors(ax1, ds, x_coords, y_coords)
-        
-        self._format_axis(ax1, 'Reflectivity + Motion Vectors', timestamp, radar)
-        
+
+        self._format_axis(ax1, "Reflectivity + Motion Vectors", timestamp, radar)
+
         if flow_plotted:
             self._add_flow_legend(ax1)
-        
+
         # ============================================================
         # PANEL 2: Segmented Cells + Projections
         # ============================================================
         # Mask reflectivity to show only segmented cells
         labels_mask = labels.values > 0
         refl_segmented = np.ma.masked_where(~labels_mask, refl)
-        refl_segmented = np.ma.masked_where(refl_segmented < self.min_refl, refl_segmented)
-        
+        refl_segmented = np.ma.masked_where(
+            refl_segmented < self.min_refl, refl_segmented
+        )
+
         im2 = self._plot_reflectivity_field(ax2, refl_segmented, x_coords, y_coords)
         self._add_colorbar(ax2, im2)
         self._add_basemap(ax2, ds, x_coords, y_coords)
-        
+
         # Add segmentation contours (thin black lines)
         self._plot_segmentation_contours(ax2, labels, x_coords, y_coords)
-        
+
         # Add projection contours (thin transparent gray lines)
         self._plot_projection_contours(ax2, ds, x_coords, y_coords)
-        
-        self._format_axis(ax2, 'Segmented Cells + Projections', timestamp, radar)
-        
+
+        self._format_axis(ax2, "Segmented Cells + Projections", timestamp, radar)
+
         # ============================================================
         # Save Figure
         # ============================================================
         plt.tight_layout()
-        
+
         if output_path is None:
             output_path = Path(
                 f"/tmp/radar_plot_{timestamp.strftime('%Y%m%d_%H%M%S')}.{self.output_format}"
             )
-        
+
         return self._save_figure(fig, Path(output_path))
-    
+
     def plot_from_netcdf(
         self,
         segmentation_nc: Path,
@@ -633,12 +628,12 @@ class RadarPlotter:
             Path to saved PNG file.
         """
         import time
-        
+
         max_retries = 5
         retry_delay = 0.1
-        
+
         seg_path = Path(segmentation_nc)
-        
+
         # Wait for file to exist
         for attempt in range(max_retries):
             if seg_path.exists() and seg_path.stat().st_size > 0:
@@ -647,7 +642,7 @@ class RadarPlotter:
                 time.sleep(retry_delay * (attempt + 1))
             else:
                 raise FileNotFoundError(f"File not found: {segmentation_nc}")
-        
+
         # Try to open NetCDF
         seg_ds = None
         for attempt in range(max_retries):
@@ -658,17 +653,19 @@ class RadarPlotter:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay * (attempt + 1))
                 else:
-                    raise RuntimeError(f"Failed to open NetCDF: {segmentation_nc}") from e
-        
+                    raise RuntimeError(
+                        f"Failed to open NetCDF: {segmentation_nc}"
+                    ) from e
+
         # Validate required variables
         labels_name = self._get_var_name("cell_labels", "cell_labels")
         refl_name = self._get_var_name("reflectivity", "reflectivity")
-        
+
         if labels_name not in seg_ds.data_vars:
             raise ValueError(f"Missing variable: {labels_name}")
         if refl_name not in seg_ds.data_vars:
             raise ValueError(f"Missing variable: {refl_name}")
-        
+
         try:
             plot_file = self.plot_reflectivity_with_cells(
                 ds=seg_ds,
@@ -677,7 +674,7 @@ class RadarPlotter:
             )
         finally:
             seg_ds.close()
-        
+
         return plot_file
 
 
@@ -729,9 +726,9 @@ class PlotterThread(threading.Thread):
         input_queue: queue.Queue,
         output_dirs: dict,
         config: "InternalConfig" = None,
-        file_tracker = None,
+        file_tracker=None,
         show_plots: bool = False,
-        name: str = 'RadarPlotter',
+        name: str = "RadarPlotter",
     ):
         """Initialize plotter thread.
 
@@ -751,18 +748,18 @@ class PlotterThread(threading.Thread):
             Thread name (default: 'RadarPlotter').
         """
         super().__init__(name=name, daemon=True)
-        
+
         self.input_queue = input_queue
         self.output_dirs = output_dirs
         self.config = config
         self.file_tracker = file_tracker
         self.show_plots = show_plots
-        
+
         self.plotter = RadarPlotter(config=config, show_plots=show_plots)
         self.running = True
-        
+
         logger.info(f"{name} initialized")
-    
+
     def run(self):
         """Process files from queue until shutdown signal received.
 
@@ -770,72 +767,75 @@ class PlotterThread(threading.Thread):
         Logs errors but continues processing on per-file failures.
         """
         logger.info(f"{self.name} started")
-        
+
         while self.running:
             try:
                 item = self.input_queue.get(timeout=1.0)
-                
+
                 if item is None:
                     logger.info(f"{self.name} received shutdown signal")
                     break
-                
+
                 self._process_item(item)
-                
+
             except queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"Error in {self.name}: {e}", exc_info=True)
-        
+
         logger.info(f"{self.name} stopped")
-    
+
     def _process_item(self, item: dict):
         """Process plot item from queue."""
         try:
-            seg_nc = item.get('segmentation_nc')
-            radar = item.get('radar', 'RADAR')
-            timestamp = item.get('timestamp', datetime.now(UTC))
-            
+            seg_nc = item.get("segmentation_nc")
+            radar = item.get("radar", "RADAR")
+            timestamp = item.get("timestamp", datetime.now(UTC))
+
             if not seg_nc or not Path(seg_nc).exists():
                 logger.warning(f"Segmentation file not found: {seg_nc}")
                 return
-            
+
             # Get file_id for tracker
-            file_id = Path(seg_nc).stem.replace('_analysis', '').replace('_segmentation', '')
-            
+            file_id = (
+                Path(seg_nc).stem.replace("_analysis", "").replace("_segmentation", "")
+            )
+
             # Use helper for consistent paths
             from adapt.configuration.schemas.directories import get_plot_path
-            
+
             output_path = get_plot_path(
                 output_dirs=self.output_dirs,
                 radar=radar,
-                plot_type='reflectivity',
-                scan_time=timestamp
+                plot_type="reflectivity",
+                scan_time=timestamp,
             )
-            
+
             plot_file = self.plotter.plot_from_netcdf(
                 segmentation_nc=seg_nc,
                 output_path=output_path,
             )
-            
+
             logger.info(f"{radar} plot saved: {plot_file}")
-            
+
             # Update tracker
             tracker = self.file_tracker
             if tracker and plot_file:
                 tracker.mark_stage_complete(file_id, "plotted", path=Path(plot_file))
-            
+
         except Exception as e:
             logger.exception(f"Error processing plot item: {e}")
-            
+
             tracker = self.file_tracker
             if tracker:
                 file_id = (
-                    Path(item.get('segmentation_nc', '')).stem
-                    .replace('_analysis', '').replace('_segmentation', '')
+                    Path(item.get("segmentation_nc", ""))
+                    .stem.replace("_analysis", "")
+                    .replace("_segmentation", "")
                 )
                 if file_id:
                     tracker.mark_stage_complete(file_id, "plotted", error=str(e))
-    
+
     def stop(self):
         """Signal thread to stop and join gracefully."""
         self.running = False
@@ -899,7 +899,7 @@ class PlotConsumer(threading.Thread):
         config: "InternalConfig" = None,
         poll_interval: float = 2.0,
         show_live: bool = False,
-        name: str = "PlotConsumer"
+        name: str = "PlotConsumer",
     ):
         """Initialize plot consumer.
 
@@ -939,9 +939,12 @@ class PlotConsumer(threading.Thread):
 
         # Import ProductType here to avoid circular imports
         from adapt.persistence import ProductType
+
         self._product_type = ProductType.ANALYSIS_NC
 
-        logger.info(f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})")
+        logger.info(
+            f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})"
+        )
 
     def run(self):
         """Main consumer loop - poll repository and generate plots."""
@@ -976,7 +979,7 @@ class PlotConsumer(threading.Thread):
                 # No artifacts yet
                 return
 
-            artifact_id = latest['artifact_id']
+            artifact_id = latest["artifact_id"]
 
             # Check if this is a new artifact
             if artifact_id == self._last_seen_id:
@@ -992,9 +995,9 @@ class PlotConsumer(threading.Thread):
 
     def _process_artifact(self, artifact: dict):
         """Generate plot from artifact."""
-        artifact_id = artifact['artifact_id']
-        Path(artifact['file_path'])
-        scan_time_str = artifact.get('scan_time')
+        artifact_id = artifact["artifact_id"]
+        Path(artifact["file_path"])
+        scan_time_str = artifact.get("scan_time")
 
         try:
             # Parse scan time
@@ -1008,7 +1011,7 @@ class PlotConsumer(threading.Thread):
 
             try:
                 # Generate output path
-                radar = artifact.get('radar', self.repository.radar)
+                radar = artifact.get("radar", self.repository.radar)
                 date_str = scan_time.strftime("%Y%m%d")
                 time_str = scan_time.strftime("%H%M%S")
 
@@ -1019,8 +1022,7 @@ class PlotConsumer(threading.Thread):
 
                 # Generate plot
                 plot_file = self.plotter.plot_reflectivity_with_cells(
-                    ds=ds,
-                    output_path=output_path
+                    ds=ds, output_path=output_path
                 )
 
                 self._processed_count += 1
@@ -1053,16 +1055,16 @@ class PlotConsumer(threading.Thread):
                 return
 
             # Load table
-            df = self.repository.open_table(cells_db['artifact_id'], table_name='cells')
+            df = self.repository.open_table(cells_db["artifact_id"], table_name="cells")
 
             if df.empty:
                 return
 
             # Get most recent cells (last scan)
-            if 'time' in df.columns:
-                df['time'] = pd.to_datetime(df['time'])
-                latest_time = df['time'].max()
-                recent = df[df['time'] == latest_time]
+            if "time" in df.columns:
+                df["time"] = pd.to_datetime(df["time"])
+                latest_time = df["time"].max()
+                recent = df[df["time"] == latest_time]
             else:
                 recent = df.tail(10)
 
@@ -1074,18 +1076,18 @@ class PlotConsumer(threading.Thread):
             # Build stats summary
             stats_parts = [f"Cells: {num_cells}"]
 
-            if 'cell_area_sqkm' in recent.columns:
-                area = recent['cell_area_sqkm'].dropna()
+            if "cell_area_sqkm" in recent.columns:
+                area = recent["cell_area_sqkm"].dropna()
                 if len(area) > 0:
                     stats_parts.append(f"Area: {area.mean():.1f} km2 (mean)")
 
-            if 'radar_reflectivity_mean' in recent.columns:
-                refl_mean = recent['radar_reflectivity_mean'].dropna()
+            if "radar_reflectivity_mean" in recent.columns:
+                refl_mean = recent["radar_reflectivity_mean"].dropna()
                 if len(refl_mean) > 0:
                     stats_parts.append(f"Refl: {refl_mean.mean():.1f} dBZ (mean)")
 
-            if 'radar_reflectivity_max' in recent.columns:
-                refl_max = recent['radar_reflectivity_max'].dropna()
+            if "radar_reflectivity_max" in recent.columns:
+                refl_max = recent["radar_reflectivity_max"].dropna()
                 if len(refl_max) > 0:
                     stats_parts.append(f"Max: {refl_max.max():.1f} dBZ")
 
@@ -1098,15 +1100,19 @@ class PlotConsumer(threading.Thread):
                 print("Latest Cell Statistics:")
                 print("-" * 60)
 
-                cols_to_show = ['cell_label', 'cell_area_sqkm',
-                               'radar_reflectivity_mean', 'radar_reflectivity_max']
+                cols_to_show = [
+                    "cell_label",
+                    "cell_area_sqkm",
+                    "radar_reflectivity_mean",
+                    "radar_reflectivity_max",
+                ]
                 cols_available = [c for c in cols_to_show if c in recent.columns]
 
                 if cols_available:
                     display_df = recent[cols_available].copy()
-                    display_df.columns = (
-                        ['Label', 'Area (km2)', 'Mean dBZ', 'Max dBZ'][:len(cols_available)]
-                    )
+                    display_df.columns = ["Label", "Area (km2)", "Mean dBZ", "Max dBZ"][
+                        : len(cols_available)
+                    ]
                     print(display_df.to_string(index=False))
 
                 print("=" * 60 + "\n")

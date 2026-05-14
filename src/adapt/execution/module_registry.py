@@ -68,9 +68,7 @@ class ModuleRegistry:
         """
         name = module_class.name
         if not name:
-            raise ValueError(
-                f"Cannot register module with empty name: {module_class}"
-            )
+            raise ValueError(f"Cannot register module with empty name: {module_class}")
         if name in self._modules:
             existing = self._modules[name]
             raise RuntimeError(

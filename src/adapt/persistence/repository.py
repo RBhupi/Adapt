@@ -34,13 +34,14 @@ from adapt.persistence.registry import RepositoryRegistry
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
 
-__all__ = ['DataRepository', 'ProductType']
+__all__ = ["DataRepository", "ProductType"]
 
 logger = logging.getLogger(__name__)
 
 
 class ProductType:
     """Artifact product type constants."""
+
     NEXRAD_RAW = "nexrad_raw"
     GRIDDED_NC = "gridded3d"  # Updated to match new catalog
     ANALYSIS_NC = "segmentation2d"  # Updated to match new catalog
@@ -163,33 +164,37 @@ class DataRepository:
         # Register radar in global registry (idempotent), including optional location metadata.
         radars = self.registry.list_radars()
         row = radars[radars["radar"] == self.radar] if not radars.empty else None
-        existing_lat = row.iloc[0]["location_lat"] if row is not None and not row.empty else None
-        existing_lon = row.iloc[0]["location_lon"] if row is not None and not row.empty else None
+        existing_lat = (
+            row.iloc[0]["location_lat"] if row is not None and not row.empty else None
+        )
+        existing_lon = (
+            row.iloc[0]["location_lon"] if row is not None and not row.empty else None
+        )
 
         # Do not use external lookup tables for location metadata. The pipeline
         # will populate location_lat/location_lon from the first ingested radar file.
         self.registry.register_radar(self.radar, lat=existing_lat, lon=existing_lon)
-        
+
         # Save runtime config to radar directory first
         config_path = None
         if self.config:
             config_file = self.catalog.radar_dir / f"config_run_{self.run_id}.json"
             if not config_file.exists():
                 config_json = self.config.model_dump_json()
-                with open(config_file, 'w') as f:
+                with open(config_file, "w") as f:
                     f.write(config_json)
                 logger.debug(f"Saved runtime config: {config_file}")
             config_path = str(config_file.relative_to(self.base_dir))
-        
+
         # Register this run in global registry
         mode = self.config.mode if self.config else "unknown"
-        
+
         self.registry.register_run(
             run_id=self.run_id,
             radar=self.radar,
             mode=mode,
             config_path=config_path,
-            repository_version="0.1.0"
+            repository_version="0.1.0",
         )
 
     # =========================================================================
@@ -202,7 +207,7 @@ class DataRepository:
         radar: str,
         scan_time: datetime | None,
         run_id: str,
-        content_hint: str = ""
+        content_hint: str = "",
     ) -> str:
         """Generate deterministic artifact ID from content metadata.
 
@@ -239,7 +244,7 @@ class DataRepository:
         scan_time: datetime | None = None,
         producer: str = "unknown",
         parent_ids: list[str] | None = None,
-        metadata: dict | None = None
+        metadata: dict | None = None,
     ) -> str:
         """Register an artifact in the RadarCatalog.
 
@@ -272,7 +277,7 @@ class DataRepository:
             radar=self.radar,
             scan_time=scan_time,
             run_id=self.run_id,
-            content_hint=str(file_path)
+            content_hint=str(file_path),
         )
 
         radar_dir = self.base_dir / self.radar
@@ -284,7 +289,7 @@ class DataRepository:
         file_size = file_path.stat().st_size if file_path.exists() else None
 
         catalog_metadata = metadata.copy()
-        catalog_metadata['producer'] = producer
+        catalog_metadata["producer"] = producer
 
         self.catalog.register_item(
             item_id=artifact_id,
@@ -328,20 +333,18 @@ class DataRepository:
         if artifact is None:
             raise ValueError(f"Artifact not found: {artifact_id}")
 
-        product_type = artifact['product_type']
+        product_type = artifact["product_type"]
         if product_type not in (ProductType.GRIDDED_NC, ProductType.ANALYSIS_NC):
             raise ValueError(f"Cannot open as dataset: {product_type}")
 
-        file_path = Path(artifact['file_path'])
+        file_path = Path(artifact["file_path"])
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
         return xr.open_dataset(file_path)
 
     def open_table(
-        self,
-        artifact_id: str,
-        table_name: str | None = None
+        self, artifact_id: str, table_name: str | None = None
     ) -> pd.DataFrame:
         """Open SQLite or Parquet artifact as DataFrame.
 
@@ -367,8 +370,8 @@ class DataRepository:
         if artifact is None:
             raise ValueError(f"Artifact not found: {artifact_id}")
 
-        product_type = artifact['product_type']
-        file_path = Path(artifact['file_path'])
+        product_type = artifact["product_type"]
+        file_path = Path(artifact["file_path"])
 
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -376,7 +379,7 @@ class DataRepository:
         if product_type == ProductType.CELLS_PARQUET:
             return pd.read_parquet(file_path)
         elif product_type == ProductType.CELLS_DB:
-            table_name = table_name or 'cells'
+            table_name = table_name or "cells"
             with sqlite3.connect(str(file_path)) as conn:
                 return pd.read_sql(f"SELECT * FROM {table_name}", conn)
         else:
@@ -387,7 +390,7 @@ class DataRepository:
         product_type: str | None = None,
         time_range: tuple[datetime, datetime] | None = None,
         radar: str | None = None,
-        limit: int | None = None
+        limit: int | None = None,
     ) -> list[dict]:
         """Query artifacts by criteria.
 
@@ -423,11 +426,7 @@ class DataRepository:
 
         return [self._normalize_item(row) for _, row in df.iterrows()]
 
-    def get_latest(
-        self,
-        product_type: str,
-        radar: str | None = None
-    ) -> dict | None:
+    def get_latest(self, product_type: str, radar: str | None = None) -> dict | None:
         """Get the most recent artifact of a given type.
 
         Parameters
@@ -449,7 +448,7 @@ class DataRepository:
         self,
         product_type: str,
         since_artifact_id: str | None = None,
-        radar: str | None = None
+        radar: str | None = None,
     ) -> list[dict]:
         """Get all artifacts of a type created after a given artifact.
 
@@ -501,7 +500,7 @@ class DataRepository:
         Resolves relative file_path to absolute, aliases item_id → artifact_id,
         and hoists producer from the metadata JSON for backward compatibility.
         """
-        d = item.to_dict() if hasattr(item, 'to_dict') else dict(item)
+        d = item.to_dict() if hasattr(item, "to_dict") else dict(item)
         # Resolve relative path stored in catalog to absolute
         rel = d.get("file_path", "")
         if rel and not Path(rel).is_absolute():
@@ -535,7 +534,7 @@ class DataRepository:
         producer: str,
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
-        filename_stem: str | None = None
+        filename_stem: str | None = None,
     ) -> str:
         """Write xarray Dataset to NetCDF and register artifact.
 
@@ -565,9 +564,7 @@ class DataRepository:
         """
         # Generate output path
         output_path = self._generate_netcdf_path(
-            product_type=product_type,
-            scan_time=scan_time,
-            filename_stem=filename_stem
+            product_type=product_type, scan_time=scan_time, filename_stem=filename_stem
         )
 
         # Atomic write
@@ -580,7 +577,7 @@ class DataRepository:
             scan_time=scan_time,
             producer=producer,
             parent_ids=parent_ids,
-            metadata=metadata
+            metadata=metadata,
         )
 
     def write_parquet(
@@ -591,7 +588,7 @@ class DataRepository:
         producer: str,
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
-        filename_stem: str | None = None
+        filename_stem: str | None = None,
     ) -> str:
         """Write DataFrame to Parquet and register artifact.
 
@@ -619,8 +616,7 @@ class DataRepository:
         """
         # Generate output path
         output_path = self._generate_parquet_path(
-            scan_time=scan_time,
-            filename_stem=filename_stem
+            scan_time=scan_time, filename_stem=filename_stem
         )
 
         # Atomic write
@@ -628,7 +624,7 @@ class DataRepository:
 
         # Update metadata with row count
         metadata = metadata or {}
-        metadata['row_count'] = len(df)
+        metadata["row_count"] = len(df)
 
         # Register artifact
         return self.register_artifact(
@@ -637,7 +633,7 @@ class DataRepository:
             scan_time=scan_time,
             producer=producer,
             parent_ids=parent_ids,
-            metadata=metadata
+            metadata=metadata,
         )
 
     def write_analysis2d_parquet(
@@ -646,7 +642,7 @@ class DataRepository:
         scan_time: datetime,
         producer: str = "processor",
         parent_ids: list[str] | None = None,
-        metadata: dict | None = None
+        metadata: dict | None = None,
     ) -> str:
         """Write analysis DataFrame to Parquet file (one per run_id).
 
@@ -672,12 +668,12 @@ class DataRepository:
             Registered item ID from RadarCatalog
         """
         # Ensure required columns
-        if 'radar' not in df.columns:
-            df['radar'] = self.radar
-        if 'run_id' not in df.columns:
-            df['run_id'] = self.run_id
-        if 'scan_time' not in df.columns:
-            df['scan_time'] = scan_time
+        if "radar" not in df.columns:
+            df["radar"] = self.radar
+        if "run_id" not in df.columns:
+            df["run_id"] = self.run_id
+        if "scan_time" not in df.columns:
+            df["scan_time"] = scan_time
 
         # Generate parquet file path - one file per run_id
         analysis_dir = self.catalog.radar_dir / "analysis"
@@ -700,14 +696,18 @@ class DataRepository:
 
                 # Ensure datetime columns are properly typed (fix concat type coercion)
                 datetime_cols = [
-                    'time', 'scan_time', 'start_time', 'end_time',
-                    'time_volume_start', 'time_volume_end',
+                    "time",
+                    "scan_time",
+                    "start_time",
+                    "end_time",
+                    "time_volume_start",
+                    "time_volume_end",
                 ]
                 for col in datetime_cols:
                     if col in combined_df.columns:
                         combined_df[col] = pd.to_datetime(
                             combined_df[col],
-                            errors='coerce',
+                            errors="coerce",
                             utc=True,
                         ).dt.tz_convert(None)
 
@@ -719,27 +719,28 @@ class DataRepository:
             # Write or overwrite parquet file
             pq.write_table(table, parquet_path)
             logger.debug(f"Wrote {len(table)} total rows to {parquet_path}")
-            
+
         except ImportError:
             # Fallback to pandas (less efficient but works)
             if parquet_path.exists():
                 existing_df = pd.read_parquet(parquet_path)
                 df = pd.concat([existing_df, df], ignore_index=True)
                 logger.debug(f"Appended {len(df)} rows to {parquet_path}")
-            
-            df.to_parquet(parquet_path, engine='pyarrow', index=False)
+
+            df.to_parquet(parquet_path, engine="pyarrow", index=False)
             logger.debug(f"Wrote {len(df)} total rows to {parquet_path}")
 
         # Register in new catalog system
         item_metadata = metadata or {}
-        item_metadata['row_count'] = len(df)
-        item_metadata['num_cells'] = len(df)
-        item_metadata['producer'] = producer  # Store producer in metadata
-        
+        item_metadata["row_count"] = len(df)
+        item_metadata["num_cells"] = len(df)
+        item_metadata["producer"] = producer  # Store producer in metadata
+
         # Generate unique item ID
         import uuid
+
         item_id = str(uuid.uuid4())[:16]
-        
+
         item_id = self.catalog.register_item(
             item_id=item_id,
             run_id=self.run_id,
@@ -749,9 +750,9 @@ class DataRepository:
             processing_stage="analysis",
             status="complete",
             parent_ids=parent_ids or [],
-            metadata=item_metadata
+            metadata=item_metadata,
         )
-        
+
         return item_id
 
     def write_sqlite_table(
@@ -759,7 +760,7 @@ class DataRepository:
         df: pd.DataFrame,
         table_name: str,
         artifact_id: str,
-        if_exists: str = 'append'
+        if_exists: str = "append",
     ) -> None:
         """Write DataFrame to SQLite table within an existing artifact.
 
@@ -783,11 +784,11 @@ class DataRepository:
         if artifact is None:
             raise ValueError(f"Artifact not found: {artifact_id}")
 
-        file_path = Path(artifact['file_path'])
+        file_path = Path(artifact["file_path"])
 
         with sqlite3.connect(str(file_path)) as conn:
             # If appending, perform schema migration for missing columns
-            if if_exists == 'append':
+            if if_exists == "append":
                 self._migrate_table_schema(conn, table_name, df)
 
             df.to_sql(table_name, conn, if_exists=if_exists, index=False)
@@ -795,10 +796,7 @@ class DataRepository:
         logger.debug(f"Wrote {len(df)} rows to {table_name} in {artifact_id}")
 
     def _migrate_table_schema(
-        self,
-        conn: sqlite3.Connection,
-        table_name: str,
-        df: pd.DataFrame
+        self, conn: sqlite3.Connection, table_name: str, df: pd.DataFrame
     ) -> None:
         """Add missing columns to existing table before append.
 
@@ -815,7 +813,7 @@ class DataRepository:
         # Check if table exists
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,)
+            (table_name,),
         )
         if cursor.fetchone() is None:
             # Table doesn't exist yet, will be created by to_sql
@@ -836,15 +834,21 @@ class DataRepository:
         for col in missing_columns:
             sql_type = self._infer_sql_type(col)
             try:
-                conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}')
-                logger.debug(f"Added column '{col}' ({sql_type}) to table '{table_name}'")
+                conn.execute(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}'
+                )
+                logger.debug(
+                    f"Added column '{col}' ({sql_type}) to table '{table_name}'"
+                )
             except sqlite3.OperationalError as e:
                 # Column might already exist (race condition)
                 if "duplicate column name" not in str(e).lower():
                     raise
 
         conn.commit()
-        logger.info(f"Schema migration: added {len(missing_columns)} columns to '{table_name}'")
+        logger.info(
+            f"Schema migration: added {len(missing_columns)} columns to '{table_name}'"
+        )
 
     @staticmethod
     def _infer_sql_type(column_name: str) -> str:
@@ -863,39 +867,36 @@ class DataRepository:
         col = column_name.lower()
 
         # Integer types
-        if col.endswith('_x') or col.endswith('_y'):
-            return 'INTEGER'
-        if col == 'cell_label':
-            return 'INTEGER NOT NULL'
+        if col.endswith("_x") or col.endswith("_y"):
+            return "INTEGER"
+        if col == "cell_label":
+            return "INTEGER NOT NULL"
 
         # Real/float types
-        if col.endswith('_lat') or col.endswith('_lon'):
-            return 'REAL'
-        if col.startswith('radar_'):
-            return 'REAL'
-        if col.endswith(('_mean', '_min', '_max', '_sqkm')):
-            return 'REAL'
-        if 'heading' in col:
-            return 'REAL'
-        if 'area' in col:
-            return 'REAL'
+        if col.endswith("_lat") or col.endswith("_lon"):
+            return "REAL"
+        if col.startswith("radar_"):
+            return "REAL"
+        if col.endswith(("_mean", "_min", "_max", "_sqkm")):
+            return "REAL"
+        if "heading" in col:
+            return "REAL"
+        if "area" in col:
+            return "REAL"
 
         # Timestamp types
-        if col.startswith('time'):
-            return 'TIMESTAMP'
+        if col.startswith("time"):
+            return "TIMESTAMP"
 
         # Text types
-        if col.endswith('_json'):
-            return 'TEXT'
+        if col.endswith("_json"):
+            return "TEXT"
 
         # Default to TEXT for safety
-        return 'TEXT'
+        return "TEXT"
 
     def get_or_create_cells_db(
-        self,
-        scan_time: datetime,
-        producer: str,
-        parent_ids: list[str] | None = None
+        self, scan_time: datetime, producer: str, parent_ids: list[str] | None = None
     ) -> str:
         """Get existing cells database or create new one.
 
@@ -917,7 +918,7 @@ class DataRepository:
         existing = self.query(product_type=ProductType.CELLS_DB)
 
         if existing:
-            return existing[0]['artifact_id']
+            return existing[0]["artifact_id"]
 
         # Create new
         output_path = self._generate_sqlite_path(scan_time)
@@ -931,7 +932,7 @@ class DataRepository:
             scan_time=scan_time,
             producer=producer,
             parent_ids=parent_ids or [],
-            metadata={}
+            metadata={},
         )
 
     # =========================================================================
@@ -939,10 +940,7 @@ class DataRepository:
     # =========================================================================
 
     def _generate_netcdf_path(
-        self,
-        product_type: str,
-        scan_time: datetime,
-        filename_stem: str | None = None
+        self, product_type: str, scan_time: datetime, filename_stem: str | None = None
     ) -> Path:
         """Generate NetCDF output path with run_id suffix.
 
@@ -967,9 +965,7 @@ class DataRepository:
         return base_dir / filename
 
     def _generate_parquet_path(
-        self,
-        scan_time: datetime,
-        filename_stem: str | None = None
+        self, scan_time: datetime, filename_stem: str | None = None
     ) -> Path:
         """Generate Parquet output path with run_id suffix.
 
@@ -1000,11 +996,7 @@ class DataRepository:
         filename = f"{self.radar}_{self.run_id}_cells.db"
         return base_dir / filename
 
-    def generate_plot_path(
-        self,
-        plot_type: str,
-        scan_time: datetime
-    ) -> Path:
+    def generate_plot_path(self, plot_type: str, scan_time: datetime) -> Path:
         """Generate plot output path with run_id suffix.
 
         Pattern: root_dir/RADAR_ID/plots/YYYYMMDD/{radar}_{plot_type}_{HHMMSS}_{run_id}.png
@@ -1027,12 +1019,12 @@ class DataRepository:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write to temp file
-        fd, temp_path = tempfile.mkstemp(suffix='.nc', dir=output_path.parent)
+        fd, temp_path = tempfile.mkstemp(suffix=".nc", dir=output_path.parent)
         os.close(fd)
 
         try:
             encoding = {var: {"zlib": True, "complevel": 4} for var in ds.data_vars}
-            ds.to_netcdf(temp_path, encoding=encoding, engine='netcdf4')
+            ds.to_netcdf(temp_path, encoding=encoding, engine="netcdf4")
 
             # Atomic rename
             shutil.move(temp_path, output_path)
@@ -1048,15 +1040,17 @@ class DataRepository:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write to temp file
-        fd, temp_path = tempfile.mkstemp(suffix='.parquet', dir=output_path.parent)
+        fd, temp_path = tempfile.mkstemp(suffix=".parquet", dir=output_path.parent)
         os.close(fd)
 
         try:
-            compression = 'snappy'
-            if self.config and hasattr(self.config, 'output'):
-                compression = getattr(self.config.output, 'compression', 'snappy')
+            compression = "snappy"
+            if self.config and hasattr(self.config, "output"):
+                compression = getattr(self.config.output, "compression", "snappy")
 
-            df.to_parquet(temp_path, engine='pyarrow', compression=compression, index=False)
+            df.to_parquet(
+                temp_path, engine="pyarrow", compression=compression, index=False
+            )
 
             # Atomic rename
             shutil.move(temp_path, output_path)

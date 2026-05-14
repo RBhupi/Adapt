@@ -13,12 +13,15 @@ def write_fake_segmentation_netcdf(
     }
 
     if with_labels:
-        labels = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [0, 0, 2, 2],
-            [0, 0, 2, 2],
-        ], dtype="int32")
+        labels = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 2, 2],
+                [0, 0, 2, 2],
+            ],
+            dtype="int32",
+        )
         data_vars["cell_labels"] = (("y", "x"), labels)
 
     ds = xr.Dataset(
@@ -30,7 +33,7 @@ def write_fake_segmentation_netcdf(
         attrs={
             "z_level_m": 2000,
             "radar_id": "TEST",
-        }
+        },
     )
 
     path.parent.mkdir(parents=True, exist_ok=True)

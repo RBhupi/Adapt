@@ -8,4 +8,4 @@
 # Consider removing these exports or the classes themselves.
 from .plotter import PlotterThread, RadarPlotter
 
-__all__ = ['RadarPlotter', 'PlotterThread']
+__all__ = ["RadarPlotter", "PlotterThread"]

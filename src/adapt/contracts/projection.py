@@ -28,8 +28,14 @@ def assert_projected(ds: xr.Dataset, max_steps: int = 5) -> None:
     ContractViolation
         If any invariant is violated
     """
-    require("heading_x" in ds.data_vars, "Projection contract violated: missing 'heading_x' ")
-    require("heading_y" in ds.data_vars, "Projection contract violated: missing 'heading_y' ")
+    require(
+        "heading_x" in ds.data_vars,
+        "Projection contract violated: missing 'heading_x' ",
+    )
+    require(
+        "heading_y" in ds.data_vars,
+        "Projection contract violated: missing 'heading_y' ",
+    )
 
     if "cell_projections" in ds.data_vars:
         projections = ds["cell_projections"]

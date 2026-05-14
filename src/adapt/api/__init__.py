@@ -5,4 +5,4 @@
 
 from adapt.api.client import DataClient
 
-__all__ = ['DataClient']
+__all__ = ["DataClient"]

@@ -20,13 +20,16 @@ from adapt.configuration.schemas.base import AdaptBaseModel
 # Nested Configuration Models (Runtime)
 # =============================================================================
 
+
 class InternalReaderConfig(AdaptBaseModel):
     """Runtime reader configuration."""
+
     file_format: Literal["nexrad_archive"]
 
 
 class InternalDownloaderConfig(AdaptBaseModel):
     """Runtime downloader configuration."""
+
     mode: Literal["realtime", "historical"]
     radar: str
     output_dir: str
@@ -40,6 +43,7 @@ class InternalDownloaderConfig(AdaptBaseModel):
 
 class InternalRegridderConfig(AdaptBaseModel):
     """Runtime regridding configuration."""
+
     grid_shape: tuple[int, int, int]
     grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
     roi_func: Literal["dist_beam", "dist"]
@@ -50,6 +54,7 @@ class InternalRegridderConfig(AdaptBaseModel):
 
 class InternalSegmenterConfig(AdaptBaseModel):
     """Runtime segmentation configuration."""
+
     method: Literal["threshold"]
     threshold: float
     min_cellsize_gridpoint: int
@@ -61,12 +66,14 @@ class InternalSegmenterConfig(AdaptBaseModel):
 
 class InternalVarNamesConfig(AdaptBaseModel):
     """Runtime variable name mappings."""
+
     reflectivity: str
     cell_labels: str
 
 
 class InternalCoordNamesConfig(AdaptBaseModel):
     """Runtime coordinate name mappings."""
+
     time: str
     z: str
     y: str
@@ -75,6 +82,7 @@ class InternalCoordNamesConfig(AdaptBaseModel):
 
 class InternalGlobalConfig(AdaptBaseModel):
     """Runtime global settings."""
+
     z_level: float
     var_names: InternalVarNamesConfig
     coord_names: InternalCoordNamesConfig
@@ -82,6 +90,7 @@ class InternalGlobalConfig(AdaptBaseModel):
 
 class InternalFlowParamsConfig(AdaptBaseModel):
     """Runtime optical flow parameters."""
+
     pyr_scale: float
     levels: int
     winsize: int
@@ -93,6 +102,7 @@ class InternalFlowParamsConfig(AdaptBaseModel):
 
 class InternalProjectorConfig(AdaptBaseModel):
     """Runtime projection configuration."""
+
     method: str
     max_time_interval_minutes: int
     max_projection_steps: int = Field(ge=1, le=10)  # Capped at 10
@@ -104,6 +114,7 @@ class InternalProjectorConfig(AdaptBaseModel):
 
 class InternalAnalyzerConfig(AdaptBaseModel):
     """Runtime analysis configuration."""
+
     radar_variables: list[str]
     exclude_fields: list[str]
     adjacency_min_touching_boundary_pixels: int = Field(ge=1)
@@ -111,8 +122,10 @@ class InternalAnalyzerConfig(AdaptBaseModel):
 
 class InternalTrackerConfig(AdaptBaseModel):
     """Runtime tracking configuration."""
+
     class InternalCellUidConfig(AdaptBaseModel):
         """Runtime cell UID configuration."""
+
         time_step_s: int = Field(ge=1)
         latlon_step_deg: float = Field(gt=0.0)
         area_step_km2: float = Field(gt=0.0)
@@ -129,6 +142,7 @@ class InternalTrackerConfig(AdaptBaseModel):
 
 class InternalVisualizationConfig(AdaptBaseModel):
     """Runtime visualization settings."""
+
     enabled: bool
     dpi: int
     figsize: tuple[float, float]
@@ -147,16 +161,19 @@ class InternalVisualizationConfig(AdaptBaseModel):
 
 class InternalOutputConfig(AdaptBaseModel):
     """Runtime output configuration."""
+
     compression: Literal["snappy", "gzip", "lz4", "none"]
 
 
 class InternalLoggingConfig(AdaptBaseModel):
     """Runtime logging configuration."""
+
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 class InternalProcessorConfig(AdaptBaseModel):
     """Runtime processor configuration."""
+
     max_history: int = Field(default=2, ge=2, le=10)  # Frame history for optical flow
     min_file_size: int = Field(default=5000, ge=1000)  # Minimum file size in bytes
     # Database filename pattern
@@ -167,35 +184,37 @@ class InternalProcessorConfig(AdaptBaseModel):
 # Main InternalConfig
 # =============================================================================
 
+
 class InternalConfig(AdaptBaseModel):
     """Authoritative runtime configuration.
-    
+
     This is the ONLY configuration schema that processing code sees.
     It is fully validated, immutable, and contains explicit values for
     all parameters (no None for fields that runtime depends on).
-    
+
     Usage
     -----
     Runtime modules receive InternalConfig and access fields directly:
-    
+
         def __init__(self, config: InternalConfig):
             self.threshold = config.segmenter.threshold  # NOT .get()
             self.z_level = config.global_.z_level
-    
+
     Rules
     -----
     - NO .get() calls
     - NO fallback defaults
     - NO type checking
     - NO validation
-    
+
     All of that happens during config resolution, not in runtime code.
     """
-    
+
     mode: Literal["realtime", "historical"]
     base_dir: str
     run_id: str | None = Field(
-        default=None, description="Unique run identifier generated during initialization"
+        default=None,
+        description="Unique run identifier generated during initialization",
     )
     output_dirs: dict[str, str] | None = Field(
         default=None, description="Output directory paths from initialization"
@@ -212,9 +231,9 @@ class InternalConfig(AdaptBaseModel):
     output: InternalOutputConfig
     logging: InternalLoggingConfig
     processor: InternalProcessorConfig = Field(default_factory=InternalProcessorConfig)
-    
+
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
         validate_assignment=True,
         use_enum_values=True,
         str_strip_whitespace=True,

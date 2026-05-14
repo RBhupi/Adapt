@@ -86,8 +86,7 @@ def test_module_does_not_import_other_modules(pkg: str) -> None:
 
     assert not violations, (
         f"\n{pkg} imports from other scientific modules — "
-        "shared types belong in adapt.contracts:\n"
-        + "\n".join(violations)
+        "shared types belong in adapt.contracts:\n" + "\n".join(violations)
     )
 
 
@@ -115,6 +114,5 @@ def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
 
     assert not violations, (
         f"\n{pkg} imports from layers above it — "
-        "modules must only depend on contracts/ and utils/:\n"
-        + "\n".join(violations)
+        "modules must only depend on contracts/ and utils/:\n" + "\n".join(violations)
     )

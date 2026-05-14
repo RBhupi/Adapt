@@ -1,7 +1,8 @@
-def test_geometric_centroid_is_inside_cell(labeled_ds_with_extras, make_analysis_config):
+def test_geometric_centroid_is_inside_cell(
+    labeled_ds_with_extras, make_analysis_config
+):
 
     from adapt.modules.analysis.module import RadarCellAnalyzer
-
 
     config = make_analysis_config()
     analyzer = RadarCellAnalyzer(config)
@@ -22,4 +23,3 @@ def test_mass_centroid_exists(labeled_ds_with_extras, make_analysis_config):
 
     assert "cell_centroid_mass_x" in df.columns
     assert "cell_centroid_mass_y" in df.columns
-

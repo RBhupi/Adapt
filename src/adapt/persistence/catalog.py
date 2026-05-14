@@ -24,19 +24,19 @@ from pathlib import Path
 
 import pandas as pd
 
-__all__ = ['RadarCatalog']
+__all__ = ["RadarCatalog"]
 
 logger = logging.getLogger(__name__)
 
 
 class RadarCatalog:
     """Radar-level catalog manager.
-    
+
     Manages catalog.db at {radar_dir}/catalog.db.
     Tracks all items, progress, and schemas for one radar.
-    
+
     Thread-safe via SQLite WAL mode and internal locking.
-    
+
     Examples
     --------
     >>> catalog = RadarCatalog("/data/radar_output/KHTX")
@@ -49,10 +49,10 @@ class RadarCatalog:
     ... )
     >>> items = catalog.query_items(item_type="analysis2d", limit=10)
     """
-    
+
     def __init__(self, radar_dir: str | Path):
         """Initialize radar catalog.
-        
+
         Parameters
         ----------
         radar_dir : str or Path
@@ -61,45 +61,45 @@ class RadarCatalog:
         self.radar_dir = Path(radar_dir).resolve()
         self.radar = self.radar_dir.name
         self.db_path = self.radar_dir / "catalog.db"
-        
+
         # Thread safety
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
-        
+
         # Initialize database
         self._init_database()
-        
+
         logger.info(f"RadarCatalog initialized for {self.radar} at {self.db_path}")
-    
+
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-safe database connection."""
         if self._conn is None:
             self._conn = sqlite3.connect(
-                str(self.db_path),
-                check_same_thread=False,
-                isolation_level='DEFERRED'
+                str(self.db_path), check_same_thread=False, isolation_level="DEFERRED"
             )
             self._conn.row_factory = sqlite3.Row
             # Enable WAL mode for concurrent access
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
-    
+
     def _init_database(self) -> None:
         """Initialize database schema from SQL file."""
         schema_path = (
-            Path(__file__).resolve().parents[1] / "configuration" / "schemas"
+            Path(__file__).resolve().parents[1]
+            / "configuration"
+            / "schemas"
             / "radar_catalog_schema.sql"
         )
-        
+
         if not schema_path.exists():
             # Fallback to embedded schema
             self._create_schema_inline()
             return
-        
+
         with open(schema_path) as f:
             schema_sql = f.read()
-        
+
         conn = self._get_connection()
         with self._lock:
             conn.executescript(schema_sql)
@@ -107,14 +107,13 @@ class RadarCatalog:
 
         logger.debug(f"Radar catalog schema initialized from {schema_path}")
 
-
     def _create_schema_inline(self) -> None:
         """Create schema inline (fallback)."""
         conn = self._get_connection()
         with self._lock:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            
+
             # Items table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS items (
@@ -135,12 +134,16 @@ class RadarCatalog:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_run ON items(run_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC)"
             )
-            
+
             # Progress table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS progress (
@@ -155,7 +158,7 @@ class RadarCatalog:
                     last_updated TEXT NOT NULL
                 )
             """)
-            
+
             # Schemas table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS schemas (
@@ -165,13 +168,13 @@ class RadarCatalog:
                     updated_at TEXT NOT NULL
                 )
             """)
-            
+
             conn.commit()
-    
+
     # =========================================================================
     # Item Management
     # =========================================================================
-    
+
     def register_item(
         self,
         item_id: str,
@@ -184,10 +187,10 @@ class RadarCatalog:
         parent_ids: list[str] | None = None,
         metadata: dict | None = None,
         file_size_bytes: int | None = None,
-        file_hash: str | None = None
+        file_hash: str | None = None,
     ) -> None:
         """Register a data item in the catalog.
-        
+
         Parameters
         ----------
         item_id : str
@@ -216,30 +219,42 @@ class RadarCatalog:
         now = datetime.now(UTC).isoformat()
         parent_ids_json = json.dumps(parent_ids) if parent_ids else None
         metadata_json = json.dumps(metadata) if metadata else None
-        
+
         conn = self._get_connection()
         with self._lock:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO items
                 (item_id, run_id, item_type, scan_time, file_path, parent_ids,
                  processing_stage, status, metadata, file_size_bytes, file_hash,
                  created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (item_id, run_id, item_type, scan_time, file_path, parent_ids_json,
-                  processing_stage, status, metadata_json, file_size_bytes, file_hash,
-                  now, now))
+            """,
+                (
+                    item_id,
+                    run_id,
+                    item_type,
+                    scan_time,
+                    file_path,
+                    parent_ids_json,
+                    processing_stage,
+                    status,
+                    metadata_json,
+                    file_size_bytes,
+                    file_hash,
+                    now,
+                    now,
+                ),
+            )
             conn.commit()
-        
+
         logger.debug(f"Item registered: {item_id} ({item_type})")
-    
+
     def update_item_status(
-        self,
-        item_id: str,
-        status: str,
-        error_message: str | None = None
+        self, item_id: str, status: str, error_message: str | None = None
     ) -> None:
         """Update item status.
-        
+
         Parameters
         ----------
         item_id : str
@@ -250,26 +265,29 @@ class RadarCatalog:
             Error message if status=failed
         """
         now = datetime.now(UTC).isoformat()
-        
+
         conn = self._get_connection()
         with self._lock:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE items 
                 SET status = ?, error_message = ?, updated_at = ?
                 WHERE item_id = ?
-            """, (status, error_message, now, item_id))
+            """,
+                (status, error_message, now, item_id),
+            )
             conn.commit()
-    
+
     def query_items(
         self,
         item_type: str | None = None,
         run_id: str | None = None,
         status: str | None = None,
         limit: int | None = None,
-        order_by: str = "scan_time DESC"
+        order_by: str = "scan_time DESC",
     ) -> pd.DataFrame:
         """Query items with optional filters.
-        
+
         Parameters
         ----------
         item_type : str, optional
@@ -282,7 +300,7 @@ class RadarCatalog:
             Maximum results
         order_by : str
             Sort order (default: newest first)
-            
+
         Returns
         -------
         DataFrame
@@ -290,7 +308,7 @@ class RadarCatalog:
         """
         query = "SELECT * FROM items WHERE 1=1"
         params = []
-        
+
         if item_type:
             query += " AND item_type = ?"
             params.append(item_type)
@@ -300,30 +318,26 @@ class RadarCatalog:
         if status:
             query += " AND status = ?"
             params.append(status)
-        
+
         query += f" ORDER BY {order_by}"
-        
+
         if limit:
             query += f" LIMIT {limit}"
-        
+
         conn = self._get_connection()
         with self._lock:
             return pd.read_sql_query(query, conn, params=params)
-    
-    def get_latest_item(
-        self,
-        item_type: str,
-        run_id: str | None = None
-    ) -> dict | None:
+
+    def get_latest_item(self, item_type: str, run_id: str | None = None) -> dict | None:
         """Get the most recent item of a type.
-        
+
         Parameters
         ----------
         item_type : str
             Item type to query
         run_id : str, optional
             Filter by run ID
-            
+
         Returns
         -------
         dict or None
@@ -332,20 +346,26 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             if run_id:
-                row = conn.execute("""
+                row = conn.execute(
+                    """
                     SELECT * FROM items 
                     WHERE item_type = ? AND run_id = ? AND status = 'complete'
                     ORDER BY scan_time DESC 
                     LIMIT 1
-                """, (item_type, run_id)).fetchone()
+                """,
+                    (item_type, run_id),
+                ).fetchone()
             else:
-                row = conn.execute("""
+                row = conn.execute(
+                    """
                     SELECT * FROM items 
                     WHERE item_type = ? AND status = 'complete'
                     ORDER BY scan_time DESC 
                     LIMIT 1
-                """, (item_type,)).fetchone()
-        
+                """,
+                    (item_type,),
+                ).fetchone()
+
         return dict(row) if row else None
 
     def get_item(self, item_id: str) -> dict | None:
@@ -360,14 +380,10 @@ class RadarCatalog:
     # =========================================================================
     # Progress Tracking
     # =========================================================================
-    
-    def update_progress(
-        self,
-        run_id: str,
-        **kwargs
-    ) -> None:
+
+    def update_progress(self, run_id: str, **kwargs) -> None:
         """Update processing progress for a run.
-        
+
         Parameters
         ----------
         run_id : str
@@ -376,47 +392,56 @@ class RadarCatalog:
             Progress fields to update (latest_downloaded_time, etc.)
         """
         now = datetime.now(UTC).isoformat()
-        
+
         # Build update query dynamically
         fields = list(kwargs.keys())
         if not fields:
             return
-        
+
         set_clause = ", ".join(f"{field} = ?" for field in fields)
         values = list(kwargs.values()) + [now, run_id]
-        
+
         conn = self._get_connection()
         with self._lock:
             # Try update first
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                f"""
                 UPDATE progress 
                 SET {set_clause}, last_updated = ?
                 WHERE run_id = ?
-            """, values)
-            
+            """,
+                values,
+            )
+
             # If no rows updated, insert
             if cursor.rowcount == 0:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO progress (run_id, last_updated)
                     VALUES (?, ?)
-                """, (run_id, now))
+                """,
+                    (run_id, now),
+                )
                 # Retry update
-                conn.execute(f"""
+                conn.execute(
+                    f"""
                     UPDATE progress 
                     SET {set_clause}, last_updated = ?
                     WHERE run_id = ?
-                """, values)
-            
+                """,
+                    values,
+                )
+
             conn.commit()
-    
+
     def get_progress(self, run_id: str) -> dict | None:
         """Get progress status for a run.
-        
+
         Parameters
         ----------
         run_id : str
             Run identifier
-            
+
         Returns
         -------
         dict or None
@@ -425,24 +450,20 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT * FROM progress WHERE run_id = ?",
-                (run_id,)
+                "SELECT * FROM progress WHERE run_id = ?", (run_id,)
             ).fetchone()
-        
+
         return dict(row) if row else None
-    
+
     # =========================================================================
     # Schema Management
     # =========================================================================
-    
+
     def register_schema(
-        self,
-        item_type: str,
-        columns: list[dict[str, str]],
-        schema_version: int = 1
+        self, item_type: str, columns: list[dict[str, str]], schema_version: int = 1
     ) -> None:
         """Register or update schema for an item type.
-        
+
         Parameters
         ----------
         item_type : str
@@ -454,18 +475,21 @@ class RadarCatalog:
         """
         now = datetime.now(UTC).isoformat()
         columns_json = json.dumps(columns)
-        
+
         conn = self._get_connection()
         with self._lock:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO schemas
                 (item_type, columns_json, schema_version, updated_at)
                 VALUES (?, ?, ?, ?)
-            """, (item_type, columns_json, schema_version, now))
+            """,
+                (item_type, columns_json, schema_version, now),
+            )
             conn.commit()
-        
+
         logger.debug(f"Schema registered for {item_type} (v{schema_version})")
-    
+
     def get_schema(self, item_type: str) -> list[dict] | None:
         """Get schema for an item type.
 
@@ -482,12 +506,11 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT columns_json FROM schemas WHERE item_type = ?",
-                (item_type,)
+                "SELECT columns_json FROM schemas WHERE item_type = ?", (item_type,)
             ).fetchone()
 
         if row:
-            return json.loads(row['columns_json'])
+            return json.loads(row["columns_json"])
         return None
 
     # =========================================================================
@@ -495,10 +518,7 @@ class RadarCatalog:
     # =========================================================================
 
     def register_scan(
-        self,
-        scan_time: datetime,
-        run_id: str,
-        nexrad_file_name: str | None = None
+        self, scan_time: datetime, run_id: str, nexrad_file_name: str | None = None
     ) -> str:
         """Register a new scan. Idempotent on scan_time+run_id.
 
@@ -519,28 +539,34 @@ class RadarCatalog:
         import uuid
 
         scan_time_str = scan_time.isoformat()
-        scan_date = scan_time.strftime('%Y%m%d')
+        scan_date = scan_time.strftime("%Y%m%d")
         now = datetime.now(UTC).isoformat()
 
         conn = self._get_connection()
         with self._lock:
             # Check if scan already exists
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT scan_id FROM scans
                 WHERE scan_time = ? AND run_id = ?
-            """, (scan_time_str, run_id)).fetchone()
+            """,
+                (scan_time_str, run_id),
+            ).fetchone()
 
             if row:
-                return row['scan_id']
+                return row["scan_id"]
 
             # Create new scan
             scan_id = str(uuid.uuid4())[:16]
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO scans
                 (scan_id, scan_time, scan_date, run_id, nexrad_file_name,
                  processing_status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
-            """, (scan_id, scan_time_str, scan_date, run_id, nexrad_file_name, now, now))
+            """,
+                (scan_id, scan_time_str, scan_date, run_id, nexrad_file_name, now, now),
+            )
             conn.commit()
 
         logger.debug(f"Scan registered: {scan_id} at {scan_time_str}")
@@ -553,7 +579,7 @@ class RadarCatalog:
         item_id: str,
         num_cells: int | None = None,
         max_reflectivity: float | None = None,
-        has_tracks: bool | None = None
+        has_tracks: bool | None = None,
     ) -> None:
         """Link an item to its parent scan.
 
@@ -577,10 +603,10 @@ class RadarCatalog:
 
         # Map item_type to column name
         column_map = {
-            'gridded3d': 'gridded3d_item_id',
-            'segmentation2d': 'segmentation2d_item_id',
-            'projection2d': 'projection2d_item_id',
-            'analysis2d': 'analysis2d_item_id',
+            "gridded3d": "gridded3d_item_id",
+            "segmentation2d": "segmentation2d_item_id",
+            "projection2d": "projection2d_item_id",
+            "analysis2d": "analysis2d_item_id",
         }
 
         column = column_map.get(item_type)
@@ -609,14 +635,18 @@ class RadarCatalog:
             params.append(scan_time_str)
 
             # Check if all items are now linked
-            conn.execute(f"""
+            conn.execute(
+                f"""
                 UPDATE scans
                 SET {', '.join(updates)}
                 WHERE scan_time = ?
-            """, params)
+            """,
+                params,
+            )
 
             # Update processing status
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE scans
                 SET processing_status = CASE
                     WHEN gridded3d_item_id IS NOT NULL
@@ -629,7 +659,9 @@ class RadarCatalog:
                     ELSE 'pending'
                 END
                 WHERE scan_time = ?
-            """, (scan_time_str,))
+            """,
+                (scan_time_str,),
+            )
 
             conn.commit()
 
@@ -653,8 +685,7 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT * FROM scans WHERE scan_time = ?",
-                (scan_time_str,)
+                "SELECT * FROM scans WHERE scan_time = ?", (scan_time_str,)
             ).fetchone()
 
         return dict(row) if row else None
@@ -675,8 +706,7 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT * FROM scans WHERE scan_id = ?",
-                (scan_id,)
+                "SELECT * FROM scans WHERE scan_id = ?", (scan_id,)
             ).fetchone()
 
         return dict(row) if row else None
@@ -687,7 +717,7 @@ class RadarCatalog:
         end_time: datetime | None = None,
         run_id: str | None = None,
         status: str | None = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> pd.DataFrame:
         """List scans with optional time range filter.
 
@@ -748,12 +778,15 @@ class RadarCatalog:
         conn = self._get_connection()
         with self._lock:
             if run_id:
-                row = conn.execute("""
+                row = conn.execute(
+                    """
                     SELECT * FROM scans
                     WHERE run_id = ? AND processing_status = 'complete'
                     ORDER BY scan_time DESC
                     LIMIT 1
-                """, (run_id,)).fetchone()
+                """,
+                    (run_id,),
+                ).fetchone()
             else:
                 row = conn.execute("""
                     SELECT * FROM scans
@@ -763,6 +796,7 @@ class RadarCatalog:
                 """).fetchone()
 
         return dict(row) if row else None
+
     def close(self) -> None:
         """Close database connection."""
         if self._conn:

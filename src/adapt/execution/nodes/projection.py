@@ -33,7 +33,7 @@ class ProjectionModule(BaseModule):
     name = "projection"
     inputs = ["segmented_ds", "dataset_history", "projection_config"]
     outputs = ["projected_ds"]
-    input_contracts  = {"segmented_ds": check_segmented_ds}
+    input_contracts = {"segmented_ds": check_segmented_ds}
     output_contracts = {"projected_ds": check_projected_ds}
 
     def __init__(self) -> None:

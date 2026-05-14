@@ -23,23 +23,23 @@ from pathlib import Path
 
 import pandas as pd
 
-__all__ = ['RepositoryRegistry']
+__all__ = ["RepositoryRegistry"]
 
 logger = logging.getLogger(__name__)
 
 # Cache of registry instances per root directory
-_registry_cache: dict[str, 'RepositoryRegistry'] = {}
+_registry_cache: dict[str, "RepositoryRegistry"] = {}
 _cache_lock = threading.Lock()
 
 
 class RepositoryRegistry:
     """Root-level registry for Adapt repository.
-    
+
     Manages adapt_registry.db at {root_dir}/adapt_registry.db.
     Tracks all runs and radars across the repository.
-    
+
     Thread-safe singleton per root_dir.
-    
+
     Examples
     --------
     >>> registry = RepositoryRegistry.get_instance("/data/radar_output")
@@ -47,10 +47,10 @@ class RepositoryRegistry:
     >>> registry.register_run("abc123", "KHTX", mode="realtime")
     >>> runs = registry.list_runs()
     """
-    
+
     def __init__(self, root_dir: str | Path):
         """Initialize registry at root directory.
-        
+
         Parameters
         ----------
         root_dir : str or Path
@@ -58,77 +58,75 @@ class RepositoryRegistry:
         """
         self.root_dir = Path(root_dir).resolve()
         self.db_path = self.root_dir / "adapt_registry.db"
-        
+
         # Thread safety
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
-        
+
         # Initialize database
         self._init_database()
-        
+
         logger.debug("RepositoryRegistry initialized at %s", self.db_path)
-    
+
     @classmethod
-    def get_instance(cls, root_dir: str | Path) -> 'RepositoryRegistry':
+    def get_instance(cls, root_dir: str | Path) -> "RepositoryRegistry":
         """Get singleton instance for a root directory.
-        
+
         Parameters
         ----------
         root_dir : str or Path
             Root directory path
-            
+
         Returns
         -------
         RepositoryRegistry
             Registry instance for this root directory
         """
         root_path = str(Path(root_dir).resolve())
-        
+
         with _cache_lock:
             if root_path not in _registry_cache:
                 _registry_cache[root_path] = cls(root_dir)
             return _registry_cache[root_path]
-    
+
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-safe database connection."""
         if self._conn is None:
             self._conn = sqlite3.connect(
-                str(self.db_path),
-                check_same_thread=False,
-                isolation_level='DEFERRED'
+                str(self.db_path), check_same_thread=False, isolation_level="DEFERRED"
             )
             self._conn.row_factory = sqlite3.Row
             # Enable WAL mode for concurrent access
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
-    
+
     def _init_database(self) -> None:
         """Initialize database schema from SQL file."""
         schema_path = Path(__file__).parent / "schemas" / "registry_schema.sql"
-        
+
         if not schema_path.exists():
             # Fallback to embedded schema if file not found
             self._create_schema_inline()
             return
-        
+
         with open(schema_path) as f:
             schema_sql = f.read()
-        
+
         conn = self._get_connection()
         with self._lock:
             conn.executescript(schema_sql)
             conn.commit()
-        
+
         logger.debug(f"Registry schema initialized from {schema_path}")
-    
+
     def _create_schema_inline(self) -> None:
         """Create schema inline (fallback)."""
         conn = self._get_connection()
         with self._lock:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            
+
             # Runs table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS runs (
@@ -143,10 +141,12 @@ class RepositoryRegistry:
                     created_at TEXT NOT NULL
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_radar ON runs(radar)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)")
-            
+
             # Radars table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS radars (
@@ -162,7 +162,7 @@ class RepositoryRegistry:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_radars_updated ON radars(last_updated DESC)"
             )
-            
+
             # Item types table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS item_types (
@@ -173,36 +173,36 @@ class RepositoryRegistry:
                     created_at TEXT NOT NULL
                 )
             """)
-            
+
             # Prepopulate item types
             now = datetime.now(UTC).isoformat()
             item_types_data = [
-                ('gridded3d', 'Gridded reflectivity volume', 'netcdf', '3d', now),
-                ('segmentation2d', 'Cell segmentation masks', 'netcdf', '2d', now),
-                ('projection2d', 'Cell motion projections', 'netcdf', '2d', now),
-                ('analysis2d', 'Cell-level analysis metrics', 'parquet', 'table', now),
+                ("gridded3d", "Gridded reflectivity volume", "netcdf", "3d", now),
+                ("segmentation2d", "Cell segmentation masks", "netcdf", "2d", now),
+                ("projection2d", "Cell motion projections", "netcdf", "2d", now),
+                ("analysis2d", "Cell-level analysis metrics", "parquet", "table", now),
             ]
-            
-            conn.executemany("""
+
+            conn.executemany(
+                """
                 INSERT OR IGNORE INTO item_types 
                 (item_type, description, storage_format, dimensionality, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, item_types_data)
-            
+            """,
+                item_types_data,
+            )
+
             conn.commit()
-    
+
     # =========================================================================
     # Radar Management
     # =========================================================================
-    
+
     def register_radar(
-        self,
-        radar: str,
-        lat: float | None = None,
-        lon: float | None = None
+        self, radar: str, lat: float | None = None, lon: float | None = None
     ) -> None:
         """Register a radar in the repository.
-        
+
         Parameters
         ----------
         radar : str
@@ -214,11 +214,11 @@ class RepositoryRegistry:
         """
         radar_dir = self.root_dir / radar
         radar_dir.mkdir(parents=True, exist_ok=True)
-        
+
         catalog_path = str(radar_dir / "catalog.db")
         data_path = str(radar_dir)
         now = datetime.now(UTC).isoformat()
-        
+
         conn = self._get_connection()
         with self._lock:
             conn.execute(
@@ -231,7 +231,7 @@ class RepositoryRegistry:
                 (radar, catalog_path, data_path, lat, lon, now, now),
             )
             conn.commit()
-        
+
         logger.debug("Radar registered: %s at %s", radar, data_path)
 
     def get_radar_location(self, radar: str) -> tuple[float | None, float | None]:
@@ -271,7 +271,9 @@ class RepositoryRegistry:
                 (radar,),
             ).fetchone()
             if not row:
-                raise ValueError(f"Radar '{radar}' is not registered in the repository registry")
+                raise ValueError(
+                    f"Radar '{radar}' is not registered in the repository registry"
+                )
 
             existing_lat = row["location_lat"]
             existing_lon = row["location_lon"]
@@ -284,15 +286,15 @@ class RepositoryRegistry:
                 (lat_f, lon_f, now, radar),
             )
             conn.commit()
-    
+
     def get_radar_catalog_path(self, radar: str) -> Path | None:
         """Get path to radar's catalog database.
-        
+
         Parameters
         ----------
         radar : str
             Radar identifier
-            
+
         Returns
         -------
         Path or None
@@ -301,15 +303,14 @@ class RepositoryRegistry:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT catalog_path FROM radars WHERE radar = ?",
-                (radar,)
+                "SELECT catalog_path FROM radars WHERE radar = ?", (radar,)
             ).fetchone()
-        
-        return Path(row['catalog_path']) if row else None
-    
+
+        return Path(row["catalog_path"]) if row else None
+
     def list_radars(self) -> pd.DataFrame:
         """Get list of all registered radars.
-        
+
         Returns
         -------
         DataFrame
@@ -317,25 +318,22 @@ class RepositoryRegistry:
         """
         conn = self._get_connection()
         with self._lock:
-            return pd.read_sql_query(
-                "SELECT * FROM radars ORDER BY radar",
-                conn
-            )
-    
+            return pd.read_sql_query("SELECT * FROM radars ORDER BY radar", conn)
+
     # =========================================================================
     # Run Management
     # =========================================================================
-    
+
     def register_run(
         self,
         run_id: str,
         radar: str,
         mode: str | None = None,
         config_path: str | None = None,
-        repository_version: str = "0.1.0"
+        repository_version: str = "0.1.0",
     ) -> None:
         """Register a new pipeline run.
-        
+
         Parameters
         ----------
         run_id : str
@@ -350,7 +348,7 @@ class RepositoryRegistry:
             Adapt version
         """
         now = datetime.now(UTC).isoformat()
-        
+
         conn = self._get_connection()
         with self._lock:
             conn.execute(
@@ -363,17 +361,14 @@ class RepositoryRegistry:
                 (run_id, radar, now, mode, config_path, repository_version, now),
             )
             conn.commit()
-        
+
         logger.debug("Run registered: %s for radar %s", run_id, radar)
-    
+
     def update_run_status(
-        self,
-        run_id: str,
-        status: str,
-        end_time: str | None = None
+        self, run_id: str, status: str, end_time: str | None = None
     ) -> None:
         """Update run status.
-        
+
         Parameters
         ----------
         run_id : str
@@ -388,25 +383,24 @@ class RepositoryRegistry:
             if end_time:
                 conn.execute(
                     "UPDATE runs SET status = ?, end_time = ? WHERE run_id = ?",
-                    (status, end_time, run_id)
+                    (status, end_time, run_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE runs SET status = ? WHERE run_id = ?",
-                    (status, run_id)
+                    "UPDATE runs SET status = ? WHERE run_id = ?", (status, run_id)
                 )
             conn.commit()
-        
+
         logger.debug(f"Run {run_id} status updated to {status}")
-    
+
     def list_runs(self, radar: str | None = None) -> pd.DataFrame:
         """Get list of runs, optionally filtered by radar.
-        
+
         Parameters
         ----------
         radar : str, optional
             Filter by radar ID
-            
+
         Returns
         -------
         DataFrame
@@ -420,15 +414,15 @@ class RepositoryRegistry:
             else:
                 query = "SELECT * FROM runs ORDER BY start_time DESC"
                 return pd.read_sql_query(query, conn)
-    
+
     def get_latest_run(self, radar: str | None = None) -> dict | None:
         """Get the most recent run.
-        
+
         Parameters
         ----------
         radar : str, optional
             Filter by radar ID
-            
+
         Returns
         -------
         dict or None
@@ -439,22 +433,22 @@ class RepositoryRegistry:
             if radar:
                 row = conn.execute(
                     "SELECT * FROM runs WHERE radar = ? ORDER BY start_time DESC LIMIT 1",
-                    (radar,)
+                    (radar,),
                 ).fetchone()
             else:
                 row = conn.execute(
                     "SELECT * FROM runs ORDER BY start_time DESC LIMIT 1"
                 ).fetchone()
-        
+
         return dict(row) if row else None
-    
+
     # =========================================================================
     # Item Types Management
     # =========================================================================
-    
+
     def list_item_types(self) -> list[str]:
         """Get list of registered item types.
-        
+
         Returns
         -------
         list of str
@@ -462,18 +456,20 @@ class RepositoryRegistry:
         """
         conn = self._get_connection()
         with self._lock:
-            rows = conn.execute("SELECT item_type FROM item_types ORDER BY item_type").fetchall()
-        
-        return [row['item_type'] for row in rows]
-    
+            rows = conn.execute(
+                "SELECT item_type FROM item_types ORDER BY item_type"
+            ).fetchall()
+
+        return [row["item_type"] for row in rows]
+
     def get_item_type_info(self, item_type: str) -> dict | None:
         """Get metadata for an item type.
-        
+
         Parameters
         ----------
         item_type : str
             Item type name
-            
+
         Returns
         -------
         dict or None
@@ -482,12 +478,11 @@ class RepositoryRegistry:
         conn = self._get_connection()
         with self._lock:
             row = conn.execute(
-                "SELECT * FROM item_types WHERE item_type = ?",
-                (item_type,)
+                "SELECT * FROM item_types WHERE item_type = ?", (item_type,)
             ).fetchone()
-        
+
         return dict(row) if row else None
-    
+
     def close(self) -> None:
         """Close database connection."""
         if self._conn:

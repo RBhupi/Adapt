@@ -49,7 +49,9 @@ def _ensure_modules_registered() -> None:
             cfg = yaml.safe_load(f)
         module_paths = cfg.get("pipeline", {}).get("modules", [])
     except Exception as e:
-        logger.warning("Could not read defaults.yaml (%s); falling back to hardcoded list", e)
+        logger.warning(
+            "Could not read defaults.yaml (%s); falling back to hardcoded list", e
+        )
         module_paths = [
             "adapt.modules.ingest.module",
             "adapt.modules.detection.module",

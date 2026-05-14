@@ -25,7 +25,7 @@ def test_custom_config(make_detection_config):
         min_cellsize_gridpoint=10,
         # Note: filter_by_size not exposed in UserConfig yet, uses default
     )
-    
+
     seg = RadarCellSegmenter(config)
     assert seg.threshold == 45.0
     assert seg.min_gridpoints == 10
@@ -36,10 +36,9 @@ def test_unknown_method_raises():
     # Pydantic validation happens at model creation, not at runtime
     # This test verifies the old behavior is no longer needed
     # Invalid methods are caught by Literal["threshold"] in ParamConfig
-    
+
     with pytest.raises(Exception):  # noqa: B017 — ValidationError from Pydantic
         # Try to create config with invalid method
         param = ParamConfig()
         user = UserConfig(segmentation_method="watershed")  # Invalid
         resolve_config(param, user, None)
-

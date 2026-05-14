@@ -13,6 +13,7 @@ from adapt.modules.base import BaseModule
 # Stub modules for testing
 # ---------------------------------------------------------------------------
 
+
 class StubA(BaseModule):
     name = "stub_a"
     inputs = []
@@ -53,6 +54,7 @@ class EmptyNameModule(BaseModule):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def reg():
     """Fresh registry per test — isolated from the global singleton."""
@@ -62,6 +64,7 @@ def reg():
 # ---------------------------------------------------------------------------
 # Registration tests
 # ---------------------------------------------------------------------------
+
 
 class TestRegistration:
 
@@ -136,6 +139,7 @@ class TestRegistration:
 # Retrieval tests
 # ---------------------------------------------------------------------------
 
+
 class TestRetrieval:
 
     @pytest.mark.unit
@@ -162,6 +166,7 @@ class TestRetrieval:
 # ---------------------------------------------------------------------------
 # create_modules tests
 # ---------------------------------------------------------------------------
+
 
 class TestCreateModules:
 
@@ -203,6 +208,7 @@ class TestCreateModules:
 # ---------------------------------------------------------------------------
 # Integration: registry → graph builder
 # ---------------------------------------------------------------------------
+
 
 class TestRegistryGraphIntegration:
 

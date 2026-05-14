@@ -8,4 +8,4 @@ This module provides centralized data management through the DataRepository clas
 
 from adapt.persistence.repository import DataRepository, ProductType
 
-__all__ = ['DataRepository', 'ProductType']
+__all__ = ["DataRepository", "ProductType"]

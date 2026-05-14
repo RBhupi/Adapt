@@ -14,7 +14,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-__all__ = ['FileProcessingTracker']
+__all__ = ["FileProcessingTracker"]
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +62,17 @@ class FileProcessingTracker:
     for progress or manually reset failed files::
 
         tracker = FileProcessingTracker(db_path)
-        
+
         # Check if file needs processing
         if tracker.should_process(file_id, "analyzed"):
             # Process file
             ...
             tracker.mark_stage_complete(file_id, "analyzed", num_cells=42)
-        
+
         # Get stats
         stats = tracker.get_statistics()
         print(f"Processed {stats['completed']} files")
-        
+
         tracker.close()
     """
 
@@ -163,11 +163,18 @@ class FileProcessingTracker:
         with self._lock:
             for col_def in timing_cols:
                 with contextlib.suppress(sqlite3.OperationalError):
-                    conn.execute(f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}")
+                    conn.execute(
+                        f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}"
+                    )
             conn.commit()
 
-    def register_file(self, file_id: str, radar: str, scan_time: datetime,
-                     nexrad_path: Path | None = None) -> bool:
+    def register_file(
+        self,
+        file_id: str,
+        radar: str,
+        scan_time: datetime,
+        nexrad_path: Path | None = None,
+    ) -> bool:
         """Register a new file for tracking.
 
         Creates an initial database record for a newly discovered NEXRAD file.
@@ -202,7 +209,8 @@ class FileProcessingTracker:
         with self._lock:
             # Check if already exists
             cursor = conn.execute(
-                "SELECT file_id FROM radar_file_processing WHERE file_id = ?", (file_id,)
+                "SELECT file_id FROM radar_file_processing WHERE file_id = ?",
+                (file_id,),
             )
             if cursor.fetchone():
                 return False
@@ -212,28 +220,35 @@ class FileProcessingTracker:
             if nexrad_path and nexrad_path.exists():
                 file_size_mb = nexrad_path.stat().st_size / (1024 * 1024)
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO radar_file_processing
                 (file_id, radar, scan_time, nexrad_path, file_size_mb, downloaded_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'pending')
-            """, (
-                file_id,
-                radar,
-                scan_time.isoformat(),
-                str(nexrad_path) if nexrad_path else None,
-                file_size_mb,
-                datetime.now(UTC).isoformat()
-            ))
+            """,
+                (
+                    file_id,
+                    radar,
+                    scan_time.isoformat(),
+                    str(nexrad_path) if nexrad_path else None,
+                    file_size_mb,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
             conn.commit()
 
             logger.debug(f"Registered file: {file_id}")
             return True
 
-    def mark_stage_complete(self, file_id: str, stage: str,
-                          path: Path | None = None,
-                          num_cells: int | None = None,
-                          error: str | None = None,
-                          timings: dict[str, float] | None = None):
+    def mark_stage_complete(
+        self,
+        file_id: str,
+        stage: str,
+        path: Path | None = None,
+        num_cells: int | None = None,
+        error: str | None = None,
+        timings: dict[str, float] | None = None,
+    ):
         """Mark a pipeline stage as complete or failed for a file.
 
         Called by downloader, processor, and plotter threads to record progress.
@@ -267,7 +282,7 @@ class FileProcessingTracker:
         Thread-safe. If called multiple times for the same stage, uses the
         most recent timestamp. Error stages can be reset with reset_failed().
         """
-        valid_stages = ['downloaded', 'regridded', 'analyzed', 'plotted']
+        valid_stages = ["downloaded", "regridded", "analyzed", "plotted"]
         if stage not in valid_stages:
             raise ValueError(f"Invalid stage: {stage}. Must be one of {valid_stages}")
 
@@ -276,21 +291,21 @@ class FileProcessingTracker:
 
         # Map stage to path column
         stage_to_path = {
-            'downloaded': 'nexrad_path',
-            'regridded': 'gridnc_path',
-            'analyzed': 'analysis_path',
-            'plotted': 'plot_path'
+            "downloaded": "nexrad_path",
+            "regridded": "gridnc_path",
+            "analyzed": "analysis_path",
+            "plotted": "plot_path",
         }
         path_col = stage_to_path[stage]
 
         with self._lock:
             # Determine new status
             if error:
-                new_status = 'failed'
-            elif stage == 'plotted':
-                new_status = 'completed'
+                new_status = "failed"
+            elif stage == "plotted":
+                new_status = "completed"
             else:
-                new_status = 'processing'
+                new_status = "processing"
 
             now = datetime.now(UTC).isoformat()
 
@@ -315,8 +330,11 @@ class FileProcessingTracker:
                 values.append(num_cells)
 
             _valid_timing_cols = {
-                "queue_wait_seconds", "download_seconds",
-                "ingest_seconds", "detect_seconds", "project_seconds",
+                "queue_wait_seconds",
+                "download_seconds",
+                "ingest_seconds",
+                "detect_seconds",
+                "project_seconds",
             }
             if timings:
                 for col, val in timings.items():
@@ -358,18 +376,24 @@ class FileProcessingTracker:
         conn = self._get_connection()
 
         with self._lock:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM radar_file_processing WHERE file_id = ?
-            """, (file_id,))
+            """,
+                (file_id,),
+            )
             row = cursor.fetchone()
 
             if row:
                 return dict(row)
             return None
 
-    def get_pending_files(self, stage: str | None = None,
-                         radar: str | None = None,
-                         limit: int | None = None) -> list[dict]:
+    def get_pending_files(
+        self,
+        stage: str | None = None,
+        radar: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
         """Get files awaiting processing at a specific stage.
 
         Used by downloader/processor/plotter to find files needing work.
@@ -381,7 +405,7 @@ class FileProcessingTracker:
             - 'regridded': files downloaded but not regridded
             - 'analyzed': files regridded but not analyzed
             - 'plotted': files analyzed but not plotted
-            
+
             If None, returns files with any pending stage.
 
         radar : str, optional
@@ -398,11 +422,11 @@ class FileProcessingTracker:
         conn = self._get_connection()
 
         # Build query based on stage
-        if stage == 'regridded':
+        if stage == "regridded":
             condition = "downloaded_at IS NOT NULL AND regridded_at IS NULL"
-        elif stage == 'analyzed':
+        elif stage == "analyzed":
             condition = "regridded_at IS NOT NULL AND analyzed_at IS NULL"
-        elif stage == 'plotted':
+        elif stage == "plotted":
             condition = "analyzed_at IS NOT NULL AND plotted_at IS NULL"
         else:
             condition = "status != 'completed' AND status != 'failed'"
@@ -518,17 +542,23 @@ class FileProcessingTracker:
 
         with self._lock:
             if radar:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE radar_file_processing
                     SET status = 'pending', error_message = NULL, updated_at = ?
                     WHERE status = 'failed' AND radar = ?
-                """, (datetime.now(UTC).isoformat(), radar))
+                """,
+                    (datetime.now(UTC).isoformat(), radar),
+                )
             else:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE radar_file_processing
                     SET status = 'pending', error_message = NULL, updated_at = ?
                     WHERE status = 'failed'
-                """, (datetime.now(UTC).isoformat(),))
+                """,
+                    (datetime.now(UTC).isoformat(),),
+                )
             conn.commit()
 
             logger.info("Reset failed files to pending")
@@ -560,18 +590,21 @@ class FileProcessingTracker:
 
             deleted = []
             for row in cursor.fetchall():
-                file_id = row['file_id']
-                nexrad_path = row['nexrad_path']
+                file_id = row["file_id"]
+                nexrad_path = row["nexrad_path"]
 
                 if nexrad_path and not Path(nexrad_path).exists():
                     deleted.append(file_id)
 
             # Delete records
             if deleted:
-                placeholders = ','.join('?' * len(deleted))
-                conn.execute(f"""
+                placeholders = ",".join("?" * len(deleted))
+                conn.execute(
+                    f"""
                     DELETE FROM radar_file_processing WHERE file_id IN ({placeholders})
-                """, deleted)
+                """,
+                    deleted,
+                )
                 conn.commit()
 
                 logger.info(f"Cleaned up {len(deleted)} deleted file(s)")
@@ -592,5 +625,3 @@ class FileProcessingTracker:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
-
-

@@ -37,10 +37,10 @@ def test_orchestrator_stop_is_idempotent(pipeline_config):
 def test_orchestrator_has_stop_event(pipeline_config):
     """Test orchestrator has internal stop flag and stop() sets it."""
     orch = PipelineOrchestrator(pipeline_config)
-    
-    assert hasattr(orch, '_stop_event')
+
+    assert hasattr(orch, "_stop_event")
     assert orch._stop_event is False
-    
+
     orch.stop()
     assert orch._stop_event is True
 
@@ -48,7 +48,7 @@ def test_orchestrator_has_stop_event(pipeline_config):
 def test_orchestrator_config_storage(pipeline_config):
     """Test orchestrator stores config correctly."""
     orch = PipelineOrchestrator(pipeline_config)
-    
+
     assert orch.config == pipeline_config
     assert orch.output_dirs is not None  # Should be extracted from config
 
@@ -56,6 +56,7 @@ def test_orchestrator_config_storage(pipeline_config):
 def test_orchestrator_queue_types(pipeline_config):
     """Test orchestrator creates correct queue types."""
     import queue
+
     orch = PipelineOrchestrator(pipeline_config)
 
     assert isinstance(orch.downloader_queue, queue.Queue)
@@ -70,7 +71,10 @@ def test_orchestrator_tracker_database_path(pipeline_config):
     # Database should be in RADAR_ID/analysis/ directory
     radar_id = pipeline_config.downloader.radar
     expected_db = (
-        orch.output_dirs["base"] / radar_id / "analysis" / f"{radar_id}_processing_tracker.db"
+        orch.output_dirs["base"]
+        / radar_id
+        / "analysis"
+        / f"{radar_id}_processing_tracker.db"
     )
     assert expected_db.exists()
 
@@ -78,7 +82,7 @@ def test_orchestrator_tracker_database_path(pipeline_config):
 def test_orchestrator_mode_from_config(pipeline_config):
     """Test orchestrator respects mode from config."""
     orch = PipelineOrchestrator(pipeline_config)
-    
+
     # Should use mode from config
     assert orch.config.mode in ["realtime", "historical"]
 
@@ -103,7 +107,7 @@ def test_orchestrator_stop_clears_queues(pipeline_config):
 def test_orchestrator_processor_config_accessible(pipeline_config):
     """Test orchestrator can access processor config."""
     orch = PipelineOrchestrator(pipeline_config)
-    
-    assert hasattr(orch.config, 'processor')
+
+    assert hasattr(orch.config, "processor")
     assert orch.config.processor.max_history >= 0
     assert orch.config.processor.min_file_size > 0

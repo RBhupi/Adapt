@@ -25,7 +25,7 @@ from adapt.runtime.processor import RadarProcessor
 if TYPE_CHECKING:
     from adapt.configuration.schemas import InternalConfig
 
-__all__ = ['PipelineOrchestrator']
+__all__ = ["PipelineOrchestrator"]
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +83,14 @@ class PipelineOrchestrator:
     Example usage::
 
         from adapt.runtime.orchestrator import PipelineOrchestrator
-        
+
         config = {
             "mode": "realtime",
             "downloader": {"radar": "KDIX", ...},
             "output_dirs": {...},
             ...
         }
-        
+
         orch = PipelineOrchestrator(config)
         orch.start(max_runtime=60)  # Run for 60 minutes then stop
     """
@@ -108,7 +108,7 @@ class PipelineOrchestrator:
         config : InternalConfig
             Fully resolved runtime configuration from init_runtime_config().
             Already contains all directory paths, run ID, and validated settings.
-            
+
         max_queue_size : int, optional
             Maximum size of inter-thread communication queues (default: 100).
         """
@@ -155,8 +155,8 @@ class PipelineOrchestrator:
         log_path = log_dir / f"pipeline_{radar}.log"
 
         formatter = logging.Formatter(
-            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
         # Clear existing handlers and add new ones
@@ -238,7 +238,7 @@ class PipelineOrchestrator:
             run_id=self.run_id,
             base_dir=self.output_dirs["base"],
             radar=radar,
-            config=self.config
+            config=self.config,
         )
 
         self._start_time = time.time()
@@ -246,7 +246,9 @@ class PipelineOrchestrator:
 
         logger.info(
             "Pipeline started | run=%s radar=%s mode=%s",
-            self.run_id, radar, self.config.mode.upper()
+            self.run_id,
+            radar,
+            self.config.mode.upper(),
         )
 
         # Start Downloader thread
@@ -360,7 +362,7 @@ class PipelineOrchestrator:
         wait_count = 0
         start_time = time.time()
         last_size = q.qsize()
-        
+
         while q.qsize() > 0:
             current_size = q.qsize()
             if current_size == last_size:
@@ -368,14 +370,18 @@ class PipelineOrchestrator:
             else:
                 wait_count = 0  # Reset if progress is being made
                 last_size = current_size
-            
+
             logger.info("Waiting for %s queue: %d remaining", name, current_size)
             time.sleep(1)
-            
+
             # Check timeout both by iteration count and elapsed time
             if wait_count > timeout // 5 or (time.time() - start_time) > timeout:
-                logger.warning("%s queue drain timeout (%d/%d seconds)", 
-                              name, int(time.time() - start_time), timeout)
+                logger.warning(
+                    "%s queue drain timeout (%d/%d seconds)",
+                    name,
+                    int(time.time() - start_time),
+                    timeout,
+                )
                 break
 
     def stop(self):
@@ -409,8 +415,10 @@ class PipelineOrchestrator:
         self._stop_event = True
 
         # Stop threads
-        for name, thread in [("Downloader", self.downloader),
-                              ("Processor", self.processor)]:
+        for name, thread in [
+            ("Downloader", self.downloader),
+            ("Processor", self.processor),
+        ]:
             if thread and thread.is_alive():
                 thread.stop()
                 thread.join(timeout=5)
@@ -433,12 +441,12 @@ class PipelineOrchestrator:
         elapsed = time.time() - self._start_time if self._start_time else 0
         if self.tracker:
             stats = self.tracker.get_statistics()
-            total_cells = stats.get('total_cells', 0) or 0
+            total_cells = stats.get("total_cells", 0) or 0
             logger.info(
                 "Pipeline stopped. Runtime: %.1fs | files=%d completed=%d cells=%d",
                 elapsed,
-                stats.get('total', 0),
-                stats.get('completed', 0),
+                stats.get("total", 0),
+                stats.get("completed", 0),
                 total_cells,
             )
             self.tracker.close()
@@ -458,7 +466,7 @@ class PipelineOrchestrator:
             "UP" if self.downloader and self.downloader.is_alive() else "DOWN",
             "UP" if self.processor and self.processor.is_alive() else "DOWN",
             self.downloader_queue.qsize(),
-            hist_status
+            hist_status,
         )
 
     def close_repository(self) -> None:

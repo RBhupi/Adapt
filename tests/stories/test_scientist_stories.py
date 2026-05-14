@@ -21,6 +21,7 @@ pytestmark = pytest.mark.unit
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _reflectivity_ds(values_2d: np.ndarray) -> xr.Dataset:
     H, W = values_2d.shape
     return xr.Dataset(
@@ -76,6 +77,7 @@ def _cell_stats_row(label: int, time, *, cx=5.0, cy=5.0, area=4.0) -> dict:
 # Detection stories
 # ---------------------------------------------------------------------------
 
+
 class TestScientistCanDetectCells:
     def test_user_can_detect_cells_from_threshold(self, make_detection_config):
         """Given: 2D data with a clear 40-dBZ cluster.
@@ -83,6 +85,7 @@ class TestScientistCanDetectCells:
         Then: at least one labeled cell appears at the cluster location.
         """
         from adapt.modules.detection.module import RadarCellSegmenter
+
         refl = np.zeros((10, 10), dtype=np.float32)
         refl[4:7, 4:7] = 45.0  # 9-pixel cluster at centre
         ds = _reflectivity_ds(refl)
@@ -91,12 +94,15 @@ class TestScientistCanDetectCells:
         labels = result["cell_labels"].values
         assert labels[5, 5] > 0, "Centre of cluster should be labelled"
 
-    def test_user_sees_no_cells_when_storm_below_threshold(self, detection_module_config):
+    def test_user_sees_no_cells_when_storm_below_threshold(
+        self, detection_module_config
+    ):
         """Given: all reflectivity below detection threshold.
         When: segmenter runs.
         Then: output has no cells (all labels == 0).
         """
         from adapt.modules.detection.module import RadarCellSegmenter
+
         refl = np.full((8, 8), 20.0, dtype=np.float32)  # threshold is 40 dBZ by default
         ds = _reflectivity_ds(refl)
         result = RadarCellSegmenter(detection_module_config).segment(ds)
@@ -109,8 +115,9 @@ class TestScientistCanDetectCells:
         """
         from adapt.configuration.schemas.user import UserSegmenterConfig
         from adapt.modules.detection.module import RadarCellSegmenter
+
         refl = np.zeros((12, 12), dtype=np.float32)
-        refl[2:4, 1:4] = 48.0   # storm A
+        refl[2:4, 1:4] = 48.0  # storm A
         refl[8:10, 8:11] = 46.0  # storm B
         ds = _reflectivity_ds(refl)
         config = make_detection_config(
@@ -125,10 +132,12 @@ class TestScientistCanDetectCells:
 # Tracking stories
 # ---------------------------------------------------------------------------
 
+
 class TestScientistCanTrackStorms:
     @pytest.fixture
     def tracker(self, tracking_module_config):
         from adapt.modules.tracking.module import RadarCellTracker
+
         return RadarCellTracker(tracking_module_config)
 
     def test_user_can_track_a_persistent_storm(self, tracker):
@@ -160,13 +169,22 @@ class TestScientistCanTrackStorms:
         empty_labels = np.zeros((6, 6), dtype=np.int32)
         ds1 = _labeled_ds(empty_labels, t1)
         ds2 = _labeled_ds(empty_labels, t2)
-        stats_empty = pd.DataFrame(columns=[
-            "time", "time_volume_start", "cell_label", "cell_area_sqkm",
-            "area_40dbz_km2", "cell_centroid_geom_x", "cell_centroid_geom_y",
-            "cell_centroid_mass_lat", "cell_centroid_mass_lon",
-            "radar_reflectivity_mean", "radar_reflectivity_max",
-            "radar_differential_reflectivity_max",
-        ])
+        stats_empty = pd.DataFrame(
+            columns=[
+                "time",
+                "time_volume_start",
+                "cell_label",
+                "cell_area_sqkm",
+                "area_40dbz_km2",
+                "cell_centroid_geom_x",
+                "cell_centroid_geom_y",
+                "cell_centroid_mass_lat",
+                "cell_centroid_mass_lon",
+                "radar_reflectivity_mean",
+                "radar_reflectivity_max",
+                "radar_differential_reflectivity_max",
+            ]
+        )
         tracked1, events1 = tracker.track(ds1, stats_empty)
         tracked2, events2 = tracker.track(ds2, stats_empty)
         assert tracked1.empty
