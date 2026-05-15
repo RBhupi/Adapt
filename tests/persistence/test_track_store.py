@@ -7,6 +7,7 @@ Each test uses an in-memory SQLite database with the three-table schema.
 Inputs are synthetic DataFrames; no file I/O.
 """
 
+import os
 import sqlite3
 from datetime import UTC, datetime
 
@@ -613,3 +614,40 @@ def test_cell_uid_fields_are_persisted_and_returned(store):
     assert "source_cell_uid" in ev.columns
     assert "target_cell_uid" in ev.columns
     assert ev.iloc[0]["target_cell_uid"] == "UID1"
+
+
+# ---------------------------------------------------------------------------
+# Read-only access (dashboard use case — Bug: sqlite3.OperationalError)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="chmod has no effect as root")
+def test_trackstore_readonly_connects_without_write_access(db_path):
+    """Dashboard opens TrackStore(db_path, readonly=True) on a directory it
+    cannot write to. Must not raise OperationalError from WAL sidecar creation."""
+    parent = db_path.parent
+
+    # Revoke write permission on the directory (simulates a shared / read-only repo)
+    os.chmod(parent, 0o555)
+    try:
+        ts_read = TrackStore(db_path, readonly=True)
+        conn = ts_read._connect()  # must not raise OperationalError
+        assert conn is not None
+        ts_read.close()
+    finally:
+        os.chmod(parent, 0o755)  # restore so tmp_path cleanup can proceed
+
+
+def test_trackstore_readonly_flag_accepted_by_constructor(tmp_path):
+    """TrackStore must accept a readonly keyword argument without raising TypeError."""
+    db_path = tmp_path / "catalog.db"
+
+    # Create a valid database first so the file exists
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(_DDL)
+    conn.close()
+
+    ts = TrackStore(db_path, readonly=True)  # must not raise TypeError
+    conn = ts._connect()
+    assert conn is not None
+    ts.close()

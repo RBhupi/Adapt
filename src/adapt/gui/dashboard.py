@@ -150,6 +150,7 @@ _HV_KEYS = (
     "zdr_max",
     "age",
     "vel_mean",
+    "sw_mean",
 )
 
 
@@ -1070,7 +1071,7 @@ class AdaptDashboard(tk.Tk):
                             try:
                                 from adapt.persistence.track_store import TrackStore
 
-                                hist = TrackStore(db_path_r).get_track_history(
+                                hist = TrackStore(db_path_r, readonly=True).get_track_history(
                                     self._current_run_id, self._selected_cell_uid
                                 )
                                 if not hist.empty:
@@ -1248,7 +1249,7 @@ class AdaptDashboard(tk.Tk):
                 if run_row:
                     run_id = run_row["run_id"]
                     conn.close()
-                    ts_obj = TrackStore(db_path)
+                    ts_obj = TrackStore(db_path, readonly=True)
                     rows = (
                         ts_obj._connect()
                         .execute(
@@ -1656,7 +1657,7 @@ class AdaptDashboard(tk.Tk):
                 from adapt.persistence.track_store import TrackStore
 
                 scan_time_dt = pd.Timestamp(self._current_scan_ts).to_pydatetime()
-                ts_obj = TrackStore(db_path)
+                ts_obj = TrackStore(db_path, readonly=True)
                 scan_cells = ts_obj.get_cells_by_scan(
                     self._current_run_id, scan_time_dt
                 )
@@ -1697,7 +1698,7 @@ class AdaptDashboard(tk.Tk):
             try:
                 from adapt.persistence.track_store import TrackStore
 
-                ts_obj = TrackStore(db_path)
+                ts_obj = TrackStore(db_path, readonly=True)
                 history_df = ts_obj.get_track_history(
                     self._current_run_id, str(cell_uid)
                 )
@@ -2100,7 +2101,7 @@ class AdaptDashboard(tk.Tk):
             try:
                 from adapt.persistence.track_store import TrackStore
 
-                ts_obj = TrackStore(db_path)
+                ts_obj = TrackStore(db_path, readonly=True)
                 conn = ts_obj._connect()
                 rows = conn.execute(
                     "SELECT * FROM cells_by_scan WHERE run_id=? ORDER BY scan_time, cell_uid",

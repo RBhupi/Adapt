@@ -80,8 +80,9 @@ class TrackStore:
     Opens its own connection to the same catalog.db used by RadarCatalog.
     """
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, readonly: bool = False):
         self._db_path = Path(db_path)
+        self._readonly = readonly
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
 
@@ -91,14 +92,28 @@ class TrackStore:
 
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(
-                str(self._db_path),
-                check_same_thread=False,
-                isolation_level="DEFERRED",
-            )
+            if self._readonly:
+                # immutable=1 bypasses WAL processing entirely — the reader sees
+                # only checkpointed (committed) data in the main db file and never
+                # writes to the shm/wal sidecar files. This lets the dashboard
+                # open a pipeline's catalog.db without needing write access to
+                # the directory.
+                uri = f"file:{self._db_path}?mode=ro&immutable=1"
+                self._conn = sqlite3.connect(
+                    uri,
+                    uri=True,
+                    check_same_thread=False,
+                    isolation_level=None,
+                )
+            else:
+                self._conn = sqlite3.connect(
+                    str(self._db_path),
+                    check_same_thread=False,
+                    isolation_level="DEFERRED",
+                )
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
             self._assert_schema(self._conn)
         return self._conn
 
