@@ -277,9 +277,6 @@ class PipelineOrchestrator:
 
         try:
             self._main_loop(mode)
-        except KeyboardInterrupt:
-            logger.info("\nShutdown signal received (Ctrl+C)")
-            self._interrupted = True
         finally:
             self.stop()
 

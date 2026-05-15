@@ -85,6 +85,8 @@ try:
     matplotlib.use("TkAgg")
     import cmweather  # noqa: F401 — registers ChaseSpectral and other radar colormaps — must follow use()
     import matplotlib.dates as mdates
+    import matplotlib.lines as mlines
+    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import (
         FigureCanvasTkAgg,
@@ -1340,7 +1342,7 @@ class AdaptDashboard(tk.Tk):
             left=0.04,
             right=0.97,
             top=0.93,
-            bottom=0.09,
+            bottom=0.13,
         )
         ax_radar = fig.add_subplot(gs[:, 0])
         self._cbar_ax = fig.add_subplot(gs[:, 1])
@@ -1569,7 +1571,36 @@ class AdaptDashboard(tk.Tk):
         ax.set_ylabel("Y (km)")
         ax.tick_params(reset=True)
         ax.grid(True, alpha=0.3, zorder=3)
-        ax.set_title(f"{radar_id}  {var_lbl}\n{tstr}", fontsize=11, fontweight="bold")
+        ax.set_title(f"{radar_id}  {var_lbl} [{tstr}]", fontsize=11, fontweight="bold")
+
+        # ── Legend ────────────────────────────────────────────────────────────
+        legend_handles = [
+            mpatches.Patch(facecolor="gray", alpha=0.6, label="Stratiform"),
+            mlines.Line2D([], [], color="#2C3539", linewidth=0.8, label="Cell boundary"),
+            mlines.Line2D(
+                [], [], color="#2C3539", linewidth=1.2, linestyle="dashed",
+                label="Projection",
+            ),
+            mlines.Line2D(
+                [], [], color="cyan", linewidth=1.5, marker="o", markersize=4,
+                label="Track",
+            ),
+            mlines.Line2D(
+                [], [], color="#8aff9c", marker="*", markersize=8, linestyle="None",
+                label="qurrent centroid",
+            ),
+        ]
+
+        ax.legend(
+            handles=legend_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.08),
+            ncol=len(legend_handles),
+            fontsize=10,
+            framealpha=0.6,
+            borderpad=0.4,
+            columnspacing=1.0,
+        )
 
     @staticmethod
     def _add_basemap(ax, ds, x_km, y_km):

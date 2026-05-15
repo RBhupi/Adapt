@@ -164,6 +164,7 @@ def _run_nexrad(args: argparse.Namespace) -> None:
 
     def _handle_sigterm(signum, frame) -> None:
         print("\n[adapt] SIGTERM received — stopping pipeline...")
+        orchestrator._interrupted = True
         stop_event.set()
         threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
 
@@ -180,37 +181,46 @@ def _run_nexrad(args: argparse.Namespace) -> None:
     )
     orchestrator_thread.start()
 
-    # Give the orchestrator a moment to initialise the repository
-    time.sleep(2)
-
     plot_consumer = None
-    if not args.no_plot and orchestrator.repository is not None:
-        from adapt.visualization.plotter import PlotConsumer
-
-        radar = args.radar or config.downloader.radar
-        assert config.output_dirs is not None
-        plot_output_dir = Path(config.output_dirs["base"]) / radar / "plots"
-        plot_consumer = PlotConsumer(
-            repository=orchestrator.repository,
-            stop_event=stop_event,
-            output_dir=plot_output_dir,
-            config=config,
-            poll_interval=args.plot_interval,
-            show_live=args.show_plots,
-            name="PlotConsumer",
-        )
-        plot_consumer.start()
-
     try:
+        # Inside the try so a Ctrl+C during startup still reaches the finally
+        # block (PID file removal, repository close).
+        time.sleep(2)
+
+        if not args.no_plot and orchestrator.repository is not None:
+            from adapt.visualization.plotter import PlotConsumer
+
+            radar = args.radar or config.downloader.radar
+            assert config.output_dirs is not None
+            plot_output_dir = Path(config.output_dirs["base"]) / radar / "plots"
+            plot_consumer = PlotConsumer(
+                repository=orchestrator.repository,
+                stop_event=stop_event,
+                output_dir=plot_output_dir,
+                config=config,
+                poll_interval=args.plot_interval,
+                show_live=args.show_plots,
+                name="PlotConsumer",
+            )
+            plot_consumer.start()
+
         orchestrator_thread.join()
+
     except KeyboardInterrupt:
         print("\nShutdown signal received — stopping pipeline...")
-        # orchestrator runs in a non-main thread so it never sees KeyboardInterrupt;
-        # call stop() explicitly so _main_loop breaks on the next iteration.
+        # Mark interrupted so the run is finalised as "cancelled" not "completed".
+        orchestrator._interrupted = True
+        stop_event.set()
+        # The orchestrator runs in a worker thread and never receives
+        # KeyboardInterrupt; set its stop flag explicitly.
         threading.Thread(target=_safe_stop, args=(orchestrator,), daemon=True).start()
-        orchestrator_thread.join(timeout=20)
+        try:
+            orchestrator_thread.join(timeout=20)
+        except KeyboardInterrupt:
+            print("[adapt] Forcing shutdown...")
         if orchestrator_thread.is_alive():
             print("Warning: orchestrator did not stop within 20 s")
+
     finally:
         stop_event.set()
         if plot_consumer is not None and plot_consumer.is_alive():
