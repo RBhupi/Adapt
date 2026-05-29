@@ -31,6 +31,7 @@ class ProjectionModule(BaseModule):
     """
 
     name = "projection"
+    pipeline_phase = 2
     inputs = ["segmented_ds", "dataset_history", "projection_config"]
     outputs = ["projected_ds"]
     input_contracts = {"segmented_ds": check_segmented_ds}

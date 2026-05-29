@@ -29,6 +29,7 @@ class DetectModule(BaseModule):
     """
 
     name = "detection"
+    pipeline_phase = 1
     inputs = ["grid_ds_2d", "detection_config"]
     outputs = ["segmented_ds", "num_cells"]
     input_contracts = {"grid_ds_2d": check_grid_ds_2d}

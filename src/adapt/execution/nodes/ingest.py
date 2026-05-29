@@ -40,6 +40,7 @@ class LoadModule(BaseModule):
     """
 
     name = "ingest"
+    pipeline_phase = 1
     inputs = ["nexrad_file", "ingest_config"]
     outputs = ["grid_ds", "grid_ds_2d", "scan_time"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}

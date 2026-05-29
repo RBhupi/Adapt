@@ -1,7 +1,7 @@
 """Tests for RadarProcessor error handling and success paths.
 
-The processor orchestrates ingest+detection via _single_executor and
-projection+analysis+tracking via _multi_executor. These tests patch the
+The processor orchestrates ingest+detection via _executors[1] and
+projection+analysis+tracking via _executors[2]. These tests patch the
 executors to keep the focus on orchestration rather than scientific behavior.
 """
 
@@ -38,7 +38,7 @@ def _fake_ds():
 
 
 def _fake_single_result(scan_time):
-    """Return what _single_executor.run() would produce."""
+    """Return what _executors[1].run() would produce."""
     return {
         "grid_ds": _fake_ds(),
         "grid_ds_2d": _fake_ds(),
@@ -60,7 +60,7 @@ def test_process_file_pipeline_exception_returns_false(
     def _boom(context):
         raise OSError("disk failure")
 
-    monkeypatch.setattr(proc._single_executor, "run", _boom)
+    monkeypatch.setattr(proc._executors[1], "run", _boom)
 
     ok = proc.process_file("/fake/path/file")
     assert ok is False
@@ -83,8 +83,8 @@ def test_process_file_contract_violation_stops_processor(
     def _boom_multi(context):
         raise ContractViolation("bad grid")
 
-    monkeypatch.setattr(proc._single_executor, "run", _fake_single)
-    monkeypatch.setattr(proc._multi_executor, "run", _boom_multi)
+    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
+    monkeypatch.setattr(proc._executors[2], "run", _boom_multi)
 
     ok1 = proc.process_file("/fake/path/file_1")
     ok2 = proc.process_file("/fake/path/file_2")
@@ -117,8 +117,8 @@ def test_process_file_success_saves_netcdf_and_returns_true(
         "cell_adjacency": pd.DataFrame(),
     }
 
-    monkeypatch.setattr(proc._single_executor, "run", _fake_single)
-    monkeypatch.setattr(proc._multi_executor, "run", lambda ctx: fake_result)
+    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
+    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_result)
 
     saved = []
     monkeypatch.setattr(
@@ -147,7 +147,7 @@ def test_process_file_skips_already_analyzed(
     proc.file_tracker = _FakeTracker()
     called = []
     monkeypatch.setattr(
-        proc._single_executor,
+        proc._executors[1],
         "run",
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
     )

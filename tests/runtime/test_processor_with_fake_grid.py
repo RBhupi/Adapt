@@ -1,7 +1,7 @@
 """Processor orchestration test using fake module outputs.
 
-The processor runs a single-frame executor (ingest+detection) to build a
-2-frame history, then runs the multi-frame executor (projection+analysis+tracking).
+The processor runs the phase-1 executor (ingest+detection) to build a
+2-frame history, then runs the phase-2 executor (projection+analysis+tracking).
 These tests patch the executors to avoid touching real scientific modules.
 """
 
@@ -58,8 +58,8 @@ def test_processor_accepts_fake_grid(
         "cell_adjacency": pd.DataFrame(),
     }
 
-    monkeypatch.setattr(proc._single_executor, "run", _fake_single)
-    monkeypatch.setattr(proc._multi_executor, "run", lambda ctx: fake_multi_result)
+    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
+    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi_result)
     monkeypatch.setattr(proc, "_save_results", lambda result, st: None)
 
     ok1 = proc.process_file("/fake/file_1")

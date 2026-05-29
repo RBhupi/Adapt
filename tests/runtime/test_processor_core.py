@@ -3,8 +3,9 @@
 
 """Tests for RadarProcessor graph-based processing.
 
-The processor delegates scientific work to two GraphExecutors built at startup:
-_single_executor (ingest + detection) and _multi_executor (projection + analysis + tracking).
+The processor delegates scientific work to per-phase GraphExecutors built at startup,
+grouped by pipeline_phase: phase=1 (ingest + detection), phase=2 (projection + analysis
++ tracking), phase=3 (post-persistence extensions, empty by default).
 These tests verify the orchestration layer: initialization, stop/start lifecycle.
 """
 
@@ -28,34 +29,35 @@ def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
     )
 
 
-def test_processor_initializes_with_two_executors(
+def test_processor_initializes_phase_executors(
     pipeline_config, pipeline_output_dirs, test_repository
 ):
-    """Processor creates two GraphExecutors (single-frame and multi-frame) on init."""
+    """Processor builds one GraphExecutor per pipeline_phase on init."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
-    assert isinstance(proc._single_executor, GraphExecutor)
-    assert isinstance(proc._multi_executor, GraphExecutor)
+    assert isinstance(proc._executors, dict)
+    assert isinstance(proc._executors[1], GraphExecutor)
+    assert isinstance(proc._executors[2], GraphExecutor)
 
 
-def test_single_executor_contains_ingest_and_detection(
+def test_phase1_executor_contains_ingest_and_detection(
     pipeline_config, pipeline_output_dirs, test_repository
 ):
-    """_single_executor graph covers exactly the ingest and detection nodes."""
+    """Phase-1 executor graph covers ingest and detection nodes."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
-    single_names = {n.name for n in proc._single_executor.nodes}
-    assert "ingest" in single_names
-    assert "detection" in single_names
+    phase1_names = {n.name for n in proc._executors[1].nodes}
+    assert "ingest" in phase1_names
+    assert "detection" in phase1_names
 
 
-def test_multi_executor_contains_projection_analysis_tracking(
+def test_phase2_executor_contains_projection_analysis_tracking(
     pipeline_config, pipeline_output_dirs, test_repository
 ):
-    """_multi_executor graph covers projection, analysis, and tracking nodes."""
+    """Phase-2 executor graph covers projection, analysis, and tracking nodes."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
-    multi_names = {n.name for n in proc._multi_executor.nodes}
-    assert "projection" in multi_names
-    assert "analysis" in multi_names
-    assert "tracking" in multi_names
+    phase2_names = {n.name for n in proc._executors[2].nodes}
+    assert "projection" in phase2_names
+    assert "analysis" in phase2_names
+    assert "tracking" in phase2_names
 
 
 def test_processor_stop_sets_flag(

@@ -231,6 +231,7 @@ class InternalConfig(AdaptBaseModel):
     output: InternalOutputConfig
     logging: InternalLoggingConfig
     processor: InternalProcessorConfig = Field(default_factory=InternalProcessorConfig)
+    extensions: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(
         extra="forbid",

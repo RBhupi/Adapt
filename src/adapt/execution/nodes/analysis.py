@@ -32,6 +32,7 @@ class AnalysisModule(BaseModule):
     """
 
     name = "analysis"
+    pipeline_phase = 2
     inputs = ["projected_ds", "analysis_config", "scan_time"]
     outputs = ["cell_stats", "cell_adjacency"]
     output_contracts = {

@@ -100,26 +100,28 @@ class RadarProcessor(threading.Thread):
                 "Initialize it in the orchestrator before creating the processor."
             )
 
-        # Build two execution graphs; module instances are shared (stateful
-        # projector/tracker state persists across files via the module objects).
-        _ensure_modules_registered()
+        # Build one execution graph per pipeline phase. Module instances are shared
+        # (stateful projector/tracker state persists across files).
+        _ensure_modules_registered(config.extensions)
         modules = registry.create_modules()
 
-        single_modules = [m for m in modules if m.name in {"ingest", "detection"}]
-        multi_modules = [
-            m for m in modules if m.name in {"projection", "analysis", "tracking"}
-        ]
+        phase_groups: dict[int, list] = {}
+        for m in modules:
+            phase_groups.setdefault(m.pipeline_phase, []).append(m)
 
-        self._single_executor = GraphExecutor(GraphBuilder(single_modules).build())
-        self._multi_executor = GraphExecutor(GraphBuilder(multi_modules).build())
+        self._executors: dict[int, GraphExecutor] = {
+            phase: GraphExecutor(GraphBuilder(mods).build())
+            for phase, mods in sorted(phase_groups.items())
+        }
 
         self._module_configs = materialize_module_configs(config)
 
-        logger.info(
-            "RadarProcessor graphs: single=[%s] multi=[%s]",
-            ", ".join(m.name for m in single_modules),
-            ", ".join(m.name for m in multi_modules),
-        )
+        for phase, mods in sorted(phase_groups.items()):
+            logger.info(
+                "RadarProcessor phase=%d: [%s]",
+                phase,
+                ", ".join(m.name for m in mods),
+            )
 
         # Frame pairing orchestration state
         self._segmented_history: list[tuple[str, object, datetime | None]] = []
@@ -173,15 +175,21 @@ class RadarProcessor(threading.Thread):
     def process_file(self, filepath) -> bool:
         """Process a NEXRAD file with frame-pairing orchestration.
 
-        Phase 1 — ingest + detection (every file):
-            Runs single-frame executor. Contract-validated by GraphExecutor.
+        Phase 1 — pipeline_phase=1 modules (every file):
+            Per-file executor. Contract-validated by GraphExecutor.
 
-        Phase 2 — frame pairing:
+        Frame pairing:
             Accumulates segmented datasets. Waits until 2 frames are ready.
 
-        Phase 3 — projection + analysis + tracking (when pair is ready):
-            Injects dataset_history into context. Runs multi-frame executor.
+        Phase 2 — pipeline_phase=2 modules (when pair is ready):
+            Injects dataset_history into context. Per-pair executor.
             Contract-validated by GraphExecutor.
+
+        Phase 3 — pipeline_phase=3 modules (after persistence, when pair ran):
+            Post-persistence executor. Extensions read from the data store
+            independently using the persistence reader/writer.
+            Context: run_id, scan_time, catalog_path, repository.
+            No-op if no phase-3 modules are registered.
 
         Returns
         -------
@@ -216,7 +224,7 @@ class RadarProcessor(threading.Thread):
             if self.repository:
                 base_ctx["repository"] = self.repository
 
-            frame_ctx = self._single_executor.run(base_ctx)
+            frame_ctx = self._executors[1].run(base_ctx)
             single_s = time.perf_counter() - t0
 
             # Register radar location from first scan (idempotent after that)
@@ -277,12 +285,24 @@ class RadarProcessor(threading.Thread):
             if self.repository:
                 pair_ctx["repository"] = self.repository
 
-            result = self._multi_executor.run(pair_ctx)
+            result = self._executors[2].run(pair_ctx)
             project_s = time.perf_counter() - t_proj
 
-            # ── Phase 5: persist results ───────────────────────────────────
+            # ── Persist results ────────────────────────────────────────────
             if self.repository and result:
                 self._save_results(result, scan_time)
+
+            # ── Phase 3: post-persistence extension modules ────────────────
+            # Extensions read from the data store independently via the
+            # persistence reader/writer — no in-memory objects are passed.
+            if 3 in self._executors and self.repository:
+                post_ctx = {
+                    "run_id": self.repository.run_id,
+                    "scan_time": scan_time,
+                    "catalog_path": self.repository.catalog.db_path,
+                    "repository": self.repository,
+                }
+                self._executors[3].run(post_ctx)
 
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0

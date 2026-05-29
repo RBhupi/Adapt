@@ -33,6 +33,7 @@ class TrackingModule(BaseModule):
     """
 
     name = "tracking"
+    pipeline_phase = 2
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time"]
     outputs = ["tracked_cells", "cell_events"]
     input_contracts = {"projected_ds": check_projected_ds}

@@ -171,6 +171,9 @@ class UserConfig(AdaptBaseModel):
     radar_variables: list[str] | None = None
     exclude_fields: list[str] | None = None
 
+    # Extension modules (optional, user-selected)
+    extensions: list[str] = Field(default_factory=list)
+
     # Nested overrides (advanced users)
     downloader: UserDownloaderConfig | None = None
     regridder: UserRegridderConfig | None = None
@@ -229,6 +232,9 @@ class UserConfig(AdaptBaseModel):
 
         if self.mode is not None:
             overrides["mode"] = self.mode
+
+        if self.extensions:
+            overrides["extensions"] = self.extensions
 
         if self.base_dir is not None:
             overrides["base_dir"] = str(self.base_dir)

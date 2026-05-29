@@ -52,6 +52,7 @@ class BaseModule(ABC):
     outputs: ClassVar[list[str]] = []
     input_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
     output_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
+    pipeline_phase: ClassVar[int] = 1
 
     @abstractmethod
     def run(self, context: dict) -> dict:

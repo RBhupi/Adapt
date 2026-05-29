@@ -37,12 +37,13 @@ logger = logging.getLogger(__name__)
 _DEFAULTS_YAML = Path(__file__).parent.parent / "configuration" / "defaults.yaml"
 
 
-def _ensure_modules_registered() -> None:
-    """Import module files listed in config/defaults.yaml.
+def _ensure_modules_registered(extensions: list[str] | None = None) -> None:
+    """Import module files listed in config/defaults.yaml plus any user extensions.
 
     Each entry under ``pipeline.modules`` is a Python module path.
     Importing it triggers the ``registry.register()`` call at module level.
-    To add a new module: add one line to defaults.yaml — no Python edits needed.
+    To add a core module: add one line to defaults.yaml.
+    To add an extension: pass its dotted import path via ``extensions``.
     """
     try:
         with open(_DEFAULTS_YAML) as f:
@@ -53,19 +54,28 @@ def _ensure_modules_registered() -> None:
             "Could not read defaults.yaml (%s); falling back to hardcoded list", e
         )
         module_paths = [
-            "adapt.modules.ingest.module",
-            "adapt.modules.detection.module",
-            "adapt.modules.projection.module",
-            "adapt.modules.analysis.module",
-            "adapt.modules.tracking.module",
+            "adapt.execution.nodes.ingest",
+            "adapt.execution.nodes.detection",
+            "adapt.execution.nodes.projection",
+            "adapt.execution.nodes.analysis",
+            "adapt.execution.nodes.tracking",
         ]
 
     for path in module_paths:
         try:
             importlib.import_module(path)
-            logger.debug("Registered module from: %s", path)
+            logger.debug("Registered core module from: %s", path)
         except Exception as e:
-            logger.error("Failed to import module '%s': %s", path, e)
+            logger.error("Failed to import core module '%s': %s", path, e)
+
+    for path in extensions or []:
+        try:
+            importlib.import_module(path)
+            logger.info("Registered extension module from: %s", path)
+        except Exception as e:
+            raise ImportError(
+                f"Failed to load extension module '{path}': {e}"
+            ) from e
 
 
 class NexradPipeline:
