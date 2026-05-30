@@ -78,9 +78,7 @@ class LoadModule(BaseModule):
         )
 
         if ds is None:
-            raise RuntimeError(
-                f"Ingest failed: load_and_regrid returned None for {filepath}"
-            )
+            raise RuntimeError(f"Ingest failed: load_and_regrid returned None for {filepath}")
 
         z_level = config.z_level
         z_name = config.z_coord

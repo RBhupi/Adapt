@@ -64,7 +64,6 @@ def _make_tracking_module(name, inputs, outputs):
 
 
 class TestNode:
-
     @pytest.mark.unit
     def test_node_wraps_module(self):
         mod = StubModule("grid", ["radar_volume"], ["grid_volume"])
@@ -96,7 +95,6 @@ class TestNode:
 
 
 class TestGraphBuilder:
-
     @pytest.mark.unit
     def test_build_linear_chain(self):
         """A → B → C should produce correct dependencies."""
@@ -127,9 +125,7 @@ class TestGraphBuilder:
         consumer1 = StubModule("consumer1", ["data"], ["out1"])
         consumer2 = StubModule("consumer2", ["data"], ["out2"])
 
-        nodes = {
-            n.name: n for n in GraphBuilder([source, consumer1, consumer2]).build()
-        }
+        nodes = {n.name: n for n in GraphBuilder([source, consumer1, consumer2]).build()}
 
         assert nodes["source"] in nodes["consumer1"].dependencies
         assert nodes["source"] in nodes["consumer2"].dependencies
@@ -174,7 +170,6 @@ class TestGraphBuilder:
 
 
 class TestGraphExecutor:
-
     def setup_method(self):
         """Clear shared tracker before each test."""
         _execution_order.clear()
@@ -257,9 +252,7 @@ class TestGraphExecutor:
     @pytest.mark.unit
     def test_executor_single_node(self):
         """Single node with no deps runs and returns output."""
-        mod = StubModule(
-            "solo", [], ["result"], side_effect=lambda ctx: {"result": "done"}
-        )
+        mod = StubModule("solo", [], ["result"], side_effect=lambda ctx: {"result": "done"})
         nodes = GraphBuilder([mod]).build()
         ctx = GraphExecutor(nodes).run({})
         assert ctx["result"] == "done"
@@ -306,7 +299,6 @@ class _ContractStub(BaseModule):
 
 
 class TestGraphExecutorContracts:
-
     @pytest.mark.unit
     def test_input_contract_is_called_before_run(self):
         """Input validator must be called before module.run()."""
@@ -319,9 +311,7 @@ class TestGraphExecutorContracts:
             call_order.append("run")
             return {"out": 1}
 
-        mod = _ContractStub(
-            "m", ["inp"], ["out"], run_fn=_run, input_contracts={"inp": _validate}
-        )
+        mod = _ContractStub("m", ["inp"], ["out"], run_fn=_run, input_contracts={"inp": _validate})
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({"inp": "value"})
 
@@ -339,9 +329,7 @@ class TestGraphExecutorContracts:
         def _validate(val):
             call_order.append("validate")
 
-        mod = _ContractStub(
-            "m", [], ["out"], run_fn=_run, output_contracts={"out": _validate}
-        )
+        mod = _ContractStub("m", [], ["out"], run_fn=_run, output_contracts={"out": _validate})
         nodes = GraphBuilder([mod]).build()
         GraphExecutor(nodes).run({})
 
@@ -354,9 +342,7 @@ class TestGraphExecutorContracts:
         def _bad_validator(val):
             raise ContractViolation("input contract broken")
 
-        mod = _ContractStub(
-            "m", ["inp"], ["out"], input_contracts={"inp": _bad_validator}
-        )
+        mod = _ContractStub("m", ["inp"], ["out"], input_contracts={"inp": _bad_validator})
         nodes = GraphBuilder([mod]).build()
 
         with pytest.raises(ContractViolation, match="input contract broken"):
@@ -448,12 +434,8 @@ class TestExecutorBranchGaps:
         iteration A is already in `completed` — the `continue` on line 82 fires.
         """
         order = []
-        A = StubModule(
-            "a", [], ["x"], side_effect=lambda ctx: (order.append("a") or {"x": 1})
-        )
-        B = StubModule(
-            "b", ["x"], ["y"], side_effect=lambda ctx: (order.append("b") or {"y": 2})
-        )
+        A = StubModule("a", [], ["x"], side_effect=lambda ctx: order.append("a") or {"x": 1})
+        B = StubModule("b", ["x"], ["y"], side_effect=lambda ctx: order.append("b") or {"y": 2})
         # Reverse order: B first, then A
         nodes = GraphBuilder([B, A]).build()
         result = GraphExecutor(nodes).run({})

@@ -282,10 +282,7 @@ class AwsNexradDownloader(threading.Thread):
                 logger.exception("Download task failed")
 
             # Historical: exit after completion
-            if (
-                self.config.downloader.mode == "historical"
-                and self.is_historical_complete()
-            ):
+            if self.config.downloader.mode == "historical" and self.is_historical_complete():
                 logger.info("Historical download complete")
                 break
 
@@ -299,10 +296,7 @@ class AwsNexradDownloader(threading.Thread):
         for _ in range(seconds // 2):
             if self.stopped():
                 break
-            if (
-                self.config.downloader.mode == "historical"
-                and self.is_historical_complete()
-            ):
+            if self.config.downloader.mode == "historical" and self.is_historical_complete():
                 break
             self._sleep(2)
 
@@ -360,9 +354,7 @@ class AwsNexradDownloader(threading.Thread):
         end = self._clock()
         start = end - timedelta(minutes=self.latest_minutes)
 
-        logger.debug(
-            "Realtime: last %d min (%s to %s)", self.latest_minutes, start, end
-        )
+        logger.debug("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
 
         # Use the full realtime window for availability checks. This avoids
         # false "not found" warnings around UTC midnight when the window spans
@@ -486,9 +478,7 @@ class AwsNexradDownloader(threading.Thread):
             if self._file_exists(local_path):
                 with self._known_files_lock:
                     if local_path not in self._known_files:
-                        self._notify_queue(
-                            local_path, scan.scan_time, is_new, download_seconds
-                        )
+                        self._notify_queue(local_path, scan.scan_time, is_new, download_seconds)
                         self._known_files.add(local_path)
                         queued += 1
             else:
@@ -506,9 +496,7 @@ class AwsNexradDownloader(threading.Thread):
             self._processed_scans = queued
             if processed >= len(scans):
                 self._historical_complete.set()
-                logger.info(
-                    "Historical mode complete after processing %d scans", processed
-                )
+                logger.info("Historical mode complete after processing %d scans", processed)
 
         return new_downloads
 
@@ -518,9 +506,7 @@ class AwsNexradDownloader(threading.Thread):
         date_str = scan.scan_time.strftime("%Y%m%d")
 
         if self.output_dirs:
-            return (
-                self.output_dirs["base"] / self.radar / "nexrad" / date_str / filename
-            )
+            return self.output_dirs["base"] / self.radar / "nexrad" / date_str / filename
 
         # Legacy fallback
         return (self.output_dir / date_str / self.radar / filename).resolve()
@@ -578,13 +564,9 @@ class AwsNexradDownloader(threading.Thread):
             if tracker:
                 tracker.register_file(file_id, self.radar, scan_time, path)
                 timings = (
-                    {"download_seconds": download_seconds}
-                    if download_seconds is not None
-                    else None
+                    {"download_seconds": download_seconds} if download_seconds is not None else None
                 )
-                tracker.mark_stage_complete(
-                    file_id, "downloaded", path=path, timings=timings
-                )
+                tracker.mark_stage_complete(file_id, "downloaded", path=path, timings=timings)
 
             self.result_queue.put(
                 {

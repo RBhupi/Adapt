@@ -6,9 +6,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 
 class _FakeDownloader:
-    def __init__(
-        self, complete: bool, alive: bool, processed: int = 0, expected: int = 0
-    ):
+    def __init__(self, complete: bool, alive: bool, processed: int = 0, expected: int = 0):
         self._complete = complete
         self._alive = alive
         self._processed = processed
@@ -62,9 +60,7 @@ class _FakeRepository:
 def test_historical_complete_returns_true_and_stops_processor(pipeline_config):
     pipeline_config = pipeline_config.model_copy(update={"mode": "historical"})
     orch = PipelineOrchestrator(pipeline_config)
-    orch.downloader = _FakeDownloader(
-        complete=True, alive=False, processed=5, expected=5
-    )
+    orch.downloader = _FakeDownloader(complete=True, alive=False, processed=5, expected=5)
     orch.processor = _FakeProcessor()
 
     done = orch._check_historical_complete()

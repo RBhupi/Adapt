@@ -125,5 +125,5 @@ Adapt is supported by the U.S. Department of Energy as part of the Atmospheric R
 
 ## License
 
-Copyright © 2026, UChicago Argonne, LLC  
+Copyright © 2026, UChicago Argonne, LLC
 See [LICENSE](LICENSE) for terms and disclaimer.

@@ -183,9 +183,7 @@ def _load_saved_runtime_config(base_dir: str, run_id: str) -> InternalConfig:
     """Load saved runtime config JSON for an existing run."""
     cfg_path = Path(base_dir) / f"runtime_config_{run_id}.json"
     if not cfg_path.exists():
-        raise FileNotFoundError(
-            f"Saved runtime config not found for run_id '{run_id}': {cfg_path}"
-        )
+        raise FileNotFoundError(f"Saved runtime config not found for run_id '{run_id}': {cfg_path}")
 
     with open(cfg_path) as f:
         cfg_dict = json.load(f)
@@ -304,9 +302,7 @@ def init_runtime_config(args) -> InternalConfig:
         if run_id:
             print(f"Reusing existing run ID (config unchanged): {run_id}")
         else:
-            run_id = DataRepository.generate_run_id(
-                internal_config_dict["downloader"]["radar"]
-            )
+            run_id = DataRepository.generate_run_id(internal_config_dict["downloader"]["radar"])
     internal_config_dict["run_id"] = run_id
 
     config = InternalConfig.model_validate(internal_config_dict)

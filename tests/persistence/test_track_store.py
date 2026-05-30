@@ -149,9 +149,7 @@ def _empty_cell_adjacency() -> pd.DataFrame:
     )
 
 
-def _initiation_event(
-    scan_time: datetime, cell_uid: str, cell_label: int
-) -> pd.DataFrame:
+def _initiation_event(scan_time: datetime, cell_uid: str, cell_label: int) -> pd.DataFrame:
     ts = scan_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     return pd.DataFrame(
         [
@@ -191,9 +189,7 @@ def _continue_event(
     )
 
 
-def _termination_event(
-    scan_time: datetime, cell_uid: str, cell_label: int
-) -> pd.DataFrame:
+def _termination_event(scan_time: datetime, cell_uid: str, cell_label: int) -> pd.DataFrame:
     ts = scan_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     return pd.DataFrame(
         [
@@ -329,9 +325,7 @@ def test_split_sets_split_source_retroactively_on_prev_scan(store):
         ],
         ignore_index=True,
     )
-    cells2 = pd.concat(
-        [_tracked_cells(1, "CCCC"), _tracked_cells(2, "DDDD")], ignore_index=True
-    )
+    cells2 = pd.concat([_tracked_cells(1, "CCCC"), _tracked_cells(2, "DDDD")], ignore_index=True)
     store.write_scan(
         "r1",
         t2,
@@ -355,9 +349,7 @@ def test_merge_into_existing_track_marks_sources_terminated(store):
         ],
         ignore_index=True,
     )
-    cells1 = pd.concat(
-        [_tracked_cells(1, "EE"), _tracked_cells(2, "FF")], ignore_index=True
-    )
+    cells1 = pd.concat([_tracked_cells(1, "EE"), _tracked_cells(2, "FF")], ignore_index=True)
     store.write_scan(
         "r1",
         t1,
@@ -393,9 +385,7 @@ def test_merge_into_existing_track_marks_sources_terminated(store):
 def test_merge_into_new_cell_uid_sets_origin_type_merge(store):
     t1 = _t("2024-01-01T12:00:00")
     t2 = _t("2024-01-01T12:05:00")
-    cells1 = pd.concat(
-        [_tracked_cells(1, "GG"), _tracked_cells(2, "HH")], ignore_index=True
-    )
+    cells1 = pd.concat([_tracked_cells(1, "GG"), _tracked_cells(2, "HH")], ignore_index=True)
     init2 = pd.concat(
         [
             _initiation_event(t1, "GG", 1),
@@ -697,8 +687,6 @@ def test_readonly_trackstore_sees_written_data_with_catalog_open(tmp_path):
     writer.close()
 
     reader = TrackStore(db_path, readonly=True)
-    count = reader._connect().execute(
-        "SELECT count(*) FROM cells_by_scan"
-    ).fetchone()[0]
+    count = reader._connect().execute("SELECT count(*) FROM cells_by_scan").fetchone()[0]
     reader.close()
     assert count == 1

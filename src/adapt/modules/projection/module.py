@@ -253,17 +253,15 @@ class RadarCellProjector:
 
         # Get reflectivity from ds (already at correct z-level from processor)
         # Reflectivity is always 2D at the configured z-level
-        refl1 = np.nan_to_num(
-            ds_list[0][self.refl_var].values, nan=self.nan_fill
-        ).astype(np.float32)
-        refl2 = np.nan_to_num(
-            ds_list[1][self.refl_var].values, nan=self.nan_fill
-        ).astype(np.float32)
+        refl1 = np.nan_to_num(ds_list[0][self.refl_var].values, nan=self.nan_fill).astype(
+            np.float32
+        )
+        refl2 = np.nan_to_num(ds_list[1][self.refl_var].values, nan=self.nan_fill).astype(
+            np.float32
+        )
 
         refl1_norm, refl2_norm = self._normalize(refl1, refl2)
-        flow = cv2.calcOpticalFlowFarneback(
-            refl1_norm, refl2_norm, None, **self.flow_params
-        )
+        flow = cv2.calcOpticalFlowFarneback(refl1_norm, refl2_norm, None, **self.flow_params)
         flow = self._sanitize_flow(flow)
 
         # Get cell_labels from segmenter output
@@ -288,9 +286,7 @@ class RadarCellProjector:
         # Each pixel carries its original flow value and uses accumulated displacement.
         # @TODO I have removed more complecated logic of using flow at new positions for each step,
         # because some cells did not move in noisy radar data during the test.
-        future_projections = self._project_frames(
-            labels_curr, flow, n_steps=self.max_proj_steps
-        )
+        future_projections = self._project_frames(labels_curr, flow, n_steps=self.max_proj_steps)
         for i in range(self.max_proj_steps):
             labels_proj_list.append(future_projections[i])
 
@@ -301,9 +297,7 @@ class RadarCellProjector:
         # frame_offset=0: registration (projection from t-1 to t0)
         # frame_offset=1,2,...: future projections from t0
         if labels_proj_list:
-            frame_offsets = list(
-                range(len(labels_proj_list))
-            )  # 0, 1, 2, ... (0=registration)
+            frame_offsets = list(range(len(labels_proj_list)))  # 0, 1, 2, ... (0=registration)
             projections = np.stack(labels_proj_list, axis=0)
 
             ds_out["cell_projections"] = xr.DataArray(
@@ -337,9 +331,7 @@ class RadarCellProjector:
                 },
             )
 
-            logger.info(
-                f"Added cell_projections with {len(labels_proj_list)} projection steps"
-            )
+            logger.info(f"Added cell_projections with {len(labels_proj_list)} projection steps")
 
         # Store projection metadata for contract validation
         # This enables self-describing datasets: validators can read runtime config
@@ -347,9 +339,7 @@ class RadarCellProjector:
         ds_out.attrs.update(
             {
                 "max_projection_steps": self.max_proj_steps,
-                "num_projection_steps": (
-                    len(labels_proj_list) if labels_proj_list else 0
-                ),
+                "num_projection_steps": (len(labels_proj_list) if labels_proj_list else 0),
                 "projection_method": "adapt_default",
             }
         )
@@ -498,9 +488,7 @@ class RadarCellProjector:
                 float(magnitude.max()),
             )
             # Scale down vectors that exceed the cap, preserving direction.
-            scale = np.where(
-                too_large, self.max_flow_magnitude / np.maximum(magnitude, 1e-6), 1.0
-            )
+            scale = np.where(too_large, self.max_flow_magnitude / np.maximum(magnitude, 1e-6), 1.0)
             flow = flow * scale[:, :, np.newaxis]
 
         return flow

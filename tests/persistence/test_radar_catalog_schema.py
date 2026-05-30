@@ -9,10 +9,7 @@ def test_radar_catalog_initializes_track_tables(tmp_path):
 
     catalog = RadarCatalog(radar_dir)
     conn = sqlite3.connect(catalog.db_path)
-    tables = {
-        row[0]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     catalog.close()
 

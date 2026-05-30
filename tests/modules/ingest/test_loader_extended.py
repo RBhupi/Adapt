@@ -45,9 +45,7 @@ def test_loader_with_custom_roi_func(make_ingest_config):
 
 def test_loader_with_custom_grid_limits(make_ingest_config):
     """Loader respects custom grid_limits."""
-    config = make_ingest_config(
-        grid_limits=((0, 10000), (-50000, 50000), (-50000, 50000))
-    )
+    config = make_ingest_config(grid_limits=((0, 10000), (-50000, 50000), (-50000, 50000)))
     loader = RadarDataLoader(config)
     assert loader.grid_limits[0] == (0, 10000)
 

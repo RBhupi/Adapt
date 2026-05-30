@@ -60,9 +60,7 @@ def test_phase2_executor_contains_projection_analysis_tracking(
     assert "tracking" in phase2_names
 
 
-def test_processor_stop_sets_flag(
-    pipeline_config, pipeline_output_dirs, test_repository
-):
+def test_processor_stop_sets_flag(pipeline_config, pipeline_output_dirs, test_repository):
     """stop() signals the run loop to exit."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
     assert not proc.stopped()
@@ -70,9 +68,7 @@ def test_processor_stop_sets_flag(
     assert proc.stopped()
 
 
-def test_processor_stop_is_idempotent(
-    pipeline_config, pipeline_output_dirs, test_repository
-):
+def test_processor_stop_is_idempotent(pipeline_config, pipeline_output_dirs, test_repository):
     """Calling stop() twice is safe."""
     proc = _make_proc(pipeline_config, pipeline_output_dirs, test_repository)
     proc.stop()
@@ -111,6 +107,4 @@ def test_processor_close_database_returns_none(
 def test_processor_requires_repository(pipeline_config, pipeline_output_dirs):
     """RadarProcessor raises ValueError when repository is None."""
     with pytest.raises(ValueError, match="DataRepository is required"):
-        RadarProcessor(
-            queue.Queue(), pipeline_config, pipeline_output_dirs, repository=None
-        )
+        RadarProcessor(queue.Queue(), pipeline_config, pipeline_output_dirs, repository=None)

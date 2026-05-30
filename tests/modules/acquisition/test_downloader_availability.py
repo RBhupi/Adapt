@@ -42,9 +42,7 @@ def test_availability_check_warns_when_radar_explicitly_not_found(caplog, temp_d
         downloader._check_radar_available(start, end)
 
     # Should warn because check succeeded but radar not found
-    assert any(
-        "Radar KOHX not found in AWS" in record.message for record in caplog.records
-    )
+    assert any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
 
 
 def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
@@ -74,9 +72,7 @@ def test_availability_check_does_not_warn_when_check_fails(caplog, temp_dir):
         downloader._check_radar_available(start, end)
 
     # Should NOT warn because check failed (exception)
-    assert not any(
-        "Radar KOHX not found in AWS" in record.message for record in caplog.records
-    )
+    assert not any("Radar KOHX not found in AWS" in record.message for record in caplog.records)
 
 
 def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
@@ -110,6 +106,4 @@ def test_availability_check_does_not_warn_when_radar_found(caplog, temp_dir):
         downloader._check_radar_available(start, end)
 
     # Should NOT warn because radar was found
-    assert not any(
-        "Radar KOHX not found in AWS" in record.message for record in caplog.records
-    )
+    assert not any("Radar KOHX not found in AWS" in record.message for record in caplog.records)

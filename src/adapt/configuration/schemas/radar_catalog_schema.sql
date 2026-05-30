@@ -1,8 +1,8 @@
 -- ====================================================================
 -- Adapt Radar Catalog Database Schema (Radar Level)
--- File: catalog.db  
+-- File: catalog.db
 -- Location: {root_dir}/{radar}/catalog.db
--- 
+--
 -- Purpose: Detailed tracking of all data items for a specific radar
 -- ====================================================================
 
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 
 -- ====================================================================
 -- Table: progress
--- 
+--
 -- Real-time processing state tracking per run
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS progress (

@@ -164,9 +164,7 @@ class FileProcessingTracker:
         with self._lock:
             for col_def in timing_cols:
                 with contextlib.suppress(sqlite3.OperationalError):
-                    conn.execute(
-                        f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}"
-                    )
+                    conn.execute(f"ALTER TABLE radar_file_processing ADD COLUMN {col_def}")
             conn.commit()
 
     def register_file(

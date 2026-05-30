@@ -246,7 +246,7 @@ _CONFIG_TEMPLATE = """\
 #   adapt run-nexrad config.yaml --radar KDIX --mode historical \\
 #       --start-time 2025-03-05T15:00:00Z --end-time 2025-03-05T18:00:00Z
 #
-# All settings below override the built-in defaults for given run. 
+# All settings below override the built-in defaults for given run.
 # CLI options (e.g. --radar, --mode) take precedence over config file values.
 
 # --------------------------------------------------------------------------

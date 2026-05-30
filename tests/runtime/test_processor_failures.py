@@ -21,9 +21,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 def _make_proc(pipeline_config, pipeline_output_dirs, test_repository):
     q = queue.Queue()
-    return RadarProcessor(
-        q, pipeline_config, pipeline_output_dirs, repository=test_repository
-    )
+    return RadarProcessor(q, pipeline_config, pipeline_output_dirs, repository=test_repository)
 
 
 def _fake_ds():

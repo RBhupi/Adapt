@@ -434,9 +434,7 @@ class DataClient:
     # Data Access Methods
     # =========================================================================
 
-    def latest(
-        self, item_type: str, radar: str | None = None
-    ) -> pd.DataFrame | xr.Dataset:
+    def latest(self, item_type: str, radar: str | None = None) -> pd.DataFrame | xr.Dataset:
         """Load the most recent item of a given type.
 
         Parameters
@@ -461,9 +459,7 @@ class DataClient:
         item = catalog.get_latest_item(item_type)
 
         if not item:
-            raise FileNotFoundError(
-                f"No items found for type '{item_type}' in radar {radar}"
-            )
+            raise FileNotFoundError(f"No items found for type '{item_type}' in radar {radar}")
 
         # Construct full file path
         file_path = self.root_dir / radar / item["file_path"]
@@ -535,8 +531,7 @@ class DataClient:
 
             # Get all Parquet file paths
             file_paths = [
-                str(self.root_dir / radar / row["file_path"])
-                for _, row in items.iterrows()
+                str(self.root_dir / radar / row["file_path"]) for _, row in items.iterrows()
             ]
 
             # Create or replace view
@@ -546,7 +541,7 @@ class DataClient:
                     conn.execute(f"DROP VIEW IF EXISTS {item_type}")
                     # Register table view
                     conn.execute(f"""
-                        CREATE VIEW {item_type} AS 
+                        CREATE VIEW {item_type} AS
                         SELECT * FROM read_parquet({file_paths})
                     """)
                 except Exception as e:
@@ -564,9 +559,7 @@ class DataClient:
     # Scan Listing and Time-Based Access
     # =========================================================================
 
-    def list_scans(
-        self, item_type: str, radar: str | None = None, limit: int = 50
-    ) -> pd.DataFrame:
+    def list_scans(self, item_type: str, radar: str | None = None, limit: int = 50) -> pd.DataFrame:
         """List available scans with timestamps.
 
         Parameters
@@ -633,9 +626,7 @@ class DataClient:
             radar = radars[0]
 
         # Convert to string for comparison
-        scan_time_str = (
-            scan_time.isoformat() if isinstance(scan_time, datetime) else scan_time
-        )
+        scan_time_str = scan_time.isoformat() if isinstance(scan_time, datetime) else scan_time
 
         catalog = self._get_radar_catalog(radar)
         conn = catalog._get_connection()
@@ -911,9 +902,7 @@ class DataClient:
 
         bundle: dict[str, Any] = {
             "scan_time": (
-                scan_time_dt.isoformat()
-                if isinstance(scan_time_dt, datetime)
-                else scan_time
+                scan_time_dt.isoformat() if isinstance(scan_time_dt, datetime) else scan_time
             ),
             "radar": radar,
             "segmentation2d": None,
@@ -963,12 +952,8 @@ class DataClient:
         # Get tracks active at this scan time
         run_id = scan.get("run_id")
         if run_id:
-            scan_cells = TrackStore(catalog.db_path).get_cells_by_scan(
-                run_id, scan_time_dt
-            )
-            bundle["tracks"] = (
-                scan_cells.to_dict("records") if not scan_cells.empty else []
-            )
+            scan_cells = TrackStore(catalog.db_path).get_cells_by_scan(run_id, scan_time_dt)
+            bundle["tracks"] = scan_cells.to_dict("records") if not scan_cells.empty else []
 
         return bundle
 
@@ -1020,11 +1005,7 @@ class DataClient:
                 # Extract cell tracking info from cells DataFrame
                 if "cell_uid" in bundle["cells"].columns:
                     uids = sorted(
-                        bundle["cells"]["cell_uid"]
-                        .dropna()
-                        .astype(str)
-                        .unique()
-                        .tolist()
+                        bundle["cells"]["cell_uid"].dropna().astype(str).unique().tolist()
                     )
                     for uid in uids:
                         bundle["tracks"].append({"cell_uid": uid})
@@ -1037,9 +1018,7 @@ class DataClient:
         conn = catalog._get_connection()
 
         with catalog._lock:
-            row = conn.execute(
-                "SELECT * FROM items WHERE item_id = ?", (item_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
 
         return dict(row) if row else None
 

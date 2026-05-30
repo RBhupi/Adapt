@@ -34,9 +34,7 @@ def test_processor_accepts_fake_grid(
 ):
     """Processor handles a successful 2-frame pipeline result correctly."""
     in_q = queue.Queue()
-    proc = RadarProcessor(
-        in_q, pipeline_config, pipeline_output_dirs, repository=test_repository
-    )
+    proc = RadarProcessor(in_q, pipeline_config, pipeline_output_dirs, repository=test_repository)
 
     scan_times = [
         datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),

@@ -46,9 +46,7 @@ class RegridderConfig(AdaptBaseModel):
     """PyART regridding configuration."""
 
     grid_shape: tuple[int, int, int] = (41, 301, 301)
-    grid_limits: tuple[
-        tuple[float, float], tuple[float, float], tuple[float, float]
-    ] = (
+    grid_limits: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = (
         (0.0, 20000.0),
         (-150000.0, 150000.0),
         (-150000.0, 150000.0),
@@ -68,9 +66,7 @@ class SegmenterConfig(AdaptBaseModel):
     max_cellsize_gridpoint: int | None = Field(None, ge=1)
     closing_kernel: tuple[int, int] = (1, 1)
     filter_by_size: bool = True
-    h_maxima: float = Field(
-        5.0, gt=0, description="h-maxima height for cell seeding (dBZ)"
-    )
+    h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
 
     @field_validator("threshold", mode="before")
     @classmethod

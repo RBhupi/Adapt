@@ -12,8 +12,8 @@ Select all that apply.
 ## What changed
 2-4 bullets in plain language.
 
-- 
-- 
+-
+-
 
 ## Why
 1-2 lines on the user/problem impact.

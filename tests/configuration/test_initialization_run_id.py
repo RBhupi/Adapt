@@ -39,9 +39,7 @@ def test_init_runtime_config_accepts_valid_user_run_id(tmp_path, capsys):
 
 def test_init_runtime_config_rejects_invalid_user_run_id(tmp_path):
     """Invalid run_id format raises a ValueError."""
-    with pytest.raises(
-        ValueError, match="Invalid run_id: must match YYYYMONDD-HHMM-RADAR"
-    ):
+    with pytest.raises(ValueError, match="Invalid run_id: must match YYYYMONDD-HHMM-RADAR"):
         init_runtime_config(_args(tmp_path, run_id="bad-run-id"))
 
 
@@ -68,12 +66,8 @@ def test_init_runtime_config_continues_existing_run_id(tmp_path, capsys):
 
 def test_init_runtime_config_requires_base_dir_with_run_id(tmp_path):
     """--base-dir is required when --run-id is provided."""
-    with pytest.raises(
-        ValueError, match="--base-dir is required when --run-id is provided"
-    ):
-        init_runtime_config(
-            _args(tmp_path, run_id="2026MAR23-0206-KBOX", base_dir=None)
-        )
+    with pytest.raises(ValueError, match="--base-dir is required when --run-id is provided"):
+        init_runtime_config(_args(tmp_path, run_id="2026MAR23-0206-KBOX", base_dir=None))
 
 
 def test_init_runtime_config_existing_run_ignores_config_and_cli(tmp_path, capsys):

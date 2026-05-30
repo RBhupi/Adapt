@@ -140,9 +140,7 @@ class TestTypeCoercion:
 
     def test_method_normalized_to_lowercase(self):
         """Method names are normalized to lowercase."""
-        user = UserConfig(
-            base_dir="/tmp", radar="KHTX", segmentation_method="THRESHOLD"
-        )
+        user = UserConfig(base_dir="/tmp", radar="KHTX", segmentation_method="THRESHOLD")
         config = resolve_config(ParamConfig(), user, None)
 
         assert config.segmenter.method == "threshold"
@@ -371,9 +369,7 @@ class TestIntegration:
         default_excludes = set(param.analyzer.exclude_fields)
 
         # User sets exclude_fields at top level (alias)
-        user = UserConfig(
-            base_dir="/tmp", radar="KHTX", exclude_fields=["top_level_exclude"]
-        )
+        user = UserConfig(base_dir="/tmp", radar="KHTX", exclude_fields=["top_level_exclude"])
 
         config = resolve_config(param, user, None)
 

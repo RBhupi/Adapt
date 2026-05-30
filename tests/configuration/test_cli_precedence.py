@@ -5,9 +5,7 @@ from adapt.configuration.schemas.user import UserConfig
 
 
 def test_cli_overrides_do_not_mutate_user():
-    user = UserConfig.model_validate(
-        {"RADAR_ID": "KABC", "MODE": "realtime", "BASE_DIR": "/tmp"}
-    )
+    user = UserConfig.model_validate({"RADAR_ID": "KABC", "MODE": "realtime", "BASE_DIR": "/tmp"})
 
     cli = CLIConfig.model_validate({"radar": "KHTX"})
 

@@ -2,7 +2,7 @@
 -- Adapt Registry Database Schema (Root Level)
 -- File: adapt_registry.db
 -- Location: {root_dir}/adapt_registry.db
--- 
+--
 -- Purpose: Global registry tracking all runs and radars
 -- ====================================================================
 
@@ -11,7 +11,7 @@ PRAGMA foreign_keys=ON;   -- Enforce foreign key constraints
 
 -- ====================================================================
 -- Table: runs
--- 
+--
 -- Tracks all pipeline runs across all radars
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS runs (
@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 
 -- ====================================================================
 -- Table: radars
--- 
+--
 -- Registry of radar stations processed by this repository
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS radars (
@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_radars_updated ON radars(last_updated DESC);
 
 -- ====================================================================
 -- Table: item_types
--- 
+--
 -- Registry of product types that can be stored
 -- Allows dynamic addition without code changes
 -- ====================================================================

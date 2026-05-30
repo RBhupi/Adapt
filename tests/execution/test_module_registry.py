@@ -67,7 +67,6 @@ def reg():
 
 
 class TestRegistration:
-
     @pytest.mark.unit
     def test_register_single_module(self, reg):
         reg.register(StubA)
@@ -141,7 +140,6 @@ class TestRegistration:
 
 
 class TestRetrieval:
-
     @pytest.mark.unit
     def test_get_returns_class(self, reg):
         reg.register(StubA)
@@ -169,7 +167,6 @@ class TestRetrieval:
 
 
 class TestCreateModules:
-
     @pytest.mark.unit
     def test_create_modules_returns_instances(self, reg):
         reg.register(StubA)
@@ -211,7 +208,6 @@ class TestCreateModules:
 
 
 class TestRegistryGraphIntegration:
-
     @pytest.mark.unit
     def test_create_modules_feeds_graph_builder(self, reg):
         """Modules from registry can be used directly with GraphBuilder."""

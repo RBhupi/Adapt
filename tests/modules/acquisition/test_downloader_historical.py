@@ -49,9 +49,7 @@ def test_fetch_scans_filters_and_sorts(monkeypatch, tmp_path, make_config):
 
     config = make_config()
     d = AwsNexradDownloader(config, output_dir=tmp_path)
-    monkeypatch.setattr(
-        d.conn, "get_avail_scans_in_range", lambda *args, **kwargs: scans
-    )
+    monkeypatch.setattr(d.conn, "get_avail_scans_in_range", lambda *args, **kwargs: scans)
 
     result = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))
     assert len(result) == 2

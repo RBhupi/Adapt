@@ -164,12 +164,8 @@ class DataRepository:
         # Register radar in global registry (idempotent), including optional location metadata.
         radars = self.registry.list_radars()
         row = radars[radars["radar"] == self.radar] if not radars.empty else None
-        existing_lat = (
-            row.iloc[0]["location_lat"] if row is not None and not row.empty else None
-        )
-        existing_lon = (
-            row.iloc[0]["location_lon"] if row is not None and not row.empty else None
-        )
+        existing_lat = row.iloc[0]["location_lat"] if row is not None and not row.empty else None
+        existing_lon = row.iloc[0]["location_lon"] if row is not None and not row.empty else None
 
         # Do not use external lookup tables for location metadata. The pipeline
         # will populate location_lat/location_lon from the first ingested radar file.
@@ -343,9 +339,7 @@ class DataRepository:
 
         return xr.open_dataset(file_path)
 
-    def open_table(
-        self, artifact_id: str, table_name: str | None = None
-    ) -> pd.DataFrame:
+    def open_table(self, artifact_id: str, table_name: str | None = None) -> pd.DataFrame:
         """Open SQLite or Parquet artifact as DataFrame.
 
         Parameters
@@ -615,9 +609,7 @@ class DataRepository:
             Registered artifact ID
         """
         # Generate output path
-        output_path = self._generate_parquet_path(
-            scan_time=scan_time, filename_stem=filename_stem
-        )
+        output_path = self._generate_parquet_path(scan_time=scan_time, filename_stem=filename_stem)
 
         # Atomic write
         self._atomic_write_parquet(df, output_path)
@@ -834,21 +826,15 @@ class DataRepository:
         for col in missing_columns:
             sql_type = self._infer_sql_type(col)
             try:
-                conn.execute(
-                    f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}'
-                )
-                logger.debug(
-                    f"Added column '{col}' ({sql_type}) to table '{table_name}'"
-                )
+                conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}')
+                logger.debug(f"Added column '{col}' ({sql_type}) to table '{table_name}'")
             except sqlite3.OperationalError as e:
                 # Column might already exist (race condition)
                 if "duplicate column name" not in str(e).lower():
                     raise
 
         conn.commit()
-        logger.info(
-            f"Schema migration: added {len(missing_columns)} columns to '{table_name}'"
-        )
+        logger.info(f"Schema migration: added {len(missing_columns)} columns to '{table_name}'")
 
     @staticmethod
     def _infer_sql_type(column_name: str) -> str:
@@ -964,9 +950,7 @@ class DataRepository:
 
         return base_dir / filename
 
-    def _generate_parquet_path(
-        self, scan_time: datetime, filename_stem: str | None = None
-    ) -> Path:
+    def _generate_parquet_path(self, scan_time: datetime, filename_stem: str | None = None) -> Path:
         """Generate Parquet output path with run_id suffix.
 
         Pattern: root_dir/RADAR_ID/analysis/YYYYMMDD/filename_{run_id}_cells.parquet
@@ -1048,9 +1032,7 @@ class DataRepository:
             if self.config and hasattr(self.config, "output"):
                 compression = getattr(self.config.output, "compression", "snappy")
 
-            df.to_parquet(
-                temp_path, engine="pyarrow", compression=compression, index=False
-            )
+            df.to_parquet(temp_path, engine="pyarrow", compression=compression, index=False)
 
             # Atomic rename
             shutil.move(temp_path, output_path)

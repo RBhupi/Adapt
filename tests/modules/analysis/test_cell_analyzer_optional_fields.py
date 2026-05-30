@@ -15,9 +15,7 @@ def test_heading_statistics_optional(labeled_ds_with_extras, make_analysis_confi
     assert "cell_heading_y_mean" in df.columns
 
 
-def test_projection_centroids_json_present(
-    labeled_ds_with_extras, make_analysis_config
-):
+def test_projection_centroids_json_present(labeled_ds_with_extras, make_analysis_config):
     """Projection centroids are included in extraction."""
     from adapt.modules.analysis.module import RadarCellAnalyzer
 

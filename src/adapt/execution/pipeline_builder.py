@@ -50,9 +50,7 @@ def _ensure_modules_registered(extensions: list[str] | None = None) -> None:
             cfg = yaml.safe_load(f)
         module_paths = cfg.get("pipeline", {}).get("modules", [])
     except Exception as e:
-        logger.warning(
-            "Could not read defaults.yaml (%s); falling back to hardcoded list", e
-        )
+        logger.warning("Could not read defaults.yaml (%s); falling back to hardcoded list", e)
         module_paths = [
             "adapt.execution.nodes.ingest",
             "adapt.execution.nodes.detection",
@@ -73,9 +71,7 @@ def _ensure_modules_registered(extensions: list[str] | None = None) -> None:
             importlib.import_module(path)
             logger.info("Registered extension module from: %s", path)
         except Exception as e:
-            raise ImportError(
-                f"Failed to load extension module '{path}': {e}"
-            ) from e
+            raise ImportError(f"Failed to load extension module '{path}': {e}") from e
 
 
 class NexradPipeline:

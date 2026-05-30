@@ -1,6 +1,4 @@
-def test_geometric_centroid_is_inside_cell(
-    labeled_ds_with_extras, make_analysis_config
-):
+def test_geometric_centroid_is_inside_cell(labeled_ds_with_extras, make_analysis_config):
 
     from adapt.modules.analysis.module import RadarCellAnalyzer
 

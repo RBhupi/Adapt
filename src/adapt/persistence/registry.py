@@ -141,9 +141,7 @@ class RepositoryRegistry:
                     created_at TEXT NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_radar ON runs(radar)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)")
 
@@ -185,7 +183,7 @@ class RepositoryRegistry:
 
             conn.executemany(
                 """
-                INSERT OR IGNORE INTO item_types 
+                INSERT OR IGNORE INTO item_types
                 (item_type, description, storage_format, dimensionality, created_at)
                 VALUES (?, ?, ?, ?, ?)
             """,
@@ -271,9 +269,7 @@ class RepositoryRegistry:
                 (radar,),
             ).fetchone()
             if not row:
-                raise ValueError(
-                    f"Radar '{radar}' is not registered in the repository registry"
-                )
+                raise ValueError(f"Radar '{radar}' is not registered in the repository registry")
 
             existing_lat = row["location_lat"]
             existing_lon = row["location_lon"]
@@ -364,9 +360,7 @@ class RepositoryRegistry:
 
         logger.debug("Run registered: %s for radar %s", run_id, radar)
 
-    def update_run_status(
-        self, run_id: str, status: str, end_time: str | None = None
-    ) -> None:
+    def update_run_status(self, run_id: str, status: str, end_time: str | None = None) -> None:
         """Update run status.
 
         Parameters
@@ -386,9 +380,7 @@ class RepositoryRegistry:
                     (status, end_time, run_id),
                 )
             else:
-                conn.execute(
-                    "UPDATE runs SET status = ? WHERE run_id = ?", (status, run_id)
-                )
+                conn.execute("UPDATE runs SET status = ? WHERE run_id = ?", (status, run_id))
             conn.commit()
 
         logger.debug(f"Run {run_id} status updated to {status}")
@@ -436,9 +428,7 @@ class RepositoryRegistry:
                     (radar,),
                 ).fetchone()
             else:
-                row = conn.execute(
-                    "SELECT * FROM runs ORDER BY start_time DESC LIMIT 1"
-                ).fetchone()
+                row = conn.execute("SELECT * FROM runs ORDER BY start_time DESC LIMIT 1").fetchone()
 
         return dict(row) if row else None
 
@@ -456,9 +446,7 @@ class RepositoryRegistry:
         """
         conn = self._get_connection()
         with self._lock:
-            rows = conn.execute(
-                "SELECT item_type FROM item_types ORDER BY item_type"
-            ).fetchall()
+            rows = conn.execute("SELECT item_type FROM item_types ORDER BY item_type").fetchall()
 
         return [row["item_type"] for row in rows]
 

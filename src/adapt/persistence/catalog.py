@@ -137,12 +137,8 @@ class RadarCatalog:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_run ON items(run_id)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_scan_time ON items(scan_time DESC)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_items_type_time ON items(item_type, scan_time DESC)"
             )
@@ -275,7 +271,7 @@ class RadarCatalog:
         with self._lock:
             conn.execute(
                 """
-                UPDATE items 
+                UPDATE items
                 SET status = ?, error_message = ?, updated_at = ?
                 WHERE item_id = ?
             """,
@@ -353,9 +349,9 @@ class RadarCatalog:
             if run_id:
                 row = conn.execute(
                     """
-                    SELECT * FROM items 
+                    SELECT * FROM items
                     WHERE item_type = ? AND run_id = ? AND status = 'complete'
-                    ORDER BY scan_time DESC 
+                    ORDER BY scan_time DESC
                     LIMIT 1
                 """,
                     (item_type, run_id),
@@ -363,9 +359,9 @@ class RadarCatalog:
             else:
                 row = conn.execute(
                     """
-                    SELECT * FROM items 
+                    SELECT * FROM items
                     WHERE item_type = ? AND status = 'complete'
-                    ORDER BY scan_time DESC 
+                    ORDER BY scan_time DESC
                     LIMIT 1
                 """,
                     (item_type,),
@@ -377,9 +373,7 @@ class RadarCatalog:
         """Get a single item record by ID. Returns None if not found."""
         conn = self._get_connection()
         with self._lock:
-            row = conn.execute(
-                "SELECT * FROM items WHERE item_id = ?", (item_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
         return dict(row) if row else None
 
     # =========================================================================
@@ -411,7 +405,7 @@ class RadarCatalog:
             # Try update first
             cursor = conn.execute(
                 f"""
-                UPDATE progress 
+                UPDATE progress
                 SET {set_clause}, last_updated = ?
                 WHERE run_id = ?
             """,
@@ -430,7 +424,7 @@ class RadarCatalog:
                 # Retry update
                 conn.execute(
                     f"""
-                    UPDATE progress 
+                    UPDATE progress
                     SET {set_clause}, last_updated = ?
                     WHERE run_id = ?
                 """,
@@ -454,9 +448,7 @@ class RadarCatalog:
         """
         conn = self._get_connection()
         with self._lock:
-            row = conn.execute(
-                "SELECT * FROM progress WHERE run_id = ?", (run_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM progress WHERE run_id = ?", (run_id,)).fetchone()
 
         return dict(row) if row else None
 
@@ -643,7 +635,7 @@ class RadarCatalog:
             conn.execute(
                 f"""
                 UPDATE scans
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE scan_time = ?
             """,
                 params,
@@ -710,9 +702,7 @@ class RadarCatalog:
         """
         conn = self._get_connection()
         with self._lock:
-            row = conn.execute(
-                "SELECT * FROM scans WHERE scan_id = ?", (scan_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM scans WHERE scan_id = ?", (scan_id,)).fetchone()
 
         return dict(row) if row else None
 

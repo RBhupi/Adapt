@@ -9,9 +9,7 @@ def test_max_projection_steps_is_capped(simple_labeled_ds_pair, make_projection_
     """Projection steps are capped at default maximum."""
     from adapt.configuration.schemas.user import UserProjectorConfig
 
-    config = make_projection_config(
-        projector=UserProjectorConfig(max_projection_steps=100)
-    )
+    config = make_projection_config(projector=UserProjectorConfig(max_projection_steps=100))
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)
@@ -19,9 +17,7 @@ def test_max_projection_steps_is_capped(simple_labeled_ds_pair, make_projection_
     assert out["cell_projections"].shape[0] == 11  # 1 + 10
 
 
-def test_custom_flow_params_do_not_crash(
-    simple_labeled_ds_pair, make_projection_config
-):
+def test_custom_flow_params_do_not_crash(simple_labeled_ds_pair, make_projection_config):
     """Custom flow parameters are accepted without crashing."""
     from adapt.configuration.schemas.user import UserProjectorConfig
 

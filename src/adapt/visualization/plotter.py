@@ -140,9 +140,7 @@ class RadarPlotter:
             logger.warning("Basemap requested but contextily not installed")
             self.use_basemap = False
 
-        logger.info(
-            f"RadarPlotter initialized (format={self.output_format}, dpi={self.dpi})"
-        )
+        logger.info(f"RadarPlotter initialized (format={self.output_format}, dpi={self.dpi})")
 
     def _get_var_name(self, var_key: str, default: str) -> str:
         """Get variable name from config."""
@@ -192,9 +190,7 @@ class RadarPlotter:
     def _mask_reflectivity(self, refl: np.ndarray) -> np.ma.MaskedArray:
         """Apply thresholding to reflectivity."""
         refl_float = refl.astype(float)
-        return np.ma.masked_where(
-            (refl_float < self.min_refl) | np.isnan(refl_float), refl_float
-        )
+        return np.ma.masked_where((refl_float < self.min_refl) | np.isnan(refl_float), refl_float)
 
     def _setup_figure(self) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
         """Create figure with two subplots."""
@@ -435,18 +431,14 @@ class RadarPlotter:
                     zorder=40,
                 )
 
-    def _format_axis(
-        self, ax: plt.Axes, title: str, timestamp: datetime, radar: str
-    ) -> None:
+    def _format_axis(self, ax: plt.Axes, title: str, timestamp: datetime, radar: str) -> None:
         """Format axis with labels and title."""
         ax.set_xlabel("Distance from Radar - X (km)", fontsize=11)
         ax.set_ylabel("Distance from Radar - Y (km)", fontsize=11)
         ax.grid(True, alpha=0.2, linestyle=":", linewidth=0.5)
 
         time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
-        ax.set_title(
-            f"{radar} {title}\n{time_str}", fontsize=12, fontweight="bold", pad=10
-        )
+        ax.set_title(f"{radar} {title}\n{time_str}", fontsize=12, fontweight="bold", pad=10)
 
     def _add_flow_legend(self, ax: plt.Axes) -> None:
         """Add legend for optical flow vectors."""
@@ -464,9 +456,7 @@ class RadarPlotter:
                 label="Flow",
             )
         ]
-        ax.legend(
-            handles=legend_elements, loc="upper right", fontsize=10, framealpha=0.9
-        )
+        ax.legend(handles=legend_elements, loc="upper right", fontsize=10, framealpha=0.9)
 
     def _save_figure(self, fig: plt.Figure, output_path: Path) -> str:
         """Save figure in configured format."""
@@ -475,9 +465,7 @@ class RadarPlotter:
         # Ensure correct extension
         output_file = output_path.with_suffix(f".{self.output_format}")
 
-        fig.savefig(
-            output_file, dpi=self.dpi, bbox_inches="tight", format=self.output_format
-        )
+        fig.savefig(output_file, dpi=self.dpi, bbox_inches="tight", format=self.output_format)
 
         plt.close(fig)
         logger.info(f"Plot saved: {output_file}")
@@ -578,9 +566,7 @@ class RadarPlotter:
         # Mask reflectivity to show only segmented cells
         labels_mask = labels.values > 0
         refl_segmented = np.ma.masked_where(~labels_mask, refl)
-        refl_segmented = np.ma.masked_where(
-            refl_segmented < self.min_refl, refl_segmented
-        )
+        refl_segmented = np.ma.masked_where(refl_segmented < self.min_refl, refl_segmented)
 
         im2 = self._plot_reflectivity_field(ax2, refl_segmented, x_coords, y_coords)
         self._add_colorbar(ax2, im2)
@@ -653,9 +639,7 @@ class RadarPlotter:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay * (attempt + 1))
                 else:
-                    raise RuntimeError(
-                        f"Failed to open NetCDF: {segmentation_nc}"
-                    ) from e
+                    raise RuntimeError(f"Failed to open NetCDF: {segmentation_nc}") from e
 
         # Validate required variables
         labels_name = self._get_var_name("cell_labels", "cell_labels")
@@ -797,9 +781,7 @@ class PlotterThread(threading.Thread):
                 return
 
             # Get file_id for tracker
-            file_id = (
-                Path(seg_nc).stem.replace("_analysis", "").replace("_segmentation", "")
-            )
+            file_id = Path(seg_nc).stem.replace("_analysis", "").replace("_segmentation", "")
 
             # Use helper for consistent paths
             from adapt.configuration.schemas.directories import get_plot_path
@@ -942,9 +924,7 @@ class PlotConsumer(threading.Thread):
 
         self._product_type = ProductType.ANALYSIS_NC
 
-        logger.info(
-            f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})"
-        )
+        logger.info(f"{name} initialized (poll_interval={poll_interval}s, output_dir={output_dir})")
 
     def run(self):
         """Main consumer loop - poll repository and generate plots."""

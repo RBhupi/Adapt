@@ -93,9 +93,7 @@ class TestCatalogInitialization:
     def test_catalog_items_table_exists(self, repository):
         """RadarCatalog items table should exist."""
         conn = repository.catalog._get_connection()
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='items'"
-        )
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'")
         assert cursor.fetchone() is not None
 
     def test_run_registered_in_registry(self, repository):
@@ -405,9 +403,7 @@ class TestLifecycle:
 
     def test_context_manager(self, temp_base_dir):
         """Should work as context manager."""
-        with DataRepository(
-            run_id="ctx12345", base_dir=temp_base_dir, radar="KHTX"
-        ) as repo:
+        with DataRepository(run_id="ctx12345", base_dir=temp_base_dir, radar="KHTX") as repo:
             assert repo.run_id == "ctx12345"
 
     def test_generate_run_id(self):
@@ -582,9 +578,7 @@ class TestGetAllSince:
             producer="test",
         )
 
-        results = repository.get_all_since(
-            ProductType.ANALYSIS_NC, since_artifact_id=id1
-        )
+        results = repository.get_all_since(ProductType.ANALYSIS_NC, since_artifact_id=id1)
         assert len(results) == 2
         result_ids = [r["artifact_id"] for r in results]
         assert id2 in result_ids

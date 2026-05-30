@@ -241,9 +241,7 @@ class RadarProcessor(threading.Thread):
             scan_time = frame_ctx.get("scan_time")
 
             # ── Phase 2: accumulate frame history ──────────────────────────
-            self._segmented_history.append(
-                (filepath, frame_ctx["segmented_ds"], scan_time)
-            )
+            self._segmented_history.append((filepath, frame_ctx["segmented_ds"], scan_time))
             if len(self._segmented_history) > self._max_history:
                 self._segmented_history.pop(0)
 
@@ -319,21 +317,15 @@ class RadarProcessor(threading.Thread):
                     timings["queue_wait_seconds"] = queue_wait_s
                 for fp, _, _ in self._segmented_history:
                     fid = Path(fp).stem
-                    tracker.mark_stage_complete(
-                        fid, "analyzed", num_cells=n_cells, timings=timings
-                    )
+                    tracker.mark_stage_complete(fid, "analyzed", num_cells=n_cells, timings=timings)
 
             return True
 
         except ContractViolation as e:
-            logger.critical(
-                "CRITICAL: Pipeline contract violated: %s. Stopping pipeline.", e
-            )
+            logger.critical("CRITICAL: Pipeline contract violated: %s. Stopping pipeline.", e)
             self.stop()
             if tracker:
-                tracker.mark_stage_complete(
-                    file_id, "analyzed", error=f"ContractViolation: {e}"
-                )
+                tracker.mark_stage_complete(file_id, "analyzed", error=f"ContractViolation: {e}")
             return False
 
         except Exception as e:
@@ -408,31 +400,21 @@ class RadarProcessor(threading.Thread):
         cell_events = result.get("cell_events")
 
         if cell_stats is not None and not cell_stats.empty:
-            writer.write_analysis(
-                df=cell_stats, scan_time=scan_time, producer="analysis"
-            )
+            writer.write_analysis(df=cell_stats, scan_time=scan_time, producer="analysis")
         if cell_adjacency is not None and not cell_adjacency.empty:
-            writer.write_analysis(
-                df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency"
-            )
+            writer.write_analysis(df=cell_adjacency, scan_time=scan_time, producer="cell_adjacency")
 
         if tracked_cells is not None and not tracked_cells.empty:
             if cell_stats is None:
-                raise ValueError(
-                    "Missing required cell_stats for TrackStore persistence"
-                )
+                raise ValueError("Missing required cell_stats for TrackStore persistence")
             if cell_adjacency is None:
-                raise ValueError(
-                    "Missing required cell_adjacency for TrackStore persistence"
-                )
+                raise ValueError("Missing required cell_adjacency for TrackStore persistence")
             TrackStore(self.repository.catalog.db_path).write_scan(
                 run_id=self.repository.run_id,
                 scan_time=scan_time,
                 cell_stats_df=cell_stats,
                 tracked_cells_df=tracked_cells,
-                cell_events_df=(
-                    cell_events if cell_events is not None else pd.DataFrame()
-                ),
+                cell_events_df=(cell_events if cell_events is not None else pd.DataFrame()),
                 cell_adjacency_df=cell_adjacency,
             )
 

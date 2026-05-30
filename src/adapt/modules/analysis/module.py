@@ -278,9 +278,7 @@ class RadarCellAnalyzer:
                 f"Missing required labels variable '{labels_name}' for adjacency extraction"
             )
         if "time" not in ds.coords:
-            raise ValueError(
-                "Missing required coordinate 'time' for adjacency extraction"
-            )
+            raise ValueError("Missing required coordinate 'time' for adjacency extraction")
 
         labels = ds[labels_name].values
         if labels.ndim != 2:
@@ -308,9 +306,7 @@ class RadarCellAnalyzer:
         return adjacency
 
     @staticmethod
-    def _compute_boundary_adjacency(
-        labels: np.ndarray, min_touching_pixels: int
-    ) -> pd.DataFrame:
+    def _compute_boundary_adjacency(labels: np.ndarray, min_touching_pixels: int) -> pd.DataFrame:
         """Compute direct boundary adjacency between positive labels.
 
         Counts touching boundary pixel-edges using 4-neighborhood comparisons
@@ -318,9 +314,7 @@ class RadarCellAnalyzer:
         (a < b).
         """
         if min_touching_pixels < 1:
-            raise ValueError(
-                f"min_touching_pixels must be >= 1, got {min_touching_pixels}"
-            )
+            raise ValueError(f"min_touching_pixels must be >= 1, got {min_touching_pixels}")
 
         labels = labels.astype(np.int64, copy=False)
         counts: dict[tuple[int, int], int] = {}
@@ -403,10 +397,7 @@ class RadarCellAnalyzer:
             if (
                 var in ds.data_vars
                 and var not in self.exclude_fields
-                and (
-                    ds[var].dims[-2:] == ("y", "x")
-                    or ds[var].dims[-3:] == ("z", "y", "x")
-                )
+                and (ds[var].dims[-2:] == ("y", "x") or ds[var].dims[-3:] == ("z", "y", "x"))
             ):
                 available_vars.append(var)
         return available_vars
@@ -505,14 +496,10 @@ class RadarCellAnalyzer:
             valid_mask = np.isfinite(refl_cell)
             if np.any(valid_mask):
                 centroid_mass_y = int(
-                    np.round(
-                        np.average(y_indices[valid_mask], weights=refl_cell[valid_mask])
-                    )
+                    np.round(np.average(y_indices[valid_mask], weights=refl_cell[valid_mask]))
                 )
                 centroid_mass_x = int(
-                    np.round(
-                        np.average(x_indices[valid_mask], weights=refl_cell[valid_mask])
-                    )
+                    np.round(np.average(x_indices[valid_mask], weights=refl_cell[valid_mask]))
                 )
             else:
                 centroid_mass_y = int(np.round(geom_props["centroid_y"]))
@@ -521,9 +508,7 @@ class RadarCellAnalyzer:
             centroid_mass_y = int(np.round(geom_props["centroid_y"]))
             centroid_mass_x = int(np.round(geom_props["centroid_x"]))
 
-        lat_mass, lon_mass = self.get_lat_lon(
-            centroid_mass_x, centroid_mass_y, lat_grid, lon_grid
-        )
+        lat_mass, lon_mass = self.get_lat_lon(centroid_mass_x, centroid_mass_y, lat_grid, lon_grid)
 
         # Build properties dict with ALL centroids in both XY and lat/lon
         props = {
@@ -570,9 +555,7 @@ class RadarCellAnalyzer:
                     projection_centroids = []
 
                     # Extract centroids for each projection step
-                    for step_idx in range(
-                        min(projections.shape[0], self.max_projection_steps + 1)
-                    ):
+                    for step_idx in range(min(projections.shape[0], self.max_projection_steps + 1)):
                         proj_mask = projections[step_idx] == region.label
                         if np.any(proj_mask):
                             # Use reusable centroid function (already has lat/lon)
@@ -588,38 +571,28 @@ class RadarCellAnalyzer:
                         # Index 0 = Registration centroid (projection from previous to current)
                         if projection_centroids[0] is not None:
                             reg_cent = projection_centroids[0]
-                            props["cell_centroid_registration_x"] = reg_cent[
-                                "centroid_x"
-                            ]
-                            props["cell_centroid_registration_y"] = reg_cent[
-                                "centroid_y"
-                            ]
+                            props["cell_centroid_registration_x"] = reg_cent["centroid_x"]
+                            props["cell_centroid_registration_y"] = reg_cent["centroid_y"]
                             if "centroid_lat" in reg_cent:
-                                props["cell_centroid_registration_lat"] = reg_cent[
-                                    "centroid_lat"
-                                ]
-                                props["cell_centroid_registration_lon"] = reg_cent[
-                                    "centroid_lon"
-                                ]
+                                props["cell_centroid_registration_lat"] = reg_cent["centroid_lat"]
+                                props["cell_centroid_registration_lon"] = reg_cent["centroid_lon"]
 
                         # Indices 1+ = Forward projection centroids
-                        for proj_idx, proj_cent in enumerate(
-                            projection_centroids[1:], start=1
-                        ):
+                        for proj_idx, proj_cent in enumerate(projection_centroids[1:], start=1):
                             if proj_cent is not None:
-                                props[f"cell_centroid_projection{proj_idx}_x"] = (
-                                    proj_cent["centroid_x"]
-                                )
-                                props[f"cell_centroid_projection{proj_idx}_y"] = (
-                                    proj_cent["centroid_y"]
-                                )
+                                props[f"cell_centroid_projection{proj_idx}_x"] = proj_cent[
+                                    "centroid_x"
+                                ]
+                                props[f"cell_centroid_projection{proj_idx}_y"] = proj_cent[
+                                    "centroid_y"
+                                ]
                                 if "centroid_lat" in proj_cent:
-                                    props[f"cell_centroid_projection{proj_idx}_lat"] = (
-                                        proj_cent["centroid_lat"]
-                                    )
-                                    props[f"cell_centroid_projection{proj_idx}_lon"] = (
-                                        proj_cent["centroid_lon"]
-                                    )
+                                    props[f"cell_centroid_projection{proj_idx}_lat"] = proj_cent[
+                                        "centroid_lat"
+                                    ]
+                                    props[f"cell_centroid_projection{proj_idx}_lon"] = proj_cent[
+                                        "centroid_lon"
+                                    ]
 
                         # Also store full projection centroids as JSON for compact storage
                         props["cell_projection_centroids_json"] = json.dumps(
@@ -628,8 +601,7 @@ class RadarCellAnalyzer:
                                     {
                                         k: v
                                         for k, v in c.items()
-                                        if c
-                                        and not (isinstance(v, float) and np.isnan(v))
+                                        if c and not (isinstance(v, float) and np.isnan(v))
                                     }
                                     if c
                                     else None

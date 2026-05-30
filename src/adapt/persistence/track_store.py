@@ -151,9 +151,7 @@ class TrackStore:
         if cell_adjacency_df is None:
             raise ValueError("cell_adjacency_df is required (no fallback)")
         if not isinstance(cell_adjacency_df, pd.DataFrame):
-            raise TypeError(
-                f"cell_adjacency_df must be a DataFrame, got {type(cell_adjacency_df)}"
-            )
+            raise TypeError(f"cell_adjacency_df must be a DataFrame, got {type(cell_adjacency_df)}")
 
         scan_iso = _to_iso(scan_time)
         conn = self._connect()
@@ -201,14 +199,10 @@ class TrackStore:
 
             # 5. Insert cell_events
             if not cell_events_df.empty:
-                self._insert_cell_events(
-                    conn, run_id, scan_iso, prev_iso, cell_events_df
-                )
+                self._insert_cell_events(conn, run_id, scan_iso, prev_iso, cell_events_df)
 
             # 6. Upsert cell_tracks summary
-            self._upsert_cell_tracks(
-                conn, run_id, scan_iso, tracked_cells_df, cell_events_df
-            )
+            self._upsert_cell_tracks(conn, run_id, scan_iso, tracked_cells_df, cell_events_df)
 
             conn.commit()
             # Checkpoint WAL so readonly readers using immutable=1 see current data.
@@ -274,9 +268,7 @@ class TrackStore:
         """
         tables = {
             r["name"]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
         legacy = sorted(t for t in ("tracks", "track_events") if t in tables)
@@ -294,12 +286,8 @@ class TrackStore:
                 "Ensure catalog.db was created with the current schema."
             )
 
-        cbs_cols = {
-            r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()
-        }
-        if "n_adjacent_tracks" in cbs_cols or any(
-            c.endswith("_index") for c in cbs_cols
-        ):
+        cbs_cols = {r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()}
+        if "n_adjacent_tracks" in cbs_cols or any(c.endswith("_index") for c in cbs_cols):
             raise RuntimeError(
                 "Legacy index/adjacency columns detected in cells_by_scan. "
                 "Recreate catalog.db (delete it and rerun the pipeline)."
@@ -310,18 +298,14 @@ class TrackStore:
                 "Ensure catalog.db was created with the current schema."
             )
 
-        ct_cols = {
-            r[1] for r in conn.execute("PRAGMA table_info(cell_tracks)").fetchall()
-        }
+        ct_cols = {r[1] for r in conn.execute("PRAGMA table_info(cell_tracks)").fetchall()}
         if any(c.endswith("_index") for c in ct_cols):
             raise RuntimeError(
                 "Legacy index columns detected in cell_tracks. "
                 "Recreate catalog.db (delete it and rerun the pipeline)."
             )
 
-        ce_cols = {
-            r[1] for r in conn.execute("PRAGMA table_info(cell_events)").fetchall()
-        }
+        ce_cols = {r[1] for r in conn.execute("PRAGMA table_info(cell_events)").fetchall()}
         if any(c.endswith("_index") for c in ce_cols):
             raise RuntimeError(
                 "Legacy index columns detected in cell_events. "
@@ -340,9 +324,7 @@ class TrackStore:
         import json
 
         if tracked_cells_df.empty:
-            raise ValueError(
-                "tracked_cells_df is empty (cannot build adjacency summary)"
-            )
+            raise ValueError("tracked_cells_df is empty (cannot build adjacency summary)")
 
         required = {"cell_label_a", "cell_label_b", "touching_boundary_pixels"}
         missing = sorted(required - set(cell_adjacency_df.columns))
@@ -366,9 +348,7 @@ class TrackStore:
             if a == b:
                 raise ValueError("cell_adjacency_df contains a self-pair")
             if a not in label_to_uid or b not in label_to_uid:
-                raise ValueError(
-                    f"cell_adjacency_df references unknown cell labels: {a}, {b}"
-                )
+                raise ValueError(f"cell_adjacency_df references unknown cell labels: {a}, {b}")
             ua = label_to_uid[a]
             ub = label_to_uid[b]
             neighbors.setdefault(ua, set()).add(ub)
@@ -380,18 +360,10 @@ class TrackStore:
             out[uid] = (len(ids), json.dumps(ids))
         return out
 
-    def _ensure_columns(
-        self, conn: sqlite3.Connection, cell_stats_df: pd.DataFrame
-    ) -> None:
-        existing = {
-            r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()
-        }
+    def _ensure_columns(self, conn: sqlite3.Connection, cell_stats_df: pd.DataFrame) -> None:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(cells_by_scan)").fetchall()}
         for col in cell_stats_df.columns:
-            if (
-                col in _SKIP_FROM_CELL_STATS
-                or col in _FIXED_CBS_COLS
-                or col in existing
-            ):
+            if col in _SKIP_FROM_CELL_STATS or col in _FIXED_CBS_COLS or col in existing:
                 continue
             sql_type = _infer_sql_type(col)
             with contextlib.suppress(sqlite3.OperationalError):
@@ -449,9 +421,9 @@ class TrackStore:
                 and tid in first_seen_map
             ):
                 try:
-                    first_dt = _dt.strptime(
-                        first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ"
-                    ).replace(tzinfo=UTC)
+                    first_dt = _dt.strptime(first_seen_map[tid], "%Y-%m-%dT%H:%M:%SZ").replace(
+                        tzinfo=UTC
+                    )
                     age_seconds = max(0.0, (scan_dt - first_dt).total_seconds())
                 except ValueError:
                     pass
@@ -487,9 +459,7 @@ class TrackStore:
         placeholders = ", ".join("?" * len(cols))
         col_list = ", ".join(cols)
         update_set = ", ".join(
-            f"{c}=excluded.{c}"
-            for c in cols
-            if c not in ("run_id", "scan_time", "cell_uid")
+            f"{c}=excluded.{c}" for c in cols if c not in ("run_id", "scan_time", "cell_uid")
         )
         sql = (
             f"INSERT INTO cells_by_scan ({col_list}) VALUES ({placeholders}) "
@@ -497,9 +467,7 @@ class TrackStore:
         )
         conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
 
-    def _prev_scan_time(
-        self, conn: sqlite3.Connection, run_id: str, scan_iso: str
-    ) -> str | None:
+    def _prev_scan_time(self, conn: sqlite3.Connection, run_id: str, scan_iso: str) -> str | None:
         row = conn.execute(
             "SELECT MAX(scan_time) AS t FROM cells_by_scan WHERE run_id=? AND scan_time<?",
             (run_id, scan_iso),
@@ -619,9 +587,7 @@ class TrackStore:
 
         # Classify events for origin/termination
         initiated: dict[str, str] = {}  # cell_uid → event_group_id
-        split_children: dict[str, tuple[str, str]] = (
-            {}
-        )  # child_tid → (parent_tid, group_id)
+        split_children: dict[str, tuple[str, str]] = {}  # child_tid → (parent_tid, group_id)
         terminated: dict[str, str] = {}  # cell_uid → event_group_id
         merged_into: dict[str, tuple[str, str]] = {}  # src_tid → (tgt_tid, group_id)
 

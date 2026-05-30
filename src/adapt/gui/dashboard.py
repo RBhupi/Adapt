@@ -188,9 +188,7 @@ _VAR_LABELS = {
 if HAS_MPL:
 
     class _CompactToolbar(NavigationToolbar2Tk):
-        toolitems = [
-            t for t in NavigationToolbar2Tk.toolitems if t[0] not in ("Back", "Forward")
-        ]
+        toolitems = [t for t in NavigationToolbar2Tk.toolitems if t[0] not in ("Back", "Forward")]
 
         def __init__(self, canvas, window, *, pack_toolbar=True, lat0=0.0, lon0=0.0):
             self._ltrans = None
@@ -214,10 +212,7 @@ if HAS_MPL:
                     x_km = toks.get("x", 0.0)
                     y_km = toks.get("y", 0.0)
                     lon_v, lat_v = self._ltrans.transform(x_km * 1000.0, y_km * 1000.0)
-                    s = (
-                        f"x={x_km:.2f}  y={y_km:.2f}"
-                        f"    {lat_v:.4f}\u00b0  {lon_v:.4f}\u00b0"
-                    )
+                    s = f"x={x_km:.2f}  y={y_km:.2f}    {lat_v:.4f}\u00b0  {lon_v:.4f}\u00b0"
                 except Exception:
                     logger.exception("Failed to update toolbar coordinate message")
             super().set_message(s)
@@ -344,18 +339,13 @@ def _list_radars(repo: Path) -> list:
         if radars:
             return sorted(radars)
     except Exception:
-        logger.exception(
-            "Failed to list radars via DataClient; using filesystem fallback"
-        )
+        logger.exception("Failed to list radars via DataClient; using filesystem fallback")
 
     # Fallback: filesystem scan for NEXRAD-style directories
     return sorted(
         d.name
         for d in repo.iterdir()
-        if d.is_dir()
-        and len(d.name) == 4
-        and d.name.isupper()
-        and (d / "nexrad").exists()
+        if d.is_dir() and len(d.name) == 4 and d.name.isupper() and (d / "nexrad").exists()
     )
 
 
@@ -400,9 +390,7 @@ def _list_runs(repo: Path, radar: str = None) -> list:
                 runs.append(f"{run_id}  ({mtime})")
             return runs
     except Exception:
-        logger.exception(
-            "Failed to list runs via DataClient; using filesystem fallback"
-        )
+        logger.exception("Failed to list runs via DataClient; using filesystem fallback")
 
     # Fallback: filesystem scan for runtime_config_*.json
     configs = sorted(repo.glob("runtime_config_*.json"), reverse=True)
@@ -418,7 +406,6 @@ def _list_runs(repo: Path, radar: str = None) -> list:
 
 
 class AdaptDashboard(tk.Tk):
-
     def __init__(self, repo: str = None):
         super().__init__()
         self.title("Adapt Radar Dashboard")
@@ -437,9 +424,7 @@ class AdaptDashboard(tk.Tk):
 
         # Inline render state
         self._current_nc_ds = None  # loaded xarray Dataset
-        self._current_cell_df = (
-            None  # cells_by_scan DataFrame (SQLite) or parquet fallback
-        )
+        self._current_cell_df = None  # cells_by_scan DataFrame (SQLite) or parquet fallback
         self._current_run_id = None  # run_id for the loaded cell data
         self._current_scan_ts = None  # pd.Timestamp of current displayed scan
         self._cell_contours = {}  # cell_id -> contour set on radar ax
@@ -447,9 +432,7 @@ class AdaptDashboard(tk.Tk):
 
         # Track click overlay state
         self._selected_cell_uid: str | None = None
-        self._track_overlay: list | None = (
-            None  # matplotlib artists for tracking overlay
-        )
+        self._track_overlay: list | None = None  # matplotlib artists for tracking overlay
         self._ts_axes: tuple | None = None  # (ax_area, ax_dbz, ax_reserved)
         self._show_flow_var: tk.BooleanVar | None = None  # set in _build_scan_tab
         self._colorbar: object | None = None  # active colorbar reference
@@ -504,38 +487,28 @@ class AdaptDashboard(tk.Tk):
         repo_entry = ttk.Entry(row1, textvariable=self._repo_root, width=50)
         repo_entry.pack(side="left", padx=2)
         repo_entry.bind("<Return>", lambda _: self._on_repo_changed())
-        ttk.Button(row1, text="Browse", command=self._browse_repo).pack(
-            side="left", padx=(2, 10)
-        )
+        ttk.Button(row1, text="Browse", command=self._browse_repo).pack(side="left", padx=(2, 10))
 
         ttk.Separator(row1, orient="vertical").pack(side="left", fill="y", padx=4)
-        ttk.Button(row1, text="Refresh", command=self._refresh_all).pack(
-            side="left", padx=2
-        )
+        ttk.Button(row1, text="Refresh", command=self._refresh_all).pack(side="left", padx=2)
 
         # Row 2: Radar + Run + Pipeline control
         row2 = ttk.Frame(toolbar)
         row2.pack(fill="x", pady=(3, 0))
 
         ttk.Label(row2, text="Radar:").pack(side="left")
-        self.radar_cb = ttk.Combobox(
-            row2, textvariable=self._radar, width=8, state="readonly"
-        )
+        self.radar_cb = ttk.Combobox(row2, textvariable=self._radar, width=8, state="readonly")
         self.radar_cb.pack(side="left", padx=(2, 10))
         self.radar_cb.bind("<<ComboboxSelected>>", lambda _: self._on_radar_changed())
 
         ttk.Label(row2, text="Run:").pack(side="left")
-        self.run_cb = ttk.Combobox(
-            row2, textvariable=self._run_sel, width=30, state="readonly"
-        )
+        self.run_cb = ttk.Combobox(row2, textvariable=self._run_sel, width=30, state="readonly")
         self.run_cb.pack(side="left", padx=(2, 14))
 
         ttk.Separator(row2, orient="vertical").pack(side="left", fill="y", padx=4)
         self.btn_start = ttk.Button(row2, text="Start Pipeline", command=self._start)
         self.btn_start.pack(side="left", padx=2)
-        self.btn_stop = ttk.Button(
-            row2, text="Stop", command=self._stop, state="disabled"
-        )
+        self.btn_stop = ttk.Button(row2, text="Stop", command=self._stop, state="disabled")
         self.btn_stop.pack(side="left", padx=2)
 
         # ── Status bar ────────────────────────────────────────────────────────
@@ -583,14 +556,14 @@ class AdaptDashboard(tk.Tk):
 
         ttk.Label(ctrl1, text="Min:", font=("", 10)).pack(side="left", padx=(10, 0))
         self._plot_vmin = tk.StringVar(value="10")
-        ttk.Entry(
-            ctrl1, textvariable=self._plot_vmin, width=6, font=("Courier", 10)
-        ).pack(side="left", padx=2)
+        ttk.Entry(ctrl1, textvariable=self._plot_vmin, width=6, font=("Courier", 10)).pack(
+            side="left", padx=2
+        )
         ttk.Label(ctrl1, text="Max:", font=("", 10)).pack(side="left", padx=(4, 0))
         self._plot_vmax = tk.StringVar(value="60")
-        ttk.Entry(
-            ctrl1, textvariable=self._plot_vmax, width=6, font=("Courier", 10)
-        ).pack(side="left", padx=2)
+        ttk.Entry(ctrl1, textvariable=self._plot_vmax, width=6, font=("Courier", 10)).pack(
+            side="left", padx=2
+        )
         ttk.Label(
             ctrl1,
             text="  (change variable/range then click Show Latest or Show Loop)",
@@ -604,14 +577,10 @@ class AdaptDashboard(tk.Tk):
 
         ttk.Label(ctrl2, text="Scan:", font=("", 10)).pack(side="left")
         self.scan_var = tk.StringVar()
-        self.scan_cb = ttk.Combobox(
-            ctrl2, textvariable=self.scan_var, width=28, state="readonly"
-        )
+        self.scan_cb = ttk.Combobox(ctrl2, textvariable=self.scan_var, width=28, state="readonly")
         self.scan_cb.pack(side="left", padx=(2, 2))
         self.scan_cb.bind("<<ComboboxSelected>>", lambda _: self._inline_render())
-        ttk.Button(ctrl2, text="◄", width=2, command=self._prev_scan).pack(
-            side="left", padx=1
-        )
+        ttk.Button(ctrl2, text="◄", width=2, command=self._prev_scan).pack(side="left", padx=1)
         ttk.Button(ctrl2, text="►", width=2, command=self._next_scan).pack(
             side="left", padx=(1, 10)
         )
@@ -638,9 +607,7 @@ class AdaptDashboard(tk.Tk):
             font=("Courier", 10),
         ).pack(side="left", padx=(2, 8))
 
-        ttk.Label(ctrl2, text="Proj steps:", font=("", 10)).pack(
-            side="left", padx=(8, 0)
-        )
+        ttk.Label(ctrl2, text="Proj steps:", font=("", 10)).pack(side="left", padx=(8, 0))
         self._max_proj_var = tk.IntVar(value=0)
         ttk.Spinbox(
             ctrl2,
@@ -654,16 +621,10 @@ class AdaptDashboard(tk.Tk):
             side="left", padx=(0, 8)
         )
 
-        ttk.Button(ctrl2, text="Show Latest", command=self._show_latest).pack(
-            side="left", padx=2
-        )
-        self.btn_loop = ttk.Button(
-            ctrl2, text="Show Loop", command=self._toggle_nc_loop
-        )
+        ttk.Button(ctrl2, text="Show Latest", command=self._show_latest).pack(side="left", padx=2)
+        self.btn_loop = ttk.Button(ctrl2, text="Show Loop", command=self._toggle_nc_loop)
         self.btn_loop.pack(side="left", padx=2)
-        ttk.Button(ctrl2, text="Clear", command=self._clear_canvas).pack(
-            side="left", padx=2
-        )
+        ttk.Button(ctrl2, text="Clear", command=self._clear_canvas).pack(side="left", padx=2)
 
         ttk.Separator(ctrl2, orient="vertical").pack(side="left", fill="y", padx=8)
         self._show_flow_var = tk.BooleanVar(value=False)
@@ -705,20 +666,14 @@ class AdaptDashboard(tk.Tk):
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
-        ttk.Label(left, text="Filter cells", font=("", 10, "bold")).pack(
-            anchor="w", pady=(0, 6)
-        )
+        ttk.Label(left, text="Filter cells", font=("", 10, "bold")).pack(anchor="w", pady=(0, 6))
 
         # Cell UID prefix search
         pid_row = ttk.Frame(left)
         pid_row.pack(fill="x", pady=(0, 8))
-        ttk.Label(pid_row, text="Cell UID prefix:", width=14, anchor="w").pack(
-            side="left"
-        )
+        ttk.Label(pid_row, text="Cell UID prefix:", width=14, anchor="w").pack(side="left")
         self._cell_uid_filter = tk.StringVar()
-        ttk.Entry(pid_row, textvariable=self._cell_uid_filter, width=12).pack(
-            side="left", padx=2
-        )
+        ttk.Entry(pid_row, textvariable=self._cell_uid_filter, width=12).pack(side="left", padx=2)
         self._cell_uid_filter.trace_add("write", lambda *_: self._refresh_table())
 
         self._flt = {}
@@ -785,9 +740,7 @@ class AdaptDashboard(tk.Tk):
             "cell_centroid_mass_lat",
             "cell_centroid_mass_lon",
         ]
-        self.tv = ttk.Treeview(
-            tv_frame, columns=self._tv_cols, show="headings", height=24
-        )
+        self.tv = ttk.Treeview(tv_frame, columns=self._tv_cols, show="headings", height=24)
         widths = [70, 60, 75, 80, 80, 85, 75, 90, 90]
         for c, w in zip(self._tv_cols, widths, strict=False):
             hdr = (
@@ -817,9 +770,7 @@ class AdaptDashboard(tk.Tk):
         ctrl = ttk.Frame(tab, padding=4)
         ctrl.pack(side="top", fill="x")
         ttk.Button(ctrl, text="Refresh", command=self._flush_log).pack(side="left")
-        ttk.Button(ctrl, text="Clear", command=self._clear_log).pack(
-            side="left", padx=4
-        )
+        ttk.Button(ctrl, text="Clear", command=self._clear_log).pack(side="left", padx=4)
 
         self.log_text = scrolledtext.ScrolledText(
             tab,
@@ -838,9 +789,7 @@ class AdaptDashboard(tk.Tk):
 
     def _browse_repo(self):
         with _suppress_osx_stderr():
-            path = filedialog.askdirectory(
-                title="Select Adapt output repository", parent=self
-            )
+            path = filedialog.askdirectory(title="Select Adapt output repository", parent=self)
         if path:
             self._repo_root.set(path)
             self._on_repo_changed()
@@ -892,21 +841,16 @@ class AdaptDashboard(tk.Tk):
         radar = self._radar.get().strip().upper()
         repo = self._repo_root.get().strip()
         if not radar:
-            messagebox.showerror(
-                "Missing input", "Select a Radar ID first", parent=self
-            )
+            messagebox.showerror("Missing input", "Select a Radar ID first", parent=self)
             return
         if not repo:
-            messagebox.showerror(
-                "Missing input", "Set the Output repo path first", parent=self
-            )
+            messagebox.showerror("Missing input", "Set the Output repo path first", parent=self)
             return
         if _pipeline_running():
             pid = _PID_FILE.read_text().strip()
             messagebox.showerror(
                 "Already running",
-                f"A pipeline is already running (PID {pid}).\n"
-                f"Stop it first or delete {_PID_FILE}.",
+                f"A pipeline is already running (PID {pid}).\nStop it first or delete {_PID_FILE}.",
                 parent=self,
             )
             return
@@ -951,9 +895,7 @@ class AdaptDashboard(tk.Tk):
             self.after(0, self._on_proc_ended)
 
         threading.Thread(target=_read, daemon=True).start()
-        self._append_log(
-            f"[{datetime.now():%H:%M:%S}] Pipeline started: {radar}", "info"
-        )
+        self._append_log(f"[{datetime.now():%H:%M:%S}] Pipeline started: {radar}", "info")
         self._append_log(f"  Output: {repo}/{radar}", "info")
 
     def _stop(self):
@@ -1022,9 +964,7 @@ class AdaptDashboard(tk.Tk):
         if not self._refresh_active:
             return
         secs = max(0, int(self._next_refresh_at - time.time()))
-        scan_str = (
-            self._last_scan_dt.strftime("%H:%M:%S UTC") if self._last_scan_dt else "—"
-        )
+        scan_str = self._last_scan_dt.strftime("%H:%M:%S UTC") if self._last_scan_dt else "—"
         self.status_var.set(
             f"{self._status_base}  |  Last scan: {scan_str}  |  Next check: {secs}s"
         )
@@ -1070,11 +1010,7 @@ class AdaptDashboard(tk.Tk):
                         self._last_rendered_nc = latest
                         self.scan_var.set(labels[-1] if labels else "")
                         db_path_r = Path(repo) / radar / "catalog.db"
-                        if (
-                            self._selected_cell_uid
-                            and self._current_run_id
-                            and db_path_r.exists()
-                        ):
+                        if self._selected_cell_uid and self._current_run_id and db_path_r.exists():
                             try:
                                 from adapt.persistence.track_store import TrackStore
 
@@ -1102,9 +1038,7 @@ class AdaptDashboard(tk.Tk):
                         self._last_rendered_nc = latest
                         self.scan_var.set(labels[-1] if labels else "")
                     except Exception:
-                        logger.exception(
-                            "Failed to render latest NC file during auto-refresh"
-                        )
+                        logger.exception("Failed to render latest NC file during auto-refresh")
 
         self._refresh_table()
         if self._nb.index("current") == 2:
@@ -1121,11 +1055,7 @@ class AdaptDashboard(tk.Tk):
         # Collect NC files from all date subdirectories
         all_nc = []
         for date_dir in list(analysis_dir.iterdir()):  # eager: release FD immediately
-            if (
-                date_dir.is_dir()
-                and len(date_dir.name) == 8
-                and date_dir.name.isdigit()
-            ):
+            if date_dir.is_dir() and len(date_dir.name) == 8 and date_dir.name.isdigit():
                 all_nc.extend(list(date_dir.glob("*_analysis.nc")))  # eager
 
         # Sort by filename (contains timestamp)
@@ -1183,7 +1113,7 @@ class AdaptDashboard(tk.Tk):
         if not nc_files:
             messagebox.showinfo(
                 "No data",
-                f"No analysis files found in:\n" f'{Path(repo) / radar / "analysis"}',
+                f"No analysis files found in:\n{Path(repo) / radar / 'analysis'}",
                 parent=self,
             )
             return
@@ -1209,16 +1139,14 @@ class AdaptDashboard(tk.Tk):
         repo = self._repo_root.get().strip()
         radar = self._radar.get().strip().upper()
         if not repo or not radar:
-            messagebox.showerror(
-                "Missing input", "Set Radar ID and Repo path first.", parent=self
-            )
+            messagebox.showerror("Missing input", "Set Radar ID and Repo path first.", parent=self)
             return
 
         nc_files = self._get_nc_files(repo, radar)
         if not nc_files:
             messagebox.showinfo(
                 "Not found",
-                f"No analysis files found in:\n" f'{Path(repo) / radar / "analysis"}',
+                f"No analysis files found in:\n{Path(repo) / radar / 'analysis'}",
                 parent=self,
             )
             return
@@ -1373,9 +1301,7 @@ class AdaptDashboard(tk.Tk):
         canvas.get_tk_widget().pack(fill="both", expand=True)
         canvas.draw()
 
-        toolbar = _CompactToolbar(
-            canvas, bottom, pack_toolbar=False, lat0=lat0, lon0=lon0
-        )
+        toolbar = _CompactToolbar(canvas, bottom, pack_toolbar=False, lat0=lat0, lon0=lon0)
         toolbar.update()
         toolbar.pack(side="left")
 
@@ -1384,16 +1310,14 @@ class AdaptDashboard(tk.Tk):
         stat_frame = tk.Frame(bottom, bg=_STRIP_BG)
         stat_frame.pack(side="right", fill="y", padx=4, pady=2)
         for lbl1, key1, fg1, lbl2, key2, fg2 in _BOX_DEFS:
-            box = tk.Frame(
-                stat_frame, bg=_BOX_BG, padx=4, pady=2, relief="groove", bd=1
-            )
+            box = tk.Frame(stat_frame, bg=_BOX_BG, padx=4, pady=2, relief="groove", bd=1)
             box.pack(side="left", fill="y", padx=2, pady=1)
             for lbl, key, fg in ((lbl1, key1, fg1), (lbl2, key2, fg2)):
                 row = tk.Frame(box, bg=_BOX_BG)
                 row.pack(fill="x")
-                tk.Label(
-                    row, text=lbl + ":", font=_FONT_LBL, fg="#888888", bg=_BOX_BG
-                ).pack(side="left")
+                tk.Label(row, text=lbl + ":", font=_FONT_LBL, fg="#888888", bg=_BOX_BG).pack(
+                    side="left"
+                )
                 tk.Label(
                     row,
                     textvariable=self._hv[key],
@@ -1435,7 +1359,9 @@ class AdaptDashboard(tk.Tk):
         ts = pd.Timestamp(
             tv.item()
             if tv is not None and np.ndim(tv) == 0
-            else tv[0] if tv is not None else pd.Timestamp.now()
+            else tv[0]
+            if tv is not None
+            else pd.Timestamp.now()
         )
         tstr = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
         self._last_scan_dt = ts.to_pydatetime()
@@ -1466,9 +1392,7 @@ class AdaptDashboard(tk.Tk):
         )
 
         # ── User-selected variable overlay (cells only) ───────────────────────
-        var_name = (
-            self._plot_var.get() if self._plot_var is not None else "reflectivity"
-        )
+        var_name = self._plot_var.get() if self._plot_var is not None else "reflectivity"
         if var_name not in ds.data_vars:
             var_name = "reflectivity"
         vdef = _VAR_DEFAULTS.get(var_name, (10, 60, "dBZ", "viridis"))
@@ -1508,9 +1432,7 @@ class AdaptDashboard(tk.Tk):
             self._cbar_ax.set_axes_locator(None)
             self._colorbar = fig.colorbar(im_ov, cax=self._cbar_ax, label=unit)
         else:
-            self._colorbar = fig.colorbar(
-                im_ov, ax=ax, label=unit, fraction=0.046, pad=0.04
-            )
+            self._colorbar = fig.colorbar(im_ov, ax=ax, label=unit, fraction=0.046, pad=0.04)
 
         # ── Cell contours ─────────────────────────────────────────────────────
         for cell_id in np.unique(labels_data[labels_data > 0]):
@@ -1592,15 +1514,29 @@ class AdaptDashboard(tk.Tk):
             mpatches.Patch(facecolor="gray", alpha=0.6, label="Stratiform"),
             mlines.Line2D([], [], color="#2C3539", linewidth=0.8, label="Cell boundary"),
             mlines.Line2D(
-                [], [], color="#2C3539", linewidth=1.2, linestyle="dashed",
+                [],
+                [],
+                color="#2C3539",
+                linewidth=1.2,
+                linestyle="dashed",
                 label="Projection",
             ),
             mlines.Line2D(
-                [], [], color="cyan", linewidth=1.5, marker="o", markersize=4,
+                [],
+                [],
+                color="cyan",
+                linewidth=1.5,
+                marker="o",
+                markersize=4,
                 label="Track",
             ),
             mlines.Line2D(
-                [], [], color="#8aff9c", marker="*", markersize=8, linestyle="None",
+                [],
+                [],
+                color="#8aff9c",
+                marker="*",
+                markersize=8,
+                linestyle="None",
                 label="qurrent centroid",
             ),
         ]
@@ -1632,10 +1568,7 @@ class AdaptDashboard(tk.Tk):
             return
 
         lat, lon = float(lat), float(lon)
-        crs_str = (
-            f"+proj=aeqd +lat_0={lat} +lon_0={lon} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=km"
-        )
+        crs_str = f"+proj=aeqd +lat_0={lat} +lon_0={lon} +x_0=0 +y_0=0 +datum=WGS84 +units=km"
         ax.set_xlim(x_km.min(), x_km.max())
         ax.set_ylim(y_km.min(), y_km.max())
         try:
@@ -1693,19 +1626,13 @@ class AdaptDashboard(tk.Tk):
 
         # Resolve cell_uid for clicked cell via SQLite (avoids scan_time format issues)
         cell_uid = None
-        if (
-            self._current_run_id
-            and db_path.exists()
-            and self._current_scan_ts is not None
-        ):
+        if self._current_run_id and db_path.exists() and self._current_scan_ts is not None:
             try:
                 from adapt.persistence.track_store import TrackStore
 
                 scan_time_dt = pd.Timestamp(self._current_scan_ts).to_pydatetime()
                 ts_obj = TrackStore(db_path, readonly=True)
-                scan_cells = ts_obj.get_cells_by_scan(
-                    self._current_run_id, scan_time_dt
-                )
+                scan_cells = ts_obj.get_cells_by_scan(self._current_run_id, scan_time_dt)
                 if not scan_cells.empty and "cell_label" in scan_cells.columns:
                     matched = scan_cells[scan_cells["cell_label"] == cell_id]
                     if not matched.empty:
@@ -1744,9 +1671,7 @@ class AdaptDashboard(tk.Tk):
                 from adapt.persistence.track_store import TrackStore
 
                 ts_obj = TrackStore(db_path, readonly=True)
-                history_df = ts_obj.get_track_history(
-                    self._current_run_id, str(cell_uid)
-                )
+                history_df = ts_obj.get_track_history(self._current_run_id, str(cell_uid))
             except Exception:
                 logger.exception("Failed to load tracking history from track store")
 
@@ -1761,9 +1686,7 @@ class AdaptDashboard(tk.Tk):
         self._update_time_series(history_df)
         fig.canvas.draw_idle()
 
-    def _draw_tracking_history(
-        self, ax, history_df: pd.DataFrame | None = None
-    ) -> None:
+    def _draw_tracking_history(self, ax, history_df: pd.DataFrame | None = None) -> None:
         df = history_df if history_df is not None else self._current_cell_df
         if df is None:
             return
@@ -1781,9 +1704,7 @@ class AdaptDashboard(tk.Tk):
         lons = track_df[lon_col].values
         y_km = (lats - lat0) * (np.pi / 180.0) * R
         x_km = (lons - lon0) * (np.pi / 180.0) * R * np.cos(np.radians(lat0))
-        (line,) = ax.plot(
-            x_km, y_km, "-", color="cyan", linewidth=1.5, alpha=0.85, zorder=10
-        )
+        (line,) = ax.plot(x_km, y_km, "-", color="cyan", linewidth=1.5, alpha=0.85, zorder=10)
         dots = ax.scatter(x_km, y_km, s=18, color="cyan", zorder=11, alpha=0.9)
         cur = track_df.iloc[-1]
         cy = float((cur[lat_col] - lat0) * np.pi / 180.0 * R)
@@ -1816,9 +1737,7 @@ class AdaptDashboard(tk.Tk):
     def _apply_time_axis(ax_bottom, axes) -> None:
         """Apply shared time-axis formatting. Call after plotting, using bottom axis."""
         ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        ax_bottom.xaxis.set_major_locator(
-            mdates.AutoDateLocator(minticks=3, maxticks=10)
-        )
+        ax_bottom.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=10))
         ax_bottom.tick_params(axis="x", colors="#333333", labelsize=8, rotation=30)
         ax_bottom.set_xlabel("UTC", fontsize=8, color="#444444")
         ax_bottom.xaxis.label.set_color("#444444")
@@ -1857,9 +1776,7 @@ class AdaptDashboard(tk.Tk):
         # ── Area panel ────────────────────────────────────────────────────────
         if "cell_area_sqkm" in track_df.columns:
             vals = track_df["cell_area_sqkm"].values
-            ax_area.plot(
-                times, vals, color="#7ec8e3", linewidth=1.5, label="total area"
-            )
+            ax_area.plot(times, vals, color="#7ec8e3", linewidth=1.5, label="total area")
             ax_area.fill_between(times, vals, alpha=0.15, color="#7ec8e3")
         if "area_40dbz_km2" in track_df.columns:
             ax_area.plot(
@@ -1912,9 +1829,7 @@ class AdaptDashboard(tk.Tk):
         if "radar_differential_reflectivity_max" in track_df.columns:
             zdr = track_df["radar_differential_reflectivity_max"]
             if zdr.notna().any():
-                ax_extra.plot(
-                    times, zdr.values, color="#cc88ff", linewidth=1.2, label="max ZDR"
-                )
+                ax_extra.plot(times, zdr.values, color="#cc88ff", linewidth=1.2, label="max ZDR")
                 has_extra = True
         self._style_ts_ax(ax_extra, "dB", "ZDR")
         if has_extra:
@@ -2045,9 +1960,7 @@ class AdaptDashboard(tk.Tk):
             if df is not None and "cell_label" in df.columns:
                 if self._current_scan_ts is not None and "scan_time" in df.columns:
                     df_time = df.copy()
-                    df_time["scan_time"] = pd.to_datetime(
-                        df_time["scan_time"], utc=True
-                    )
+                    df_time["scan_time"] = pd.to_datetime(df_time["scan_time"], utc=True)
                     scan_ts = (
                         self._current_scan_ts.tz_localize("UTC")
                         if self._current_scan_ts.tzinfo is None
@@ -2084,10 +1997,7 @@ class AdaptDashboard(tk.Tk):
                         elif age_s < 3600:
                             age_str = f"{int(age_s / 60)}m{int(age_s % 60):02d}s"
                         else:
-                            age_str = (
-                                f"{int(age_s / 3600)}h"
-                                f"{int((age_s % 3600) / 60):02d}m"
-                            )
+                            age_str = f"{int(age_s / 3600)}h{int((age_s % 3600) / 60):02d}m"
                         self._hv["age"].set(age_str)
                     elif self._current_cell_df is not None:
                         cdf = self._current_cell_df
@@ -2105,20 +2015,12 @@ class AdaptDashboard(tk.Tk):
                     else:
                         self._hv["age"].set(_em)
 
-                    self._hv["lat_mass"].set(
-                        _f("cell_centroid_mass_lat", ".4f", "\u00b0")
-                    )
-                    self._hv["lon_mass"].set(
-                        _f("cell_centroid_mass_lon", ".4f", "\u00b0")
-                    )
+                    self._hv["lat_mass"].set(_f("cell_centroid_mass_lat", ".4f", "\u00b0"))
+                    self._hv["lon_mass"].set(_f("cell_centroid_mass_lon", ".4f", "\u00b0"))
                     self._hv["dbz_mean"].set(_f("radar_reflectivity_mean"))
                     self._hv["dbz_max"].set(_f("radar_reflectivity_max"))
-                    self._hv["zdr_mean"].set(
-                        _f("radar_differential_reflectivity_mean", ".2f")
-                    )
-                    self._hv["zdr_max"].set(
-                        _f("radar_differential_reflectivity_max", ".2f")
-                    )
+                    self._hv["zdr_mean"].set(_f("radar_differential_reflectivity_mean", ".2f"))
+                    self._hv["zdr_max"].set(_f("radar_differential_reflectivity_max", ".2f"))
                     self._hv["vel_mean"].set(_f("radar_velocity_mean"))
                     self._hv["sw_mean"].set(_f("radar_spectrum_width_mean"))
                     return
@@ -2200,9 +2102,7 @@ class AdaptDashboard(tk.Tk):
                     mask &= df[col].between(float(lo_v.get()), float(hi_v.get()))
 
         # Cell UID prefix filter
-        pid_prefix = (
-            self._cell_uid_filter.get().strip().upper() if self._cell_uid_filter else ""
-        )
+        pid_prefix = self._cell_uid_filter.get().strip().upper() if self._cell_uid_filter else ""
         if pid_prefix and "cell_uid" in df.columns:
             mask &= df["cell_uid"].astype(str).str.upper().str.startswith(pid_prefix)
 
@@ -2210,17 +2110,15 @@ class AdaptDashboard(tk.Tk):
 
         def _avg(col, fmt=".1f"):
             return (
-                f"{filt[col].mean():{fmt}}"
-                if col in filt.columns and not filt.empty
-                else "\u2014"
+                f"{filt[col].mean():{fmt}}" if col in filt.columns and not filt.empty else "\u2014"
             )
 
         self.stats_lbl.config(
             text=(
                 f"Showing {len(filt)} / {len(df)} cells"
-                f'  |  Avg dBZ: {_avg("radar_reflectivity_mean")}'
-                f'  |  Avg area: {_avg("cell_area_sqkm")} km\u00b2'
-                f'  |  Avg ZDR: {_avg("radar_differential_reflectivity_mean", ".2f")}'
+                f"  |  Avg dBZ: {_avg('radar_reflectivity_mean')}"
+                f"  |  Avg area: {_avg('cell_area_sqkm')} km\u00b2"
+                f"  |  Avg ZDR: {_avg('radar_differential_reflectivity_mean', '.2f')}"
             )
         )
 

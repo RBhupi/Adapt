@@ -47,7 +47,4 @@ class Node:
         return self.module.name
 
     def __repr__(self) -> str:
-        return (
-            f"Node(name={self.name!r}, "
-            f"inputs={self.inputs}, outputs={self.outputs})"
-        )
+        return f"Node(name={self.name!r}, inputs={self.inputs}, outputs={self.outputs})"

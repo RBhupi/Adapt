@@ -66,11 +66,7 @@ def deep_merge(base: dict, *overrides: dict) -> dict:
 
     for override in overrides:
         for key, value in override.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 # Recursive merge for nested dicts
                 result[key] = deep_merge(result[key], value)
             else:
@@ -178,9 +174,7 @@ def resolve_config(
         user_excludes.update(cli.analyzer.exclude_fields)
 
     if user_excludes:
-        merged.setdefault("analyzer", {})["exclude_fields"] = list(
-            default_excludes | user_excludes
-        )
+        merged.setdefault("analyzer", {})["exclude_fields"] = list(default_excludes | user_excludes)
 
     # Schema responsibility: Infer historical mode from times if mode not explicitly set
     # This handles cases where times are provided but mode is not.

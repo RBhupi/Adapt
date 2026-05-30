@@ -94,9 +94,7 @@ class TestScientistCanDetectCells:
         labels = result["cell_labels"].values
         assert labels[5, 5] > 0, "Centre of cluster should be labelled"
 
-    def test_user_sees_no_cells_when_storm_below_threshold(
-        self, detection_module_config
-    ):
+    def test_user_sees_no_cells_when_storm_below_threshold(self, detection_module_config):
         """Given: all reflectivity below detection threshold.
         When: segmenter runs.
         Then: output has no cells (all labels == 0).
