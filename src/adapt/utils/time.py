@@ -1,4 +1,4 @@
-"""Time normalization helpers shared across ADAPT modules."""
+"""Time normalization helpers shared across Adapt modules."""
 
 import contextlib
 from datetime import UTC, datetime

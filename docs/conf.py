@@ -18,18 +18,7 @@ extensions = [
 ]
 
 autodoc_mock_imports = [
-    "pyart",
-    "arm_pyart",
-    "cv2",
-    "cartopy",
-    "contextily",
-    "nexradaws",
-    "h5py",
-    "netCDF4",
-    "scipy",
-    "skimage",
-    "pyarrow",
-    "pyproj",
+    "arm_pyart",  # not installed; pyart is the installed alias
 ]
 
 myst_enable_extensions = ["colon_fence"]

@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Central contract definitions for the ADAPT pipeline.
+"""Central contract definitions for the Adapt pipeline.
 
 All pipeline stage validators and the ContractViolation exception live here.
 Import from this package — never from individual contract submodules.
