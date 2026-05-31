@@ -137,6 +137,8 @@ class InternalTrackerConfig(AdaptBaseModel):
     unmatch_cost_threshold: float = Field(default=2.0, ge=0.0)
     split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     core_reflectivity_threshold: float = Field(default=40.0, ge=0.0)
+    max_gap_minutes: float = Field(default=10.0, gt=0.0)
+    expected_speed_ms: float = Field(default=30.0, gt=0.0)
     cell_uid: InternalCellUidConfig
 
 

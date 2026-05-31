@@ -212,6 +212,16 @@ class TrackerConfig(AdaptBaseModel):
     core_reflectivity_threshold: float = Field(
         40.0, ge=0.0, description="Reflectivity threshold for core area (dBZ)"
     )
+    max_gap_minutes: float = Field(
+        10.0,
+        gt=0.0,
+        description="Maximum gap between scans before a dormant track is terminated",
+    )
+    expected_speed_ms: float = Field(
+        30.0,
+        gt=0.0,
+        description="Maximum expected cell propagation speed (m/s); scales D_pos with dt",
+    )
     cell_uid: CellUidConfig = Field(default_factory=CellUidConfig)  # type: ignore[arg-type]
 
 

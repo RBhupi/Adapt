@@ -89,6 +89,8 @@ class TrackingModuleConfig:
     uid_width: int
     reflectivity_var: str
     labels_var: str
+    max_gap_minutes: float
+    expected_speed_ms: float
 
 
 def materialize_module_configs(cfg: InternalConfig) -> dict:
@@ -161,5 +163,7 @@ def materialize_module_configs(cfg: InternalConfig) -> dict:
             uid_width=cfg.tracker.cell_uid.width,
             reflectivity_var=cfg.global_.var_names.reflectivity,
             labels_var=cfg.global_.var_names.cell_labels,
+            max_gap_minutes=cfg.tracker.max_gap_minutes,
+            expected_speed_ms=cfg.tracker.expected_speed_ms,
         ),
     }
