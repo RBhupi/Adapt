@@ -84,9 +84,18 @@ results/
 # Ignore user config overrides
 scripts/user_config.py
 
-# ignore md, txt
+# ignore scratch notes but keep docs and repo-standard markdown/text
 *.md
+!README.md
+!CLAUDE.md
+!.github/**/*.md
+!docs/**/*.md
 *.txt
+!requirements*.txt
+!docs/**/*.txt
+
+# ignore build/log output in docs
+docs/nohup.out
 
 # Ignore large data
 data/
