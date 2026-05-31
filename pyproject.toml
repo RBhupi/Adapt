@@ -121,3 +121,10 @@ select = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["adapt"]
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["adapt.gui.*", "adapt.visualization.*"]
+ignore_errors = true

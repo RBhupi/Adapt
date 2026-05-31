@@ -15,3 +15,20 @@ repos:
       - id: ruff          # lint + import sort (I rule)
         args: [--fix]
       - id: ruff-format   # black-compatible formatter
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [src/adapt, --no-error-summary]
+
+      - id: import-linter
+        name: import-linter
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        always_run: true
