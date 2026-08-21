@@ -89,6 +89,7 @@ def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_conf
             module=["fake_post"],
             input_dir=None,
             config=None,
+            run_id=None,
             verbose=False,
         )
         cli._postprocess_cmd(args)
@@ -99,6 +100,64 @@ def test_postprocess_cmd_runs_module_and_writes_table(monkeypatch, internal_conf
         finally:
             conn.close()
         assert rows == [("z", 2)]
+    finally:
+        registry.unregister("fake_post")
+        store.close()
+
+
+def test_parser_accepts_run_id():
+    parser = argparse.ArgumentParser()
+    cli._build_postprocess_parser(parser)
+
+    args = parser.parse_args(["--module", "fake_post", "--run-id", "OLDRUN1"])
+
+    assert args.run_id == "OLDRUN1"
+
+
+def _begin_run(reg, internal_config, run_id):
+    run_config = internal_config.model_copy(update={"run_id": run_id})
+    reg.begin_run(
+        RunStart(
+            run_id=run_id,
+            collection_id="TEST_RADAR",
+            config_hash="h",
+            config_json=run_config.model_dump_json(),
+            pipeline_version="0",
+            environment_json="{}",
+        )
+    )
+
+
+def test_run_id_selects_named_run_and_records_history(internal_config, temp_dir):
+    root = init_store(temp_dir / "store")
+    store = Store.open(root)
+    collection = store.collection("TEST_RADAR")
+    reg = StoreRegistry.get_instance(root)
+    reg.register_collection("TEST_RADAR", source_kind="nexrad")
+    _begin_run(reg, internal_config, "OLDRUN1")
+    _begin_run(reg, internal_config, "NEWRUN2")
+
+    registry.register(_FakePostModule)
+    try:
+        args = argparse.Namespace(
+            repository=str(root),
+            module=["fake_post"],
+            input_dir=None,
+            config=None,
+            run_id="OLDRUN1",
+            verbose=False,
+        )
+        cli._postprocess_cmd(args)
+
+        conn = sqlite3.connect(collection.products_path)
+        try:
+            rows = conn.execute("SELECT run_id FROM fake_ext").fetchall()
+        finally:
+            conn.close()
+        assert rows == [("OLDRUN1",)]
+
+        recorded = {r["module"] for r in reg.run_modules("OLDRUN1")}
+        assert "fake_post" in recorded
     finally:
         registry.unregister("fake_post")
         store.close()
