@@ -14,7 +14,14 @@ dependency resolution, ``resolve_module_configs`` for config, and the
 ``StoreOutputRouter`` for persistence (whose frozen-schema writer enforces
 module table ownership). Post-process modules declare
 ``pipeline_phase = POSTPROCESS_PHASE`` and are selected exclusively here; the
-live pipeline never loads them.
+live pipeline rejects them structurally.
+
+Store-backed inputs (mask geometry, collection location, ...) come from the
+``adapt.runtime.store_inputs`` provider registry: a module may declare any
+registered input key, and adding a new key is one provider function plus one
+``register_store_input`` call — this file does not change. Every invocation
+records per-module execution rows into ``run_modules`` when an observability
+provider is injected (the CLI always injects one).
 """
 
 import importlib
