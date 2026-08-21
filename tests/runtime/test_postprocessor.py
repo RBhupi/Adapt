@@ -219,6 +219,17 @@ def test_unknown_module_name_raises(pipeline_config, store_env):
         registry.unregister("fake_post")
 
 
+def test_missing_postprocess_defaults_yaml_raises(
+    pipeline_config, store_env, monkeypatch, tmp_path
+):
+    import adapt.runtime.postprocessor as pp_module
+
+    monkeypatch.setattr(pp_module, "_POSTPROCESS_DEFAULTS_YAML", tmp_path / "does_not_exist.yaml")
+    pp = PostProcessor(store_env.collection, store_env.registry, store_env.run_id, pipeline_config)
+    with pytest.raises(RuntimeError, match="post-process module list"):
+        pp.run(modules=["fake_post"])
+
+
 class _CustomInputModule(BaseModule):
     name = "custom_input_post"
     pipeline_phase = POSTPROCESS_PHASE

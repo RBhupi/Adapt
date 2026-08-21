@@ -54,18 +54,25 @@ def _ensure_postprocess_modules_registered(extensions: list[str] | None = None) 
     """Import post-process module paths from postprocess_defaults.yaml + extensions.
 
     Importing each path triggers its ``registry.register()`` at module level.
-    Mirrors the pipeline's ``_ensure_modules_registered``; kept separate so the
-    live pipeline never imports (and thus never sees) post-process modules.
+    Mirrors the pipeline's ``_ensure_modules_registered`` (including its
+    fail-loud rules); kept separate so the live pipeline never imports (and
+    thus never sees) post-process modules.
     """
-    module_paths: list[str] = []
-    if _POSTPROCESS_DEFAULTS_YAML.exists():
+    try:
         with open(_POSTPROCESS_DEFAULTS_YAML, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
-        module_paths = cfg.get("postprocess", {}).get("modules", []) or []
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot read post-process module list '{_POSTPROCESS_DEFAULTS_YAML}': {e}"
+        ) from e
+    module_paths = cfg.get("postprocess", {}).get("modules", []) or []
 
     for path in module_paths:
-        importlib.import_module(path)
-        logger.debug("Registered post-process module from: %s", path)
+        try:
+            importlib.import_module(path)
+            logger.debug("Registered post-process module from: %s", path)
+        except Exception as e:
+            raise ImportError(f"Failed to import post-process module '{path}': {e}") from e
 
     for path in extensions or []:
         try:

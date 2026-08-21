@@ -24,8 +24,8 @@ def resolve_module_configs(internal_config: Any) -> dict[str, Any]:
     Modules that return None (need no config) contribute no key.
     """
     configs: dict[str, Any] = {}
-    for name, module_class in registry._modules.items():
-        module_cfg = module_class.build_config(internal_config)
+    for name in registry.list_modules():
+        module_cfg = registry.get(name).build_config(internal_config)
         if module_cfg is not None:
             configs[f"{name}_config"] = module_cfg
     return configs
