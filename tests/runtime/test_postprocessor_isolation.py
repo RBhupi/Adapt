@@ -16,7 +16,9 @@ import pytest
 import yaml
 
 import adapt.runtime.postprocessor as pp
+from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import _DEFAULTS_YAML
+from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
 
 pytestmark = pytest.mark.unit
 
@@ -33,3 +35,22 @@ def test_pipeline_and_postprocess_discovery_sources_are_disjoint():
     assert "adapt.execution.nodes.xlma_stat" in post
     assert "adapt.execution.nodes.xlma_stat" not in live
     assert live.isdisjoint(post)
+
+
+class _RoguePhase4(BaseModule):
+    name = "rogue_phase4"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["run_id"]
+    outputs = ["rogue_phase4_rows"]
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+def test_live_processor_rejects_postprocess_phase_module(make_processor):
+    registry.register(_RoguePhase4)
+    try:
+        with pytest.raises(ValueError, match="rogue_phase4"):
+            make_processor()
+    finally:
+        registry.unregister("rogue_phase4")

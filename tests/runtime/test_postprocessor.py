@@ -29,16 +29,16 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 
 @pytest.fixture(autouse=True)
-def _clean_lma_registration():
-    """PostProcessor.run auto-imports the real `lma` node (postprocess_defaults).
+def _clean_xlma_registration():
+    """PostProcessor.run auto-imports the real xlma_stat node (postprocess_defaults).
 
-    Remove it from the registry and the import cache after each test so the global
-    singleton stays clean for the rest of the session and re-imports register it
-    fresh next time.
+    Remove it from the registry and the import cache after each test so the
+    global singleton stays clean for the rest of the session and re-imports
+    register it fresh next time.
     """
     yield
-    registry.unregister("lma")
-    sys.modules.pop("adapt.execution.nodes.lma", None)
+    registry.unregister("xlma_stat")
+    sys.modules.pop("adapt.execution.nodes.xlma_stat", None)
 
 
 class _FakePostModule(BaseModule):
@@ -302,6 +302,28 @@ class _ChainedModule(BaseModule):
                 [{"run_id": context["run_id"], "marker": context["derived_x"]["marker"]}]
             )
         }
+
+
+class _FakeLiveModule(BaseModule):
+    name = "fake_live"
+    pipeline_phase = 0
+    inputs = ["run_id"]
+    outputs = ["fake_live_rows"]
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+def test_requesting_live_module_raises(pipeline_config, store_env):
+    registry.register(_FakeLiveModule)
+    try:
+        pp = PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        )
+        with pytest.raises(ValueError, match="not a post-process module"):
+            pp.run(modules=["fake_live"])
+    finally:
+        registry.unregister("fake_live")
 
 
 def _test_observability():

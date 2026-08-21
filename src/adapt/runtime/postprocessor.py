@@ -110,7 +110,14 @@ class PostProcessor:
         """
         _ensure_postprocess_modules_registered(self._extensions)
 
-        available = [m for m in registry.create_modules() if m.pipeline_phase == POSTPROCESS_PHASE]
+        available = [m for m in registry.create_modules() if m.pipeline_phase >= POSTPROCESS_PHASE]
+        for name in modules:
+            if name in registry and registry.get(name).pipeline_phase < POSTPROCESS_PHASE:
+                raise ValueError(
+                    f"Module '{name}' is not a post-process module "
+                    f"(pipeline_phase={registry.get(name).pipeline_phase}); it runs in "
+                    "the live pipeline ('adapt run-nexrad')."
+                )
         selected = resolve_enabled_modules(available, modules=modules)
         logger.info("Post-processing modules: [%s]", ", ".join(m.name for m in selected))
 

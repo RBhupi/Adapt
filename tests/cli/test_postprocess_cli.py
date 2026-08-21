@@ -5,6 +5,7 @@
 
 import argparse
 import sqlite3
+import sys
 
 import pandas as pd
 import pytest
@@ -17,6 +18,19 @@ from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
+
+
+@pytest.fixture(autouse=True)
+def _clean_xlma_registration():
+    """The CLI path auto-imports the real xlma_stat node (postprocess_defaults).
+
+    Remove it from the registry and the import cache after each test so the
+    global singleton stays clean for the rest of the session and re-imports
+    register it fresh next time.
+    """
+    yield
+    registry.unregister("xlma_stat")
+    sys.modules.pop("adapt.execution.nodes.xlma_stat", None)
 
 
 class _FakePostModule(BaseModule):
