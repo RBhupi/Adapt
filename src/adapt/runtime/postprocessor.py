@@ -32,6 +32,7 @@ from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import resolve_enabled_modules
 from adapt.modules.base import POSTPROCESS_PHASE
 from adapt.persistence.output_router import StoreOutputRouter
+from adapt.runtime.store_inputs import available_store_inputs, resolve_store_input
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -110,32 +111,37 @@ class PostProcessor:
         return result
 
     def _build_context(self, selected: list) -> dict:
-        """Repository-level base context, module configs, and on-demand repo inputs.
+        """Run-level base context, module configs, and on-demand store inputs.
 
-        Store-backed inputs are injected only when a selected module declares
-        them (the same on-demand pattern the live processor uses for
-        ``grid_ds_3d``): ``minute_masks`` (minute-resolution registration masks —
-        the geometry product every external-association module consumes),
-        ``projection_minute_masks`` (the forward-projection analogue), and
-        ``radar_origin`` (the collection lat/lon for projection).
+        Store-backed inputs come from the ``adapt.runtime.store_inputs``
+        provider registry and are materialized only for keys a selected module
+        declares that neither the base context nor a sibling selected module
+        supplies. A declared input with no source fails here, by name — never
+        as an opaque executor stall.
         """
         context: dict = {"run_id": self.run_id}
         context.update(resolve_module_configs(self.config))
 
-        declared = {key for module in selected for key in module.inputs}
-        if "minute_masks" in declared:
-            from adapt.persistence.scan_mask_reader import read_minute_masks
-
-            context["minute_masks"] = read_minute_masks(self.collection, self.run_id)
-        if "projection_minute_masks" in declared:
-            from adapt.persistence.scan_mask_reader import read_projection_minute_masks
-
-            context["projection_minute_masks"] = read_projection_minute_masks(
-                self.collection, self.run_id
+        produced = {key for module in selected for key in module.outputs}
+        needed = list(
+            dict.fromkeys(
+                key
+                for module in selected
+                for key in module.inputs
+                if key not in context and key not in produced
             )
-        if "radar_origin" in declared:
-            row = self.registry.get_collection(self.collection.collection_id)
-            context["radar_origin"] = (row["location_lat"], row["location_lon"])
+        )
+        available = set(available_store_inputs())
+        missing = [key for key in needed if key not in available]
+        if missing:
+            raise ValueError(
+                f"No source for input(s) {missing} required by the selected "
+                "post-process module(s): not produced by a selected module, not a "
+                "module config, and no registered store-input provider. "
+                f"Available store inputs: {', '.join(available_store_inputs())}"
+            )
+        for key in needed:
+            context[key] = resolve_store_input(key, self.collection, self.registry, self.run_id)
         return context
 
     def _persist(self, modules: list, result: dict) -> None:

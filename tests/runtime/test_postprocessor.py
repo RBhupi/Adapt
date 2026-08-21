@@ -18,6 +18,7 @@ import pytest
 from adapt.contracts import ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
+from adapt.runtime import store_inputs
 from adapt.runtime.postprocessor import PostProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -212,3 +213,106 @@ def test_unknown_module_name_raises(pipeline_config, store_env):
             pp.run(modules=["does_not_exist"])
     finally:
         registry.unregister("fake_post")
+
+
+class _CustomInputModule(BaseModule):
+    name = "custom_input_post"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["probe_feed", "run_id"]
+    outputs = ["custom_rows"]
+    persistence = (
+        ProductTableWrite(key="custom_rows", table="custom_ext", primary_key=("run_id", "k")),
+    )
+
+    def run(self, context: dict) -> dict:
+        return {
+            "custom_rows": pd.DataFrame(
+                [{"run_id": context["run_id"], "k": context["probe_feed"]["k"], "v": 1.0}]
+            )
+        }
+
+
+def test_custom_store_input_provider_feeds_module(pipeline_config, store_env):
+    store_inputs.register_store_input("probe_feed", lambda col, reg, run_id: {"k": run_id})
+    _register(_CustomInputModule)
+    try:
+        PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        ).run(modules=["custom_input_post"])
+        conn = sqlite3.connect(store_env.collection.products_path)
+        try:
+            rows = conn.execute("SELECT k, v FROM custom_ext").fetchall()
+        finally:
+            conn.close()
+        assert rows == [(store_env.run_id, 1.0)]
+    finally:
+        registry.unregister("custom_input_post")
+        store_inputs.unregister_store_input("probe_feed")
+
+
+class _GhostInputModule(BaseModule):
+    name = "ghost_input_post"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["no_such_input", "run_id"]
+    outputs = ["ghost_rows"]
+
+    def run(self, context: dict) -> dict:
+        return {"ghost_rows": pd.DataFrame()}
+
+
+def test_missing_store_input_fails_fast_with_names(pipeline_config, store_env):
+    _register(_GhostInputModule)
+    try:
+        pp = PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        )
+        with pytest.raises(ValueError, match="no_such_input") as excinfo:
+            pp.run(modules=["ghost_input_post"])
+        assert "minute_masks" in str(excinfo.value)  # lists available providers
+    finally:
+        registry.unregister("ghost_input_post")
+
+
+class _ProducerModule(BaseModule):
+    name = "producer_post"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["run_id"]
+    outputs = ["derived_x"]
+
+    def run(self, context: dict) -> dict:
+        return {"derived_x": {"marker": context["run_id"]}}
+
+
+class _ChainedModule(BaseModule):
+    name = "chained_post"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["derived_x", "run_id"]
+    outputs = ["chained_rows"]
+    persistence = (
+        ProductTableWrite(key="chained_rows", table="chained_ext", primary_key=("run_id",)),
+    )
+
+    def run(self, context: dict) -> dict:
+        return {
+            "chained_rows": pd.DataFrame(
+                [{"run_id": context["run_id"], "marker": context["derived_x"]["marker"]}]
+            )
+        }
+
+
+def test_sibling_produced_input_needs_no_provider(pipeline_config, store_env):
+    _register(_ProducerModule)
+    _register(_ChainedModule)
+    try:
+        PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        ).run(modules=["producer_post", "chained_post"])
+        conn = sqlite3.connect(store_env.collection.products_path)
+        try:
+            rows = conn.execute("SELECT marker FROM chained_ext").fetchall()
+        finally:
+            conn.close()
+        assert rows == [(store_env.run_id,)]
+    finally:
+        registry.unregister("producer_post")
+        registry.unregister("chained_post")
