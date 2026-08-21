@@ -8,9 +8,12 @@ and the store's frozen-schema writer — module-owned extension tables only,
 never tracking core tables.
 """
 
+import json
 import sqlite3
 import sys
 from datetime import UTC, datetime
+from itertools import count
+from random import Random
 
 import pandas as pd
 import pytest
@@ -19,6 +22,7 @@ from adapt.contracts import ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
 from adapt.runtime import store_inputs
+from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.postprocessor import PostProcessor
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -298,6 +302,75 @@ class _ChainedModule(BaseModule):
                 [{"run_id": context["run_id"], "marker": context["derived_x"]["marker"]}]
             )
         }
+
+
+def _test_observability():
+    """Deterministic provider: counting clock, fixed wall clock, seeded rng."""
+    ticks = count()
+    return build_observability(
+        ObsSettings(enabled=True),
+        clock=lambda: float(next(ticks)),
+        wall_clock=lambda: datetime(2024, 5, 18, 12, 0, 0, tzinfo=UTC),
+        rng=Random(0),
+    )
+
+
+def test_records_module_execution_history(pipeline_config, store_env):
+    _register(_FakePostModule)
+    try:
+        PostProcessor(
+            store_env.collection,
+            store_env.registry,
+            store_env.run_id,
+            pipeline_config,
+            observability=_test_observability(),
+        ).run(modules=["fake_post"])
+        rows = {r["module"]: r for r in store_env.registry.run_modules(store_env.run_id)}
+        assert "fake_post" in rows
+        assert rows["fake_post"]["status"] == "completed"
+        assert rows["fake_post"]["duration_seconds"] >= 0.0
+        assert json.loads(rows["fake_post"]["detail_json"])["calls"] == 1
+    finally:
+        registry.unregister("fake_post")
+
+
+class _ExplodingModule(BaseModule):
+    name = "exploding_post"
+    pipeline_phase = POSTPROCESS_PHASE
+    inputs = ["run_id"]
+    outputs = ["boom_rows"]
+
+    def run(self, context: dict) -> dict:
+        raise RuntimeError("boom")
+
+
+def test_failed_module_recorded_as_failed(pipeline_config, store_env):
+    _register(_ExplodingModule)
+    try:
+        pp = PostProcessor(
+            store_env.collection,
+            store_env.registry,
+            store_env.run_id,
+            pipeline_config,
+            observability=_test_observability(),
+        )
+        with pytest.raises(RuntimeError, match="boom"):
+            pp.run(modules=["exploding_post"])
+        rows = {r["module"]: r for r in store_env.registry.run_modules(store_env.run_id)}
+        assert rows["exploding_post"]["status"] == "failed"
+    finally:
+        registry.unregister("exploding_post")
+
+
+def test_no_observability_records_nothing(pipeline_config, store_env):
+    _register(_FakePostModule)
+    try:
+        PostProcessor(
+            store_env.collection, store_env.registry, store_env.run_id, pipeline_config
+        ).run(modules=["fake_post"])
+        assert store_env.registry.run_modules(store_env.run_id) == []
+    finally:
+        registry.unregister("fake_post")
 
 
 def test_sibling_produced_input_needs_no_provider(pipeline_config, store_env):

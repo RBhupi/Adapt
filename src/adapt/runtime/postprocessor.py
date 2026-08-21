@@ -19,6 +19,7 @@ live pipeline never loads them.
 
 import importlib
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,12 +27,15 @@ import yaml
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.contracts import PersistenceMeta
+from adapt.contracts.observability import Observability
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import resolve_enabled_modules
 from adapt.modules.base import POSTPROCESS_PHASE
+from adapt.persistence.execution_history import StoreExecutionHistory
 from adapt.persistence.output_router import StoreOutputRouter
+from adapt.runtime.observability import disabled_observability
 from adapt.runtime.store_inputs import available_store_inputs, resolve_store_input
 
 if TYPE_CHECKING:
@@ -81,12 +85,19 @@ class PostProcessor:
         run_id: str,
         config: "InternalConfig",
         extensions: list[str] | None = None,
+        *,
+        observability: Observability | None = None,
     ) -> None:
         self.collection = collection
         self.registry = registry
         self.run_id = run_id
         self.config = config
         self._extensions = extensions
+        # Telemetry provider, injected by the CLI. Absent -> disabled (off), so
+        # the rest of this class calls it unconditionally with no `if obs` branches.
+        self._obs: Observability = (
+            observability if observability is not None else disabled_observability()
+        )
 
     def run(self, modules: list[str]) -> dict:
         """Resolve, execute, and persist the requested post-process modules.
@@ -105,10 +116,27 @@ class PostProcessor:
 
         nodes = GraphBuilder(selected).build()
         context = self._build_context(selected)
-        result = GraphExecutor(nodes).run(context)
+        try:
+            result = GraphExecutor(nodes, observability=self._obs).run(context)
+        finally:
+            self._record_history()
 
         self._persist(selected, result)
         return result
+
+    def _record_history(self) -> None:
+        """Upsert this invocation's module spans into run_modules (post-hoc audit).
+
+        Runs in a finally: a failed module still leaves its 'failed' row before
+        the exception propagates. The record is run-level — the run_modules
+        schema keys on (run_id, module), so scan_id is passed empty.
+        """
+        spans = self._obs.drain_spans()
+        if not spans:
+            return
+        StoreExecutionHistory(self.registry).record_modules(
+            self.run_id, scan_id="", spans=spans, recorded_at=datetime.now(UTC)
+        )
 
     def _build_context(self, selected: list) -> dict:
         """Run-level base context, module configs, and on-demand store inputs.
