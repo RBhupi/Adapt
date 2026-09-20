@@ -40,7 +40,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.contracts import stat_column
+from adapt.contracts import TrackingDecisions, TrackingSplitMergeTest, stat_column
+from adapt.modules.tracking.decision_log import FrameLog, LogCell
 from adapt.modules.tracking.events import (
     build_cell_events_dataframe,
     event_continue,
@@ -76,7 +77,6 @@ from adapt.modules.tracking.motion import (
     heading_change_degrees,
     heading_change_radians,
 )
-from adapt.modules.tracking.projection import select_registration_labels
 from adapt.utils.time import normalize_time_scalar
 
 # Beyond this ratio between consecutive scan intervals the cadence is flagged
@@ -142,12 +142,17 @@ class CellTracker:
         self.validator = GeometricValidator(
             config.minimum_candidate_overlap, config.minimum_projected_overlap
         )
-        self.motion = MotionValidator(config.max_speed_ms, config.max_speed_multiplier)
+        self.motion = MotionValidator(
+            config.max_speed_ms, config.max_speed_multiplier, config.acceleration_floor_ms
+        )
         self.heading_penalty_weight = config.heading_change_penalty_weight
         self._previous_scan: tuple | None = None  # (time, node_ids)
         self._cell_identity: dict[int, tuple[str, str]] = {}
         self._track_motion: dict[int, TrackMotionState] = {}  # track_index → kinematics
         self._prev_dt_s: float | None = None  # last good scan interval (cadence check)
+        # Decision log of the scan being tracked; frozen into _decisions at the end.
+        self._log = FrameLog(dt_s=None, prev=[], curr_labels=[], reset_code="FIRST_SCAN")
+        self._decisions: TrackingDecisions | None = None
 
         logger.info(
             "CellTracker initialized: buffer=%.1fkm min_opc=%.2f min_ocp=%.2f"
@@ -187,17 +192,30 @@ class CellTracker:
         cells_current = self._extract_cells_from_analyzer(ds_projected, cell_stats_df)
 
         events: list[dict] = []
+        curr_labels = [int(cell["cell_id"]) for cell in cells_current]
         if self._previous_scan is None:
+            self._log = FrameLog(
+                dt_s=None, prev=[], curr_labels=curr_labels, reset_code="FIRST_SCAN"
+            )
             node_ids = self._initialize_tracks(current_time, cells_current)
             self._previous_scan = (current_time, node_ids)
-            for node_id in node_ids:
+            for j, node_id in enumerate(node_ids):
                 events.append(
                     event_initiation(self.graph, self._cell_identity, current_time, node_id)
                 )
+                self._log.born(j, str(self.graph.get_node_attr(node_id, "cell_uid")))
+            self._decisions = self._log.freeze()
         else:
             prev_time, prev_node_ids = self._previous_scan
             dt_s = self._to_epoch_seconds(current_time) - self._to_epoch_seconds(prev_time)
-            if self._gap_forces_reset(dt_s, prev_time, current_time):
+            reset_code = self._gap_reset_code(dt_s, prev_time, current_time)
+            self._log = FrameLog(
+                dt_s=dt_s,
+                prev=self._log_cells(prev_node_ids),
+                curr_labels=curr_labels,
+                reset_code=reset_code,
+            )
+            if reset_code is not None:
                 events = self._reset_tracks(prev_node_ids, current_time, cells_current)
             else:
                 self._prev_dt_s = dt_s
@@ -217,16 +235,38 @@ class CellTracker:
             raise ValueError(f"Missing cell identity for track_index={track_index}")
         return self._cell_identity[track_index]
 
+    def decisions(self) -> TrackingDecisions:
+        """The decision record of the most recent ``track`` call (analysis only)."""
+        if self._decisions is None:
+            raise ValueError("CellTracker.decisions: no scan has been tracked yet")
+        return self._decisions
+
+    def _log_cells(self, node_ids: list[int]) -> list[LogCell]:
+        """Previous cells as the decision log identifies them."""
+        cells = []
+        for node_id in node_ids:
+            track_index = int(self.graph.get_node_attr(node_id, "track_index") or 0)
+            state = self._track_motion.get(track_index)
+            cells.append(
+                LogCell(
+                    uid=str(self.graph.get_node_attr(node_id, "cell_uid")),
+                    label=int(self.graph.get_node_attr(node_id, "cell_id")),
+                    steps_before=state.n_steps if state is not None else 0,
+                )
+            )
+        return cells
+
     # ------------------------------------------------------------------
     # Scan-gap classification (physical time)
     # ------------------------------------------------------------------
 
-    def _gap_forces_reset(self, dt_s: float, prev_time, curr_time) -> bool:
+    def _gap_reset_code(self, dt_s: float, prev_time, curr_time) -> str | None:
         """Classify the inter-scan interval; log a structured code.
 
-        Returns True when tracks must be terminated and restarted (non-monotonic
-        time or a gap above the hard limit) — never raises, never matches across
-        the gap. An irregular-but-monotonic cadence is a diagnostic warning only.
+        Returns the reset code when tracks must be terminated and restarted
+        (non-monotonic time or a gap above the hard limit) — never raises, never
+        matches across the gap. An irregular-but-monotonic cadence is a
+        diagnostic warning only and returns None.
         """
         if dt_s <= 0:
             logger.error(
@@ -236,7 +276,7 @@ class CellTracker:
                 curr_time,
                 dt_s,
             )
-            return True
+            return TrackingError.NON_MONOTONIC_TIME.value
         if dt_s > self.max_tracking_gap_s:
             logger.error(
                 "tracking_error code=%s dt_minutes=%.1f limit_minutes=%.1f",
@@ -244,7 +284,7 @@ class CellTracker:
                 dt_s / 60.0,
                 self.max_tracking_gap_minutes,
             )
-            return True
+            return TrackingError.TRACK_GAP_EXCEEDED.value
         if self._prev_dt_s is not None and (
             dt_s > _CADENCE_IRREGULAR_RATIO * self._prev_dt_s
             or dt_s * _CADENCE_IRREGULAR_RATIO < self._prev_dt_s
@@ -255,7 +295,7 @@ class CellTracker:
                 dt_s,
                 self._prev_dt_s,
             )
-        return False
+        return None
 
     def _reset_tracks(
         self, prev_node_ids: list[int], curr_time, cells_current: list[dict]
@@ -266,8 +306,10 @@ class CellTracker:
             for node_id in prev_node_ids
         ]
         self._initialize_tracks(curr_time, cells_current)
-        for node_id in self.graph.get_nodes_at_time(curr_time):
+        for j, node_id in enumerate(self.graph.get_nodes_at_time(curr_time)):
             events.append(event_initiation(self.graph, self._cell_identity, curr_time, node_id))
+            self._log.born(j, str(self.graph.get_node_attr(node_id, "cell_uid")))
+        self._decisions = self._log.freeze()
         return events
 
     # ------------------------------------------------------------------
@@ -411,10 +453,17 @@ class CellTracker:
         prev_cy = float(self.graph.get_node_attr(prev_node, "centroid_y"))
         vx = (float(curr_cell["centroid_x"]) - prev_cx) / dt_s
         vy = (float(curr_cell["centroid_y"]) - prev_cy) / dt_s
+        step_speed = math.hypot(vx, vy)
+        prior = self._track_motion.get(track_index)
+        n_steps = (prior.n_steps if prior is not None else 0) + 1
+        mean_speed = (
+            step_speed if prior is None else prior.speed + (step_speed - prior.speed) / n_steps
+        )
         self._track_motion[track_index] = TrackMotionState(
-            speed=math.hypot(vx, vy),
+            speed=mean_speed,
             heading=math.atan2(vy, vx),
             has_velocity=True,
+            n_steps=n_steps,
         )
 
     def _record_continue(
@@ -525,31 +574,68 @@ class CellTracker:
 
         edges: dict[tuple[int, int], _EdgeCost] = {}
         for i, j in pairs:
+            prev_node = all_prev_ids[i]
+            track_index = int(self.graph.get_node_attr(prev_node, "track_index") or 0)
             result = self.validator.validate(prev_hulls[i], curr_masks[j])
+            hull_c = hull_centroid_m[i] or (float("nan"), float("nan"))
+            self._log.candidate(
+                i,
+                j,
+                hull_area_px=int(hull_area_px[i]),
+                hull_centroid_x=hull_c[0],
+                hull_centroid_y=hull_c[1],
+                curr_area_px=int(curr_cells[j]["area_px"]),
+                curr_centroid_x=float(curr_cells[j]["centroid_x"]),
+                curr_centroid_y=float(curr_cells[j]["centroid_y"]),
+                intersection_px=int(np.count_nonzero(prev_hulls[i] & curr_masks[j])),
+                opc=result.opc,
+                ocp=result.ocp,
+                overlap_passed=result.passed,
+            )
             if not result.passed:
+                # Same "tracking_error code=" grammar as the gap and kinematic
+                # rejections, so one grep explains why a track ended.
+                logger.debug(
+                    "tracking_error code=%s track=%d curr=%d opc=%.2f ocp=%.2f",
+                    TrackingError.OVERLAP_REJECTED.value,
+                    track_index,
+                    j,
+                    result.opc,
+                    result.ocp,
+                )
                 continue
 
-            prev_node = all_prev_ids[i]
             prev_cx = float(self.graph.get_node_attr(prev_node, "centroid_x"))
             prev_cy = float(self.graph.get_node_attr(prev_node, "centroid_y"))
             curr_cx = float(curr_cells[j]["centroid_x"])
             curr_cy = float(curr_cells[j]["centroid_y"])
-            track_index = int(self.graph.get_node_attr(prev_node, "track_index") or 0)
             state = self._track_motion.get(track_index)
             previous_speed = state.speed if state and state.has_velocity else None
 
             decision = self.motion.check(prev_cx, prev_cy, curr_cx, curr_cy, dt_s, previous_speed)
+            self._log.kinematic(
+                i,
+                j,
+                speed_ms=decision.speed_ms,
+                previous_speed_ms=previous_speed,
+                accel_cap_ms=decision.cap_ms,
+                kinematic_code=decision.code.value if decision.code is not None else None,
+            )
             if not decision.ok:  # B3 kinematic gate
                 logger.debug(
-                    "tracking_error code=%s track=%d speed=%.1fm/s",
+                    "tracking_error code=%s track=%d curr=%d speed=%.1fm/s prev_speed=%s",
                     decision.code.value,
                     track_index,
+                    j,
                     decision.speed_ms,
+                    f"{previous_speed:.1f}" if previous_speed is not None else "-",
                 )
                 continue
 
-            hull_c = hull_centroid_m[i]
-            displacement = math.hypot(curr_cx - hull_c[0], curr_cy - hull_c[1]) if hull_c else 0.0
+            hull_xy = hull_centroid_m[i]
+            displacement = (
+                math.hypot(curr_cx - hull_xy[0], curr_cy - hull_xy[1]) if hull_xy else 0.0
+            )
             length_m = length_scale(
                 self.length_scale_name,
                 hull_area_px[i],
@@ -558,11 +644,22 @@ class CellTracker:
                 self.geometry_length_scale_km,
             )
             cost = pair_cost(result.opc, result.ocp, displacement, length_m)
-            if self.heading_penalty_weight > 0.0 and state is not None and state.has_velocity:
+            heading_change_deg = None
+            if state is not None and state.has_velocity:
                 cand_heading = math.atan2(curr_cy - prev_cy, curr_cx - prev_cx)  # B5
-                cost += self.heading_penalty_weight * heading_change_radians(
-                    state.heading, cand_heading
-                )
+                heading_change_deg = heading_change_degrees(state.heading, cand_heading)
+                if self.heading_penalty_weight > 0.0:
+                    cost += self.heading_penalty_weight * heading_change_radians(
+                        state.heading, cand_heading
+                    )
+            self._log.costed(
+                i,
+                j,
+                displacement_m=displacement,
+                length_scale_m=length_m,
+                heading_change_deg=heading_change_deg,
+                cost=cost,
+            )
             edges[(i, j)] = _EdgeCost(result.opc, result.ocp, displacement, cost)
         return edges
 
@@ -581,11 +678,13 @@ class CellTracker:
         )
         if projections_missing:
             logger.warning("No cell_projections — resetting %d tracks", len(prev_node_ids))
+            self._log.reset_code = "NO_PROJECTIONS"
             return self._reset_tracks(prev_node_ids, curr_time, curr_cells)
 
-        # Registration hull at the minute nearest the real gap (falls back to
-        # cell_projections[0] when minute frames are absent).
-        proj_labels = select_registration_labels(ds_curr, dt_s)
+        # Registration hull: the previous labels advected by the full flow step
+        # (fraction 1.0 of the scan gap). The minute frames are registered to
+        # whole minutes short of the current scan, so they under-advect.
+        proj_labels = np.asarray(ds_curr["cell_projections"].values[0])
 
         matched_prev: dict[int, int] = {}  # prev_idx → new curr node_id
         matched_curr: dict[int, int] = {}  # curr_idx → new curr node_id
@@ -623,6 +722,7 @@ class CellTracker:
             len(born) - len(split_born),
             len(split_born),
         )
+        self._decisions = self._log.freeze()
         return events
 
     # ------------------------------------------------------------------
@@ -656,11 +756,17 @@ class CellTracker:
             )
 
         forced, remaining = ConstraintPropagator.resolve(list(edge_costs.keys()))
-        events = [record(i, c, MatchMethod.PROPAGATED) for i, c in forced]
+        events = []
+        for i, c in forced:
+            self._log.component([i], [c])
+            self._log.matched(i, c, MatchMethod.PROPAGATED.value)
+            events.append(record(i, c, MatchMethod.PROPAGATED))
 
         component_costs = {edge: edge_costs[edge].cost for edge in remaining}
         for prevs, currs in AssignmentGraph(remaining).components():
+            self._log.component(prevs, currs)
             for i, c in HungarianMatcher.match(prevs, currs, component_costs):
+                self._log.matched(i, c, MatchMethod.HUNGARIAN.value)
                 events.append(record(i, c, MatchMethod.HUNGARIAN))
         return events
 
@@ -696,12 +802,24 @@ class CellTracker:
             for prev_idx, curr_node in matched_prev.items():
                 cell_id = self.graph.get_node_attr(prev_node_ids[prev_idx], "cell_id")
                 overlap = self._hull_overlap_fraction(proj_labels, cell_id, b_mask)
+                self._log.split_merge_test(
+                    TrackingSplitMergeTest(
+                        "SPLIT",
+                        str(self.graph.get_node_attr(curr_node, "cell_uid")),
+                        int(curr_cells[b_idx]["cell_id"]),
+                        float(overlap),
+                        self.split_overlap,
+                        overlap >= self.split_overlap,
+                    )
+                )
                 if overlap >= self.split_overlap and overlap > best_overlap:
                     best_parent, best_overlap = curr_node, overlap
             if best_parent is not None:
                 child_node = self._new_track_node(curr_cells[b_idx], curr_time)
                 self.graph.add_edge(best_parent, child_node, edge_type="SPLIT", cost=0.0)
                 split_born.add(b_idx)
+                self._log.born(b_idx, str(self.graph.get_node_attr(child_node, "cell_uid")))
+                self._log.split_child(b_idx)
                 events.append(
                     event_split(self.graph, self._cell_identity, curr_time, best_parent, child_node)
                 )
@@ -725,11 +843,22 @@ class CellTracker:
                 overlap = self._hull_overlap_fraction(
                     proj_labels, cell_id, curr_cells[c_idx]["mask"]
                 )
+                self._log.split_merge_test(
+                    TrackingSplitMergeTest(
+                        "MERGE",
+                        str(self.graph.get_node_attr(curr_node, "cell_uid")),
+                        int(cell_id),
+                        float(overlap),
+                        self.split_overlap,
+                        overlap >= self.split_overlap,
+                    )
+                )
                 if overlap >= self.split_overlap and overlap > best_overlap:
                     best_target, best_overlap = curr_node, overlap
             if best_target is not None:
                 self.graph.add_edge(d_node, best_target, edge_type="MERGE", cost=0.0)
                 merged[d_node] = best_target
+                self._log.merge_source(str(self.graph.get_node_attr(d_node, "cell_uid")))
                 events.append(
                     event_merge(self.graph, self._cell_identity, curr_time, d_node, best_target)
                 )
@@ -745,6 +874,7 @@ class CellTracker:
                 continue
             node_id = self._new_track_node(curr_cells[b_idx], curr_time)
             events.append(event_initiation(self.graph, self._cell_identity, curr_time, node_id))
+            self._log.born(b_idx, str(self.graph.get_node_attr(node_id, "cell_uid")))
         return events
 
     def _emit_terminations(

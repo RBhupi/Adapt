@@ -21,7 +21,6 @@ from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.tracking.module import CellTracker
-from adapt.modules.tracking.projection import select_registration_labels
 
 pytestmark = pytest.mark.unit
 
@@ -194,6 +193,7 @@ def test_acceleration_exceeded_rejects_match():
     cfg = _make_config(
         max_speed_ms=40.0,
         max_speed_multiplier=2.0,
+        acceleration_floor_ms=5.0,
         max_tracking_gap_minutes=60.0,
     )
     tracker = CellTracker(cfg)
@@ -211,6 +211,61 @@ def test_acceleration_exceeded_rejects_match():
     ds2, stats2 = _one_cell_scan(t2, 6)
     _, events2 = tracker.track(ds2, stats2, scan_id="site011scan")
     assert (events2["event_type"] == "CONTINUE").sum() == 0, "accelerating step must be rejected"
+
+
+def test_acceleration_floor_admits_storm_motion_after_a_slow_step():
+    """A slow prior step (centroid jitter) must not cap the next step below
+    plausible storm motion: the cap never falls below the floor."""
+    cfg = _make_config(max_speed_multiplier=2.0, acceleration_floor_ms=12.0)
+    tracker = CellTracker(cfg)
+    t0, t1, t2 = (np.datetime64(f"2024-01-01T12:{m:02d}:00") for m in (0, 5, 10))
+
+    ds0, stats0 = _one_cell_scan(t0, 2)
+    tracker.track(ds0, stats0, scan_id="site032scan")
+    ds1, stats1 = _one_cell_scan(t1, 3)  # 3.33 m/s → 2x cap 6.67, floor 12 wins
+    tracker.track(ds1, stats1, scan_id="site033scan")
+    ds2, stats2 = _one_cell_scan(t2, 6)  # 10 m/s
+    _, events2 = tracker.track(ds2, stats2, scan_id="site034scan")
+    assert (events2["event_type"] == "CONTINUE").sum() == 1
+
+
+def _one_cell_scan_wide(time, x_pix):
+    """Like ``_one_cell_scan`` on a 16-column grid, for multi-step motion."""
+    labels = np.zeros((8, 16), dtype=np.int32)
+    labels[2:4, x_pix : x_pix + 2] = 1
+    stats = _cell_stats(
+        time,
+        [
+            {
+                "id": 1,
+                "area": 4.0,
+                "cx": (x_pix + 0.5) * 1000.0,
+                "cy": 2500.0,
+                "mean_refl": 40.0,
+                "max_refl": 45.0,
+            }
+        ],
+    )
+    return _synthetic_ds(time, labels), stats
+
+
+def test_acceleration_reference_is_the_tracks_mean_speed_not_its_last_step():
+    """Steps of 13.3, 13.3 then 3.3 m/s give a mean of 10 m/s; a 13.3 m/s step
+    is within 2x the mean although it is 4x the last step."""
+    cfg = _make_config(max_speed_multiplier=2.0, acceleration_floor_ms=5.0)
+    tracker = CellTracker(cfg)
+    t = [
+        np.datetime64("2024-01-01T12:00:00") + np.timedelta64(s, "s")
+        for s in (0, 150, 300, 600, 750)
+    ]
+
+    for i, x in enumerate((1, 3, 5, 6)):  # +2 px/150 s, +2 px/150 s, +1 px/300 s
+        ds, stats = _one_cell_scan_wide(t[i], x)
+        _, events = tracker.track(ds, stats, scan_id=f"site04{i}scan")
+        assert (events["event_type"] == "TERMINATION").sum() == 0
+    ds, stats = _one_cell_scan_wide(t[4], 8)  # +2 px/150 s = 13.3 m/s again
+    _, events = tracker.track(ds, stats, scan_id="site044scan")
+    assert (events["event_type"] == "CONTINUE").sum() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -373,26 +428,35 @@ def test_heading_penalty_breaks_ambiguous_match_toward_consistent_track():
 # ---------------------------------------------------------------------------
 
 
-def test_registration_selects_nearest_minute():
-    """The minute frame closest to the real gap is chosen for the hull."""
-    f1 = np.full((4, 4), 11, dtype=np.int32)
-    f2 = np.full((4, 4), 22, dtype=np.int32)
-    f3 = np.full((4, 4), 33, dtype=np.int32)
-    ds = xr.Dataset(
-        {
-            "registration_minutes": (["minute", "y", "x"], np.stack([f1, f2, f3])),
-            "cell_projections": (["frame_offset", "y", "x"], np.zeros((1, 4, 4), dtype=np.int32)),
-        },
-        coords={"minute": [1, 2, 3]},
-    )
-    out = select_registration_labels(ds, dt_s=130.0)  # 2.17 min → nearest minute 2
-    assert int(out[0, 0]) == 22
+def test_matching_uses_the_hull_registered_to_the_current_scan():
+    """The registration hull is the previous labels advected by the full flow
+    step (``cell_projections[0]``, fraction 1.0 of the gap) — never an
+    under-advected minute frame.
 
+    The minute frames carry a datetime64 ``minute`` coord and an
+    ``interpolation_fraction`` coord exactly as the projection module writes
+    them; the frame nearest t_prev sits 3 px short of the cell.
+    """
+    cfg = _make_config(max_tracking_gap_minutes=60.0)
+    tracker = CellTracker(cfg)
+    t0, t1 = np.datetime64("2024-01-01T12:00:00"), np.datetime64("2024-01-01T12:04:30")
 
-def test_registration_falls_back_to_cell_projections():
-    """Without minute frames the whole-step cell_projections[0] is used."""
-    ds = xr.Dataset(
-        {"cell_projections": (["frame_offset", "y", "x"], np.full((1, 4, 4), 7, dtype=np.int32))}
+    ds0, stats0 = _one_cell_scan(t0, 2)
+    tracker.track(ds0, stats0, scan_id="site030scan")
+
+    ds1, stats1 = _one_cell_scan(t1, 6)  # cell_projections[0]: the cell exactly at x=6
+    frames = []
+    for x in (3, 4, 5, 5):
+        frame = np.zeros((8, 8), dtype=np.int32)
+        frame[2:4, x : x + 2] = 1
+        frames.append(frame)
+    minutes = np.arange(np.datetime64("2024-01-01T12:01:00"), t1, np.timedelta64(1, "m")).astype(
+        "datetime64[ns]"
     )
-    out = select_registration_labels(ds, dt_s=300.0)
-    assert int(out[0, 0]) == 7
+    fractions = ((minutes - t0) / (t1 - t0)).astype(np.float32)
+    ds1["registration_minutes"] = (("minute", "y", "x"), np.stack(frames))
+    ds1 = ds1.assign_coords(minute=minutes, interpolation_fraction=("minute", fractions))
+
+    _, events1 = tracker.track(ds1, stats1, scan_id="site031scan")
+    assert (events1["event_type"] == "CONTINUE").sum() == 1
+    assert (events1["event_type"] == "TERMINATION").sum() == 0

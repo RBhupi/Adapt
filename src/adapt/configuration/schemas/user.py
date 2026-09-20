@@ -52,6 +52,9 @@ class UserSegmenterConfig(_UserSection):
     closing_kernel: tuple[int, int] | None = None
     filter_by_size: bool | None = None
     h_maxima: float | None = None
+    seed_carry: bool | None = None
+    seed_carry_max_frames: int | None = None
+    seed_carry_min_separation: int | None = None
 
     @field_validator("method", mode="before")
     @classmethod

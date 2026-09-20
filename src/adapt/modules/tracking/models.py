@@ -34,7 +34,8 @@ class TrackingError(StrEnum):
     NON_MONOTONIC_TIME = "NON_MONOTONIC_TIME"
     TRACK_GAP_EXCEEDED = "TRACK_GAP_EXCEEDED"
     IRREGULAR_SCAN_CADENCE = "IRREGULAR_SCAN_CADENCE"
-    # Physical-constraint rejections
+    # Candidate-pair rejections
+    OVERLAP_REJECTED = "OVERLAP_REJECTED"
     VELOCITY_EXCEEDED = "VELOCITY_EXCEEDED"
     ACCELERATION_EXCEEDED = "ACCELERATION_EXCEEDED"
 
@@ -61,10 +62,14 @@ class MatchDiagnostics:
 class TrackMotionState:
     """Per-track velocity carried forward for acceleration and heading checks.
 
-    ``speed`` is in m/s; ``heading`` is in radians measured as ``atan2(vy, vx)``.
-    ``has_velocity`` is False until a track has been observed across two scans.
+    ``speed`` is the running mean of the track's step speeds (m/s) over
+    ``n_steps`` — the acceleration cap references the track's established
+    motion, not one jittery step; ``heading`` is the last step's direction in
+    radians measured as ``atan2(vy, vx)``. ``has_velocity`` is False until a
+    track has been observed across two scans.
     """
 
     speed: float = 0.0
     heading: float = 0.0
     has_velocity: bool = False
+    n_steps: int = 0

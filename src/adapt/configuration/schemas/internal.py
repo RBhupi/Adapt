@@ -76,6 +76,9 @@ class InternalSegmenterConfig(AdaptBaseModel):
     closing_kernel: tuple[int, int]
     filter_by_size: bool
     h_maxima: float
+    seed_carry: bool
+    seed_carry_max_frames: int
+    seed_carry_min_separation: int
     threshold_params: ThresholdParams
     conv_strat_raut_params: ConvStratRautParams
     conv_strat_yuter_params: ConvStratYuterParams
@@ -170,6 +173,7 @@ class InternalTrackerConfig(AdaptBaseModel):
     max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
     max_speed_ms: float = Field(default=40.0, gt=0.0)
     max_speed_multiplier: float = Field(default=3.0, gt=0.0)
+    acceleration_floor_ms: float = Field(default=10.0, ge=0.0)
     heading_change_penalty_weight: float = Field(default=0.0, ge=0.0)
     projected_hull_buffer_km: float = Field(default=1.0, gt=0.0)
     minimum_candidate_overlap: float = Field(default=0.20, ge=0.0, le=1.0)

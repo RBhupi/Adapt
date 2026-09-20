@@ -39,19 +39,25 @@ class MotionDecision:
     ok: bool
     speed_ms: float
     code: TrackingError | None = None
+    cap_ms: float | None = None  # the acceleration cap applied, None when no prior speed
 
 
 class MotionValidator:
     """Reject candidate pairs that violate hard kinematic limits.
 
     A pair is rejected when its implied speed exceeds ``max_speed_ms`` (absolute
-    cap) or ``max_speed_multiplier * previous_speed`` (acceleration cap). Rejected
-    pairs never reach overlap or Hungarian matching.
+    cap) or ``max(max_speed_multiplier * previous_speed, acceleration_floor_ms)``
+    (acceleration cap). The floor keeps a slow prior step — centroid jitter of a
+    px or two — from vetoing ordinary storm motion. Rejected pairs never reach
+    overlap or Hungarian matching.
     """
 
-    def __init__(self, max_speed_ms: float, max_speed_multiplier: float):
+    def __init__(
+        self, max_speed_ms: float, max_speed_multiplier: float, acceleration_floor_ms: float
+    ):
         self.max_speed_ms = max_speed_ms
         self.max_speed_multiplier = max_speed_multiplier
+        self.acceleration_floor_ms = acceleration_floor_ms
 
     @staticmethod
     def speed_ms(prev_x: float, prev_y: float, curr_x: float, curr_y: float, dt_s: float) -> float:
@@ -71,10 +77,9 @@ class MotionValidator:
         speed = self.speed_ms(prev_x, prev_y, curr_x, curr_y, dt_s)
         if speed > self.max_speed_ms:
             return MotionDecision(False, speed, TrackingError.VELOCITY_EXCEEDED)
-        if (
-            previous_speed is not None
-            and previous_speed > 0.0
-            and speed > self.max_speed_multiplier * previous_speed
-        ):
-            return MotionDecision(False, speed, TrackingError.ACCELERATION_EXCEEDED)
-        return MotionDecision(True, speed, None)
+        cap = None
+        if previous_speed is not None and previous_speed > 0.0:
+            cap = max(self.max_speed_multiplier * previous_speed, self.acceleration_floor_ms)
+            if speed > cap:
+                return MotionDecision(False, speed, TrackingError.ACCELERATION_EXCEEDED, cap)
+        return MotionDecision(True, speed, None, cap)

@@ -105,6 +105,24 @@ class SegmenterConfig(AdaptBaseModel):
     closing_kernel: tuple[int, int] = (1, 1)
     filter_by_size: bool = True
     h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
+    # Previous-frame seeding: the projection module's one-step-ahead labels
+    # become extra watershed markers (union with h-maxima seeds, never a
+    # replacement). Off by default; off is byte-identical to no seeding.
+    seed_carry: bool = Field(
+        False, description="Seed the watershed with the previous frame's advected cell cores"
+    )
+    seed_carry_max_frames: int = Field(
+        2,
+        ge=1,
+        description="Drop a carried core after this many consecutive frames without "
+        "independent detection",
+    )
+    seed_carry_min_separation: int = Field(
+        3,
+        ge=1,
+        description="Minimum pixel distance from any h-maxima seed for a carried core "
+        "to be admitted",
+    )
     # Per-method scientific parameters (one block per method; defaults = algorithm defaults)
     threshold_params: ThresholdParams = Field(default_factory=ThresholdParams)  # type: ignore[arg-type]
     conv_strat_raut_params: ConvStratRautParams = Field(default_factory=ConvStratRautParams)  # type: ignore[arg-type]
@@ -265,7 +283,13 @@ class TrackerConfig(AdaptBaseModel):
         3.0,
         gt=0.0,
         description="Hard acceleration cap: reject if candidate speed exceeds this times the "
-        "track's previous speed",
+        "track's mean step speed",
+    )
+    acceleration_floor_ms: float = Field(
+        10.0,
+        ge=0.0,
+        description="The acceleration cap never falls below this speed (m/s): a slow prior "
+        "step from centroid jitter must not veto ordinary storm motion",
     )
     heading_change_penalty_weight: float = Field(
         0.0,

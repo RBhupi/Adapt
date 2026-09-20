@@ -31,7 +31,6 @@ constraints with optimisation as the last resort.
 |------|----------------|
 | `module.py` | `CellTracker` — per-scan flow, state, delegation |
 | `graph.py` | `TrackingGraph` (the only `networkx` home) |
-| `projection.py` | `select_registration_labels` — minute-resolution registration hull |
 | `matching/geometry.py` | overlap (Opc/Ocp), hull dilation, length-scale strategies, `pair_cost`, centroids |
 | `matching/candidate.py` | `CandidateGenerator` — buffered high-recall candidate pairs |
 | `matching/validation.py` | `GeometricValidator` — bidirectional-overlap hard gate |
@@ -54,7 +53,7 @@ Each frame pair is resolved in this order (registration-driven, optimisation las
 ```
 scan-gap classification (physical time; hard reset on excess gap / non-monotonic time)
         ↓
-registration projected hulls (minute nearest the real gap)
+registration projected hulls (previous labels advected by the full flow step)
         ↓
 dilate hulls by projected_hull_buffer_km → liberal candidate pairs (high recall)
         ↓
@@ -212,10 +211,11 @@ optimisation → `PROPAGATED`). Only genuinely ambiguous connected components re
 
 ### Search Region
 
-Candidates come from the registration projected hull — the minute-resolution
-`registration_minutes` frame nearest the real scan gap (falling back to
-`cell_projections[0]`) — dilated by `projected_hull_buffer_km` for recall
-(`projection.select_registration_labels`, `matching/candidate.py`).
+Candidates come from the registration projected hull — `cell_projections[0]`,
+the previous scan's labels advected by the full flow step to the current scan
+time (the minute-resolution `registration_minutes` frames stop short of it by
+up to a minute) — dilated by `projected_hull_buffer_km` for recall
+(`matching/candidate.py`).
 
 ### Diagnostics
 
@@ -277,7 +277,7 @@ errors. This is a **designed extension point**, intentionally left unimplemented
 projected hulls* and *deterministic unique-overlap matching* in the hierarchy
 above — i.e. it adjusts the current-frame label field *before* matching, so all
 downstream stages operate on the corrected segmentation. It would consume the
-same `select_registration_labels` hull plus the per-parent overlap structure
+same `cell_projections[0]` registration hull plus the per-parent overlap structure
 already computed by `OverlapMatcher`.
 
 **Proposed shape when built.** A registered, swappable

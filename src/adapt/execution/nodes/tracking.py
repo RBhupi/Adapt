@@ -3,11 +3,13 @@
 
 from adapt.contracts import (
     CELL_LABELS_VAR,
+    DecisionTableWrite,
     NetcdfArtifact,
     TrackTablesWrite,
     check_cell_events,
     check_projected_ds,
     check_tracked_cells,
+    check_tracking_decisions,
 )
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
@@ -50,12 +52,15 @@ class TrackingModule(BaseModule):
     required_history = 2
     pipeline_phase = 0
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time", "scan_id"]
-    outputs = ["tracked_cells", "cell_events", "analysis_ds"]
+    # tracking_decisions: every candidate considered this scan and why each
+    # cell continued or ended — analysis-only, written to decisions.db.
+    outputs = ["tracked_cells", "cell_events", "analysis_ds", "tracking_decisions"]
     input_contracts = {"projected_ds": check_projected_ds}
     output_contracts = {
         "tracked_cells": check_tracked_cells,
         "cell_events": check_cell_events,
         "analysis_ds": check_projected_ds,
+        "tracking_decisions": check_tracking_decisions,
     }
     config_class = TrackingConfig
     # DEBT: TrackTablesWrite encodes tracking science that lives in
@@ -74,6 +79,7 @@ class TrackingModule(BaseModule):
             stats_key="cell_stats",
             adjacency_key="cell_adjacency",
         ),
+        DecisionTableWrite(key="tracking_decisions"),
     )
 
     @classmethod
@@ -87,6 +93,7 @@ class TrackingModule(BaseModule):
             max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
             max_speed_ms=cfg.tracker.max_speed_ms,
             max_speed_multiplier=cfg.tracker.max_speed_multiplier,
+            acceleration_floor_ms=cfg.tracker.acceleration_floor_ms,
             heading_change_penalty_weight=cfg.tracker.heading_change_penalty_weight,
             projected_hull_buffer_km=cfg.tracker.projected_hull_buffer_km,
             minimum_candidate_overlap=cfg.tracker.minimum_candidate_overlap,
@@ -124,6 +131,7 @@ class TrackingModule(BaseModule):
             "tracked_cells": tracked_cells,
             "cell_events": cell_events,
             "analysis_ds": analysis_ds,
+            "tracking_decisions": self._tracker.decisions(),
         }
 
 

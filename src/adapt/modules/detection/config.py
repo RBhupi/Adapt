@@ -27,6 +27,9 @@ class DetectionConfig(BaseModel):
     min_cellsize_gridpoint: int
     max_cellsize_gridpoint: int | None
     h_maxima: float
+    seed_carry: bool
+    seed_carry_max_frames: int
+    seed_carry_min_separation: int
     reflectivity_var: str
     labels_var: str
     z_level: float

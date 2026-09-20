@@ -22,6 +22,7 @@ class TrackingConfig(BaseModel):
     max_tracking_gap_minutes: float
     max_speed_ms: float
     max_speed_multiplier: float
+    acceleration_floor_ms: float
     heading_change_penalty_weight: float
     projected_hull_buffer_km: float
     minimum_candidate_overlap: float
