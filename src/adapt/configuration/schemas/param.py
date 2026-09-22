@@ -64,6 +64,26 @@ class DownloaderConfig(AdaptBaseModel):
     min_file_size: int = Field(
         1024, ge=1, description="Minimum file size in bytes to consider valid"
     )
+    max_queue_size: int = Field(
+        100,
+        ge=1,
+        description=(
+            "Scans the downloader may run ahead of the processor. Each queued item is a "
+            "small message (the volume itself is already committed to the store), so this "
+            "costs disk for the downloaded volumes only, ~10 MB each. When the queue "
+            "reaches this many items the downloader pauses; processing never pauses."
+        ),
+    )
+    queue_resume_fraction: float = Field(
+        0.10,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "The downloader resumes once the queue has drained to this fraction of "
+            "max_queue_size (at least 1 item). The gap between the two levels stops the "
+            "downloader flapping on every consumed scan."
+        ),
+    )
 
 
 class RegridderConfig(AdaptBaseModel):

@@ -124,6 +124,8 @@ class UserDownloaderConfig(_UserSection):
     max_fetch_retries: int | None = None
     start_time: str | None = None
     end_time: str | None = None
+    max_queue_size: int | None = None
+    queue_resume_fraction: float | None = None
 
 
 class UserAnalyzerConfig(_UserSection):

@@ -49,6 +49,8 @@ class InternalDownloaderConfig(AdaptBaseModel):
     start_time: str | None
     end_time: str | None
     min_file_size: int
+    max_queue_size: int = 100
+    queue_resume_fraction: float = 0.10
 
 
 class InternalRegridderConfig(AdaptBaseModel):
