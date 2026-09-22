@@ -257,12 +257,23 @@ class TrackerConfig(AdaptBaseModel):
         alphabet: Literal["base36_upper"] = "base36_upper"
 
     split_overlap_threshold: float = Field(
-        0.8,
+        0.6,
         ge=0.0,
         le=1.0,
         description=(
-            "Min fraction of projected hull area overlapping born/surviving cell "
-            "to confirm SPLIT or MERGE"
+            "Min fraction of the BORN cell explained by the continuing parent's "
+            "projected hull to confirm a SPLIT (Opc = intersection / born cell area)"
+        ),
+    )
+    merge_overlap_threshold: float = Field(
+        0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Min fraction of the DISSIPATING cell's projected hull covered by the "
+            "continuing cell to confirm a MERGE (intersection / projected hull area). "
+            "Separate from split_overlap_threshold because the two tests normalise by "
+            "different areas; a single value governed both before they were split apart."
         ),
     )
     core_field_threshold: float = Field(
@@ -292,7 +303,7 @@ class TrackerConfig(AdaptBaseModel):
         "step from centroid jitter must not veto ordinary storm motion",
     )
     heading_change_penalty_weight: float = Field(
-        0.0,
+        0.3,
         ge=0.0,
         description="Optional cost penalty per radian of heading change (0 = diagnostic only)",
     )
@@ -303,14 +314,14 @@ class TrackerConfig(AdaptBaseModel):
         "to absorb segmentation and optical-flow uncertainty",
     )
     minimum_candidate_overlap: float = Field(
-        0.20,
+        0.10,
         ge=0.0,
         le=1.0,
         description="Hard gate: min fraction of the candidate cell covered by the projected hull "
         "(Opc = intersection / candidate area)",
     )
     minimum_projected_overlap: float = Field(
-        0.20,
+        0.10,
         ge=0.0,
         le=1.0,
         description="Hard gate: min fraction of the projected hull covered by the candidate cell "

@@ -168,7 +168,8 @@ class InternalTrackerConfig(AdaptBaseModel):
         width: int = Field(ge=1)
         alphabet: Literal["base36_upper"]
 
-    split_overlap_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    split_overlap_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    merge_overlap_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     core_field_threshold: float = Field(default=40.0, ge=0.0)
     max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
     max_speed_ms: float = Field(default=40.0, gt=0.0)

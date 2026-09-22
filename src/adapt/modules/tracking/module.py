@@ -126,6 +126,7 @@ class CellTracker:
 
     def __init__(self, config):
         self.split_overlap = config.split_overlap
+        self.merge_overlap = config.merge_overlap
         self.core_threshold = config.core_field_threshold
         self.field_var = config.field_var  # generic field; not assumed to be reflectivity
         self.labels_var = config.labels_var
@@ -771,11 +772,44 @@ class CellTracker:
         return events
 
     @staticmethod
-    def _hull_overlap_fraction(proj_labels: np.ndarray, cell_id: int, mask: np.ndarray) -> float:
-        """Fraction of a previous cell's projected hull covered by ``mask``."""
+    def _overlap_areas(
+        proj_labels: np.ndarray, cell_id: int, mask: np.ndarray
+    ) -> tuple[int, int, int]:
+        """Intersection and both areas (px) for a projected hull against a cell mask."""
         proj_mask = proj_labels == cell_id
-        denom = float(np.sum(proj_mask))
-        return float(np.sum(mask & proj_mask)) / denom if denom else 0.0
+        return (
+            int(np.sum(mask & proj_mask)),
+            int(np.sum(proj_mask)),
+            int(np.sum(mask)),
+        )
+
+    @staticmethod
+    def _hull_overlap_fraction(proj_labels: np.ndarray, cell_id: int, mask: np.ndarray) -> float:
+        """Fraction of a previous cell's projected hull covered by ``mask``.
+
+        The MERGE criterion: the hull belongs to the *dissipating* cell, so this
+        asks how completely that vanishing cell went into ``mask``. It reaches
+        1.0 when a small cell is wholly absorbed by a larger one.
+        """
+        inter, hull_px, _ = CellTracker._overlap_areas(proj_labels, cell_id, mask)
+        return inter / hull_px if hull_px else 0.0
+
+    @staticmethod
+    def _cell_overlap_fraction(proj_labels: np.ndarray, cell_id: int, mask: np.ndarray) -> float:
+        """Fraction of ``mask`` explained by a previous cell's projected hull (Opc).
+
+        The SPLIT criterion, and the mirror of the merge one: here the hull
+        belongs to the *continuing parent* and ``mask`` is a born fragment, so
+        normalising by the hull would ask the fragment to account for the whole
+        parent — impossible for a split child by construction (its ceiling is
+        child area / parent hull area, observed at 0.72 on KHTX 2025-06-17 with
+        a median parent/child area ratio of 3.3, so no split could ever pass a
+        0.8 threshold). Normalising by the born cell's area instead asks the
+        question that matters: is this new cell explained by the parent? It is
+        the same quantity as ``minimum_candidate_overlap`` in the main gate.
+        """
+        inter, _, mask_px = CellTracker._overlap_areas(proj_labels, cell_id, mask)
+        return inter / mask_px if mask_px else 0.0
 
     def _new_track_node(self, cell: dict, curr_time) -> int:
         """Allocate a new track index + identity and add the observation node."""
@@ -793,7 +827,13 @@ class CellTracker:
         born: list[int],
         curr_time,
     ) -> tuple[set[int], list[dict]]:
-        """A born cell overlapping a continuing parent's projected hull is a SPLIT child."""
+        """A born cell explained by a continuing parent's projected hull is a SPLIT child.
+
+        The test is ``Opc`` — intersection over the *born* cell's area — not the
+        hull-normalised fraction the merge test uses. See
+        ``_cell_overlap_fraction`` for why the hull denominator makes a split
+        structurally undetectable.
+        """
         split_born: set[int] = set()
         events: list[dict] = []
         for b_idx in born:
@@ -801,7 +841,8 @@ class CellTracker:
             best_parent, best_overlap = None, 0.0
             for prev_idx, curr_node in matched_prev.items():
                 cell_id = self.graph.get_node_attr(prev_node_ids[prev_idx], "cell_id")
-                overlap = self._hull_overlap_fraction(proj_labels, cell_id, b_mask)
+                inter, hull_px, tested_px = self._overlap_areas(proj_labels, cell_id, b_mask)
+                overlap = inter / tested_px if tested_px else 0.0
                 self._log.split_merge_test(
                     TrackingSplitMergeTest(
                         "SPLIT",
@@ -810,6 +851,11 @@ class CellTracker:
                         float(overlap),
                         self.split_overlap,
                         overlap >= self.split_overlap,
+                        intersection_px=inter,
+                        hull_px=hull_px,
+                        tested_px=tested_px,
+                        hull_fraction=(inter / hull_px if hull_px else 0.0),
+                        cell_fraction=float(overlap),
                     )
                 )
                 if overlap >= self.split_overlap and overlap > best_overlap:
@@ -840,20 +886,25 @@ class CellTracker:
             cell_id = self.graph.get_node_attr(d_node, "cell_id")
             best_target, best_overlap = None, 0.0
             for c_idx, curr_node in matched_curr.items():
-                overlap = self._hull_overlap_fraction(
-                    proj_labels, cell_id, curr_cells[c_idx]["mask"]
-                )
+                c_mask = curr_cells[c_idx]["mask"]
+                inter, hull_px, tested_px = self._overlap_areas(proj_labels, cell_id, c_mask)
+                overlap = inter / hull_px if hull_px else 0.0
                 self._log.split_merge_test(
                     TrackingSplitMergeTest(
                         "MERGE",
                         str(self.graph.get_node_attr(curr_node, "cell_uid")),
                         int(cell_id),
                         float(overlap),
-                        self.split_overlap,
-                        overlap >= self.split_overlap,
+                        self.merge_overlap,
+                        overlap >= self.merge_overlap,
+                        intersection_px=inter,
+                        hull_px=hull_px,
+                        tested_px=tested_px,
+                        hull_fraction=float(overlap),
+                        cell_fraction=(inter / tested_px if tested_px else 0.0),
                     )
                 )
-                if overlap >= self.split_overlap and overlap > best_overlap:
+                if overlap >= self.merge_overlap and overlap > best_overlap:
                     best_target, best_overlap = curr_node, overlap
             if best_target is not None:
                 self.graph.add_edge(d_node, best_target, edge_type="MERGE", cost=0.0)

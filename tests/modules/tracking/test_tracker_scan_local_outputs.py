@@ -23,7 +23,10 @@ def config():
         import shutil
 
         param = ParamConfig()
+        # Split and merge are separate thresholds now; this fixture wants both
+        # loose, which is what the single value used to mean.
         param.tracker.split_overlap_threshold = 0.4
+        param.tracker.merge_overlap_threshold = 0.4
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)
@@ -263,6 +266,7 @@ def _make_config(split_overlap=0.4):
     try:
         param = ParamConfig()
         param.tracker.split_overlap_threshold = split_overlap
+        param.tracker.merge_overlap_threshold = split_overlap
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)

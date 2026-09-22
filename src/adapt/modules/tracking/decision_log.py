@@ -151,11 +151,18 @@ class FrameLog:
             for rank, (_, j) in enumerate(sorted(costs), start=1):
                 self._pairs[(i, j)]["cost_rank"] = rank
 
-    def _best(self, rows: list[tuple[int, dict]]) -> tuple[int | None, str | None]:
+    def _best(self, rows: list[tuple[int, dict]]):
+        """The candidate that got furthest, with how close it came.
+
+        Returns ``(label, stage, opc, ocp, cost)``. The overlaps and cost make a
+        near-miss measurable directly: a cell whose best candidate reached
+        Opc 0.19 against a 0.20 gate is a different failure from one that had
+        no candidate at all.
+        """
         if not rows:
-            return None, None
+            return None, None, None, None, None
         label, row = max(rows, key=lambda item: _STAGE_ORDER[item[1]["last_stage"]])
-        return label, row["last_stage"]
+        return label, row["last_stage"], row.get("opc"), row.get("ocp"), row.get("cost")
 
     def _reason(self, rows: list[tuple[int, dict]]) -> str:
         if self.reset_code is not None:
@@ -174,17 +181,35 @@ class FrameLog:
             if i in self._matched_prev:
                 continue
             rows = [(self.curr_labels[j], r) for (p, j), r in self._pairs.items() if p == i]
-            best_label, best_stage = self._best(rows)
+            best_label, best_stage, b_opc, b_ocp, b_cost = self._best(rows)
             reason = "MERGE_SOURCE" if cell.uid in self._merge_sources else self._reason(rows)
             yield TrackingUnmatched(
-                "prev", cell.uid, cell.label, len(rows), best_label, best_stage, reason
+                "prev",
+                cell.uid,
+                cell.label,
+                len(rows),
+                best_label,
+                best_stage,
+                reason,
+                best_opc=b_opc,
+                best_ocp=b_ocp,
+                best_cost=b_cost,
             )
 
     def _unmatched_curr(self):
         for j, uid in sorted(self._born_uids.items()):
             rows = [(self.prev[i].label, r) for (i, c), r in self._pairs.items() if c == j]
-            best_label, best_stage = self._best(rows)
+            best_label, best_stage, b_opc, b_ocp, b_cost = self._best(rows)
             reason = "SPLIT_CHILD" if j in self._split_children else self._reason(rows)
             yield TrackingUnmatched(
-                "curr", uid, self.curr_labels[j], len(rows), best_label, best_stage, reason
+                "curr",
+                uid,
+                self.curr_labels[j],
+                len(rows),
+                best_label,
+                best_stage,
+                reason,
+                best_opc=b_opc,
+                best_ocp=b_ocp,
+                best_cost=b_cost,
             )

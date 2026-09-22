@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict
 class TrackingConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    split_overlap: float
+    split_overlap: float  # Opc gate on the born cell (SPLIT)
+    merge_overlap: float  # hull-coverage gate on the dissipating cell (MERGE)
     core_field_threshold: float
     uid_width: int
     field_var: str

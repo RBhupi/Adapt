@@ -5,7 +5,13 @@
 -- the public API. Rows mirror the frozen record fields plus run/scan stamps.
 -- Config thresholds are not repeated here: join run_id to the run registry.
 
-PRAGMA user_version = 1;
+-- user_version 2: split/merge tests carry both normalisations and their areas;
+-- tracking_unmatched carries the best candidate's overlaps and cost;
+-- segmentation_frames counts size-filter exemptions for carried cells.
+-- CREATE TABLE IF NOT EXISTS does not migrate an existing file — a collection
+-- written under version 1 keeps its old columns, so start a new base_dir when
+-- the new fields are needed.
+PRAGMA user_version = 2;
 
 CREATE TABLE IF NOT EXISTS tracking_frames (
     run_id TEXT NOT NULL,
@@ -74,6 +80,9 @@ CREATE TABLE IF NOT EXISTS tracking_unmatched (
     n_candidates INTEGER NOT NULL,
     best_candidate_label INTEGER,
     best_stage TEXT,
+    best_opc REAL,
+    best_ocp REAL,
+    best_cost REAL,
     reason TEXT NOT NULL,
     PRIMARY KEY (run_id, scan_id, side, cell_uid)
 );
@@ -87,9 +96,16 @@ CREATE TABLE IF NOT EXISTS tracking_split_merge_tests (
     kind TEXT NOT NULL,
     continuing_cell_uid TEXT NOT NULL,
     tested_cell_label INTEGER NOT NULL,
-    overlap_fraction REAL NOT NULL,
+    overlap_fraction REAL NOT NULL,   -- the fraction compared against `threshold`
     threshold REAL NOT NULL,
     passed INTEGER NOT NULL,
+    -- Both normalisations and the raw areas: MERGE decides on hull_fraction,
+    -- SPLIT on cell_fraction. Kept side by side so the denominator is auditable.
+    intersection_px INTEGER,
+    hull_px INTEGER,
+    tested_px INTEGER,
+    hull_fraction REAL,
+    cell_fraction REAL,
     PRIMARY KEY (run_id, scan_id, kind, continuing_cell_uid, tested_cell_label)
 );
 
@@ -107,6 +123,7 @@ CREATE TABLE IF NOT EXISTS segmentation_frames (
     n_dropped_small INTEGER NOT NULL,
     n_dropped_large INTEGER NOT NULL,
     n_cells INTEGER NOT NULL,
+    n_size_exempt INTEGER,
     PRIMARY KEY (run_id, scan_id)
 );
 

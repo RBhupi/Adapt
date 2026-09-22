@@ -86,6 +86,7 @@ class TrackingModule(BaseModule):
     def build_config(cls, cfg) -> TrackingConfig:
         return TrackingConfig(
             split_overlap=cfg.tracker.split_overlap_threshold,
+            merge_overlap=cfg.tracker.merge_overlap_threshold,
             core_field_threshold=cfg.tracker.core_field_threshold,
             uid_width=cfg.tracker.cell_uid.width,
             field_var=cfg.global_.tracking_field,

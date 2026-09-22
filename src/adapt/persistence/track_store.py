@@ -68,6 +68,14 @@ _CBS_FIXED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("is_split_source_here", "INTEGER"),
     ("is_merge_source_here", "INTEGER"),
     ("is_terminated_after_here", "INTEGER"),
+    # A merge ends the absorbed cell's track and the survivor keeps its own uid
+    # and age, so the longer history would otherwise be unrecoverable from this
+    # table. These name the absorbed cell and the lifetime it had reached at
+    # this scan (the oldest one, when several merge into the same target).
+    # Identity is deliberately NOT transferred — a consumer that wants the
+    # longer lineage reconstructs it from these.
+    ("merged_from_cell_uid", "TEXT"),
+    ("merged_from_age_seconds", "REAL"),
 )
 
 _CBS_NOT_NULL = {"run_id", "scan_id", "scan_time", "cell_label", "cell_uid"}
@@ -282,6 +290,14 @@ class TrackStore:
             uid_col = _uid_col(tracked_cells_df)
             self._reject_duplicate_identities(scan_id, tracked_cells_df, uid_col)
             cell_uids = tracked_cells_df[uid_col].astype(str).unique().tolist()
+            # A merge source has just died, so it is absent from tracked_cells_df
+            # — but its first_seen_time is exactly what merged_from_age_seconds
+            # needs, so pull those uids in too.
+            if not cell_events_df.empty and "source_cell_uid" in cell_events_df:
+                merge_sources = cell_events_df.loc[
+                    cell_events_df["event_type"] == "MERGE", "source_cell_uid"
+                ].dropna()
+                cell_uids += [str(u) for u in merge_sources.unique() if str(u) not in cell_uids]
             placeholders = ",".join("?" * len(cell_uids))
             first_seen_rows = conn.execute(
                 "SELECT cell_uid, first_seen_time FROM cell_tracks "
@@ -549,6 +565,31 @@ class TrackStore:
         except ValueError:
             scan_dt = None
 
+        def _age_at_scan(uid: str) -> float | None:
+            """Lifetime a track had reached by this scan, from its first_seen time."""
+            if scan_dt is None or not first_seen_map or uid not in first_seen_map:
+                return None
+            try:
+                return max(0.0, (scan_dt - from_scan_iso(first_seen_map[uid])).total_seconds())
+            except ValueError:
+                return None
+
+        # Absorbed-cell provenance per merge target: keep the oldest source when
+        # several merge into the same survivor, since that is the history a
+        # consumer would otherwise lose.
+        merged_from: dict[int, tuple[str, float | None]] = {}
+        if not cell_events_df.empty:
+            for _, ev in cell_events_df.iterrows():
+                if ev["event_type"] != "MERGE":
+                    continue
+                tcl, suid = ev.get("target_cell_label"), ev.get("source_cell_uid")
+                if pd.isna(tcl) or not suid or pd.isna(suid):
+                    continue
+                age = _age_at_scan(str(suid))
+                prev = merged_from.get(int(tcl))
+                if prev is None or (age or 0.0) > (prev[1] or 0.0):
+                    merged_from[int(tcl)] = (str(suid), age)
+
         rows = []
         uid_col = _uid_col(tracked_cells_df)
         for _, tc in tracked_cells_df.iterrows():
@@ -584,6 +625,8 @@ class TrackStore:
                 "is_split_source_here": 0,
                 "is_merge_source_here": 0,
                 "is_terminated_after_here": 0,
+                "merged_from_cell_uid": merged_from.get(cl, (None, None))[0],
+                "merged_from_age_seconds": merged_from.get(cl, (None, None))[1],
             }
             # Merge all cell_stats columns
             if cl in stats_map:

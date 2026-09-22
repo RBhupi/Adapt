@@ -87,18 +87,35 @@ class TrackingUnmatched:
     best_stage: str | None
     reason: str  # NO_CANDIDATE | ALL_REJECTED_OVERLAP | ALL_REJECTED_KINEMATIC |
     # LOST_ASSIGNMENT | SPLIT_CHILD | MERGE_SOURCE | RESET | FIRST_SCAN
+    # How close the best candidate came, so a near-miss is distinguishable from
+    # no candidate at all without re-joining tracking_candidates.
+    best_opc: float | None = None
+    best_ocp: float | None = None
+    best_cost: float | None = None
 
 
 @dataclass(frozen=True)
 class TrackingSplitMergeTest:
-    """Every hull overlap tested against ``split_overlap`` — pass or fail."""
+    """Every hull overlap tested — pass or fail.
+
+    MERGE compares ``hull_fraction`` against the merge threshold, SPLIT compares
+    ``cell_fraction`` against the split one; ``overlap_fraction`` always holds
+    whichever was used for the decision.
+    """
 
     kind: str  # SPLIT | MERGE
     continuing_cell_uid: str
     tested_cell_label: int
-    overlap_fraction: float
+    overlap_fraction: float  # the fraction actually compared against `threshold`
     threshold: float
     passed: bool
+    # Both normalisations plus the raw areas, so the choice of denominator stays
+    # auditable: MERGE decides on `hull_fraction`, SPLIT on `cell_fraction`.
+    intersection_px: int | None = None
+    hull_px: int | None = None
+    tested_px: int | None = None
+    hull_fraction: float | None = None
+    cell_fraction: float | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +143,9 @@ class SegmentationFrame:
     n_dropped_small: int
     n_dropped_large: int
     n_cells: int
+    # Carried-seed basins the minimum-size filter spared (0 when the exemption
+    # is off), so the rescue's contribution can be separated from the filter's.
+    n_size_exempt: int = 0
 
 
 @dataclass(frozen=True)
