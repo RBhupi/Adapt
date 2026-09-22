@@ -91,7 +91,7 @@ class TrackingModule(BaseModule):
             uid_width=cfg.tracker.cell_uid.width,
             field_var=cfg.global_.tracking_field,
             labels_var=CELL_LABELS_VAR,
-            max_tracking_gap_minutes=cfg.tracker.max_tracking_gap_minutes,
+            max_tracking_gap_minutes=cfg.global_.max_scan_gap_minutes,
             max_speed_ms=cfg.tracker.max_speed_ms,
             max_speed_multiplier=cfg.tracker.max_speed_multiplier,
             acceleration_floor_ms=cfg.tracker.acceleration_floor_ms,

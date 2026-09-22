@@ -108,6 +108,7 @@ class UserGlobalConfig(_UserSection):
     """User-facing global config."""
 
     z_level: float | None = None
+    max_scan_gap_minutes: float | None = None
     tracking_field: str | None = None
     coord_names: dict[str, str] | None = None
 
@@ -124,7 +125,6 @@ class UserProjectorConfig(_UserSection):
     """User-facing projector config."""
 
     method: str | None = None
-    max_time_interval_minutes: int | None = None
     max_projection_steps: int | None = None
     nan_fill_value: float | None = None
     flow_params: dict[str, Any] | None = None

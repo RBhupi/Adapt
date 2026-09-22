@@ -182,6 +182,16 @@ class GlobalConfig(AdaptBaseModel):
     """Global pipeline settings."""
 
     z_level: float = Field(2000.0, description="Analysis altitude in meters")
+    max_scan_gap_minutes: float = Field(
+        10.0,
+        gt=0.0,
+        description=(
+            "The one scan-gap bound, shared by every stage that pairs frames. Beyond it "
+            "no seed is carried, no projection is computed and tracking resets. Set it to "
+            "roughly twice the nominal scan cadence; a single value keeps the stages from "
+            "disagreeing about whether a gap is crossable"
+        ),
+    )
     tracking_field: str = Field(
         "reflectivity",
         description=(
@@ -215,11 +225,10 @@ class ProjectorConfig(AdaptBaseModel):
     """Cell projection configuration."""
 
     method: Literal["adapt_default"] = "adapt_default"
-    max_time_interval_minutes: int = Field(30, ge=1)
     max_projection_steps: int = Field(3, ge=1, le=10)
     nan_fill_value: float = 0.0
     flow_params: FlowParamsConfig = Field(default_factory=FlowParamsConfig)  # type: ignore[arg-type]
-    min_motion_threshold: float = Field(0.5, ge=0)
+    min_motion_threshold: float = Field(1.0, ge=0)
     max_flow_magnitude: float = Field(
         20.0,
         gt=0,
@@ -314,12 +323,6 @@ class TrackerConfig(AdaptBaseModel):
     )
     core_field_threshold: float = Field(
         40.0, ge=0.0, description="Field threshold for the core-area output (e.g. dBZ for radar)"
-    )
-    max_tracking_gap_minutes: float = Field(
-        20.0,
-        gt=0.0,
-        description="Hard limit: scan gaps above this terminate all tracks and restart "
-        "(no matching attempted across the gap)",
     )
     max_speed_ms: float = Field(
         40.0,

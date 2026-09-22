@@ -123,6 +123,7 @@ class InternalGlobalConfig(AdaptBaseModel):
     """Runtime global settings."""
 
     z_level: float
+    max_scan_gap_minutes: float = Field(default=10.0, gt=0.0)
     tracking_field: str
     coord_names: InternalCoordNamesConfig
 
@@ -143,7 +144,6 @@ class InternalProjectorConfig(AdaptBaseModel):
     """Runtime projection configuration."""
 
     method: str
-    max_time_interval_minutes: int
     max_projection_steps: int = Field(ge=1, le=10)  # Capped at 10
     nan_fill_value: float
     flow_params: InternalFlowParamsConfig
@@ -173,7 +173,6 @@ class InternalTrackerConfig(AdaptBaseModel):
     split_overlap_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     merge_overlap_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     core_field_threshold: float = Field(default=40.0, ge=0.0)
-    max_tracking_gap_minutes: float = Field(default=20.0, gt=0.0)
     max_speed_ms: float = Field(default=40.0, gt=0.0)
     max_speed_multiplier: float = Field(default=3.0, gt=0.0)
     acceleration_floor_ms: float = Field(default=10.0, ge=0.0)

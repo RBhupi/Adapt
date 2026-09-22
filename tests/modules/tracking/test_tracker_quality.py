@@ -30,8 +30,14 @@ def _make_config(**overrides):
     try:
         param = ParamConfig()
         param.tracker.split_overlap_threshold = 0.4
+        param.tracker.merge_overlap_threshold = 0.4
         for key, val in overrides.items():
-            setattr(param.tracker, key, val)
+            # The scan-gap bound is global now — one value shared by the seed
+            # carry, projection and tracking — so it no longer lives on tracker.
+            if key == "max_tracking_gap_minutes":
+                param.global_.max_scan_gap_minutes = val
+            else:
+                setattr(param.tracker, key, val)
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
         internal = resolve_config(param, user, None)
         return TrackingModule.build_config(internal)
