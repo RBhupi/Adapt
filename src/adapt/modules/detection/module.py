@@ -215,7 +215,7 @@ class RadarCellSegmenter:
         Resolved parameters for the selected method. For ``threshold`` this is
         ``{"threshold": <dBZ>}``; for the pyart methods it is the algorithm's
         keyword arguments (splatted into the pyart call, recorded in the output).
-    - `closing_kernel` : tuple of int, default (1, 1)
+    - `closing_radius` : int, default 2 (disk radius for mask closing; 0 = off)
         Morphological closing footprint. (1, 1) means no closing.
     - `filter_by_size` : bool, default True
         Whether to apply cell size filtering.
@@ -247,14 +247,16 @@ class RadarCellSegmenter:
         """
         self.method = config.method
         self.method_params = config.method_params
-        self.kernel_size = config.closing_kernel
+        self.closing_radius = config.closing_radius
         self.filter_by_size = config.filter_by_size
         self.min_gridpoints = config.min_cellsize_gridpoint
         self.max_gridpoints = config.max_cellsize_gridpoint
         self.h_maxima = config.h_maxima
-        self.seed_carry = config.seed_carry
-        self.seed_carry_max_frames = config.seed_carry_max_frames
+        self.seed_carry_frames = config.seed_carry_frames
+        # One integer governs the carry: 0 is off, N allows N frames.
+        self.seed_carry = config.seed_carry_frames > 0
         self.seed_carry_min_separation = config.seed_carry_min_separation
+        self.carried_exempt_size_filter = config.carried_exempt_size_filter
         self.refl_name = config.reflectivity_var
         self.labels_name = config.labels_var
         self.z_level = config.z_level
@@ -395,15 +397,34 @@ class RadarCellSegmenter:
         carried: CarriedLabels | None,
     ) -> tuple[np.ndarray, tuple[int, ...]]:
         """Morphology, detect cells, filter; returns labels and carry age per label."""
-        from skimage.morphology import closing, footprint_rectangle
+        from skimage.morphology import closing, disk
 
-        closed_mask = closing(binary_mask, footprint_rectangle(self.kernel_size))
+        # Dilate then erode with the same disk: gaps and indentations narrower
+        # than ~2r are filled and the boundary is rounded, while the outer extent
+        # of anything larger than the disk is unchanged.
+        closed_mask = (
+            closing(binary_mask, disk(self.closing_radius))
+            if self.closing_radius > 0
+            else binary_mask
+        )
         components, _ = label(closed_mask, structure=_COMPONENT_CONNECTIVITY)
 
         basins, admitted, seed_rows = self._label_maxtree(closed_mask, field, carried, components)
 
+        # Basins whose marker came from a carried seed, so the size filter can
+        # spare them (see _filter_and_relabel).
+        exempt = (
+            frozenset(
+                int(r["marker_id"])
+                for r in seed_rows
+                if r["origin"] == "CARRIED" and r["decision"] == "SEEDED" and r["marker_id"]
+            )
+            if self.carried_exempt_size_filter
+            else frozenset()
+        )
+
         # if there are any cells, filter and/or renumber
-        labels = self._filter_and_relabel(basins) if basins.max() > 0 else basins
+        labels = self._filter_and_relabel(basins, exempt) if basins.max() > 0 else basins
         labels = labels.astype(np.int32)
 
         # A marker pixel keeps its own label through watershed and relabeling,
@@ -438,6 +459,18 @@ class RadarCellSegmenter:
         markers = [r for r in seed_rows if r["marker_id"] is not None]
         dropped = [r for r in markers if r["basin_px"] and r["final_label"] == 0]
         n_dropped_small = sum(r["basin_px"] < self.min_gridpoints for r in dropped)
+        # Carried basins that survived only because the exemption spared them.
+        n_size_exempt = (
+            sum(
+                r["origin"] == "CARRIED"
+                and r["decision"] == "SEEDED"
+                and r["final_label"] != 0
+                and 0 < (r["basin_px"] or 0) < self.min_gridpoints
+                for r in markers
+            )
+            if self.carried_exempt_size_filter and self.filter_by_size
+            else 0
+        )
 
         component_rows = []
         for cid in range(1, int(components.max()) + 1):
@@ -472,6 +505,7 @@ class RadarCellSegmenter:
             n_dropped_small=n_dropped_small,
             n_dropped_large=len(dropped) - n_dropped_small,
             n_cells=int(labels.max()),
+            n_size_exempt=n_size_exempt,
         )
         seeds = tuple(SegmentationSeed(**row) for row in seed_rows)
         return SegmentationDecisions(frame, seeds, tuple(component_rows))
@@ -576,7 +610,7 @@ class RadarCellSegmenter:
                 footprint_px=int(footprint.sum()),
             )
             rows.append(entry)
-            if age + 1 > self.seed_carry_max_frames:
+            if age + 1 > self.seed_carry_frames:
                 entry["decision"] = "EXPIRED"
                 continue
             if not binary[row, col]:
@@ -621,15 +655,28 @@ class RadarCellSegmenter:
                 )
         return tuple(admitted), rows
 
-    def _filter_and_relabel(self, labels: np.ndarray) -> np.ndarray:
-        """Filter, renumber by size."""
+    def _filter_and_relabel(
+        self, labels: np.ndarray, exempt_markers: frozenset[int] = frozenset()
+    ) -> np.ndarray:
+        """Filter, renumber by size.
+
+        ``exempt_markers`` are basin labels the minimum-size filter must not
+        drop. A carried seed is only ever admitted where a previous cell lost
+        its core, so its basin is small by construction; deleting it undoes the
+        rescue and leaves the previous cell with no successor, which the tracker
+        then reports as a termination. Only the minimum-size test is waived —
+        the maximum still applies, since a runaway basin is a different fault.
+        """
         labels_unique, counts = np.unique(labels, return_counts=True)
         keep_mask = labels_unique > 0
 
         if self.filter_by_size:
             if self.min_gridpoints > 1:
-                keep_mask &= counts >= self.min_gridpoints
-                num_small = np.sum((labels_unique > 0) & (counts < self.min_gridpoints))
+                too_small = counts < self.min_gridpoints
+                if exempt_markers:
+                    too_small &= ~np.isin(labels_unique, list(exempt_markers))
+                keep_mask &= ~too_small
+                num_small = np.sum((labels_unique > 0) & too_small)
                 if num_small > 0:
                     logger.debug(f"Removed {num_small} small (< {self.min_gridpoints})")
 

@@ -75,12 +75,12 @@ class InternalSegmenterConfig(AdaptBaseModel):
     ]
     min_cellsize_gridpoint: int
     max_cellsize_gridpoint: int | None
-    closing_kernel: tuple[int, int]
+    closing_radius: int
     filter_by_size: bool
     h_maxima: float
-    seed_carry: bool
-    seed_carry_max_frames: int
+    seed_carry_frames: int
     seed_carry_min_separation: int
+    carried_exempt_size_filter: bool = False
     threshold_params: ThresholdParams
     conv_strat_raut_params: ConvStratRautParams
     conv_strat_yuter_params: ConvStratYuterParams

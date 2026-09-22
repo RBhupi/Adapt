@@ -39,7 +39,14 @@ def _carried(*blocks: tuple[int, int], ages=None) -> CarriedLabels:
 
 
 def _segmenter(make_detection_config, **kw) -> RadarCellSegmenter:
-    seg_kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry": True, **kw}
+    # closing_radius=0: these tests count basin pixels on synthetic squares
+    seg_kw = {
+        "filter_by_size": False,
+        "h_maxima": 5.0,
+        "seed_carry": True,
+        "closing_radius": 0,
+        **kw,
+    }
     return RadarCellSegmenter(
         make_detection_config(threshold=35.0, segmenter=UserSegmenterConfig(**seg_kw))
     )

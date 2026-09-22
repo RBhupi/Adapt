@@ -122,23 +122,39 @@ class SegmenterConfig(AdaptBaseModel):
     # Shared labeling-backend parameters (applied to every method's mask)
     min_cellsize_gridpoint: int = Field(5, ge=1)
     max_cellsize_gridpoint: int | None = Field(None, ge=1)
-    closing_kernel: tuple[int, int] = (1, 1)
+    closing_radius: int = Field(
+        2,
+        ge=0,
+        description=(
+            "Radius (grid points) of the disk used to close the convective mask: a "
+            "dilation followed by an erosion with the same disk. Fills gaps and "
+            "indentations narrower than ~2r and rounds the boundary without changing "
+            "the extent of large features. 0 disables it."
+        ),
+    )
     filter_by_size: bool = True
     h_maxima: float = Field(5.0, gt=0, description="h-maxima height for cell seeding (dBZ)")
     # Previous-frame seeding: the projection module's one-step-ahead labels
     # become extra watershed markers (union with h-maxima seeds, never a
     # replacement). Off by default; off is byte-identical to no seeding.
-    seed_carry: bool = Field(
-        False, description="Seed the watershed with the previous frame's advected cell cores"
+    seed_carry_frames: int = Field(
+        1,
+        ge=0,
+        description="How many consecutive frames a core may be carried without independent "
+        "detection. 0 disables the carry entirely; 1 carries only from the immediately "
+        "preceding frame (a core not re-detected next frame is dropped); N allows N frames",
     )
-    seed_carry_max_frames: int = Field(
-        2,
-        ge=1,
-        description="Drop a carried core after this many consecutive frames without "
-        "independent detection",
+    carried_exempt_size_filter: bool = Field(
+        False,
+        description="Spare carried-seed cells from min_cellsize_gridpoint. Off by default: "
+        "on KHTX 2021-05-04 the spared basins (1-4 px) sat wholly inside the parent's "
+        "projected hull (Opc 1.0) but covered ~4% of it, so the tracker's "
+        "minimum_projected_overlap gate rejected them anyway — 60 of 63 became one-scan "
+        "orphan tracks and 3 continued. The rescue moved from the size filter to the "
+        "tracking gate rather than succeeding. Kept as an option for study arms",
     )
     seed_carry_min_separation: int = Field(
-        3,
+        5,
         ge=1,
         description="Minimum pixel distance from any h-maxima seed for a carried core "
         "to be admitted",

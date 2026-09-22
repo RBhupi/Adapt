@@ -93,23 +93,23 @@ class DetectModule(BaseModule):
         # Checked at startup: at run time "prior scan has no projected_ds" is
         # also the legitimate state of the second scan, so it cannot be told
         # apart from a disabled projection module there.
-        if seg.seed_carry and not _projection_enabled(cfg):
+        if seg.seed_carry_frames > 0 and not _projection_enabled(cfg):
             raise ValueError(
-                "segmenter.seed_carry needs the projection module (its advected labels "
-                "are the seeds carried forward) — enable projection or turn seed_carry off"
+                "segmenter.seed_carry_frames > 0 needs the projection module (its advected "
+                "labels are the seeds carried forward) — enable projection or set it to 0"
             )
         method_params = getattr(seg, f"{seg.method}_params").model_dump()
         return DetectionConfig(
             method=seg.method,
             method_params=method_params,
-            closing_kernel=seg.closing_kernel,
+            closing_radius=seg.closing_radius,
             filter_by_size=seg.filter_by_size,
             min_cellsize_gridpoint=seg.min_cellsize_gridpoint,
             max_cellsize_gridpoint=seg.max_cellsize_gridpoint,
             h_maxima=seg.h_maxima,
-            seed_carry=seg.seed_carry,
-            seed_carry_max_frames=seg.seed_carry_max_frames,
+            seed_carry_frames=seg.seed_carry_frames,
             seed_carry_min_separation=seg.seed_carry_min_separation,
+            carried_exempt_size_filter=seg.carried_exempt_size_filter,
             reflectivity_var=cfg.global_.tracking_field,
             labels_var=CELL_LABELS_VAR,
             z_level=cfg.global_.z_level,
@@ -131,7 +131,7 @@ class DetectModule(BaseModule):
         num_cells = int(labels.max().item())
         seed_carry = (
             tuple(int(age) for age in np.atleast_1d(labels.attrs["carry_age"]))
-            if config.seed_carry and num_cells
+            if config.seed_carry_frames > 0 and num_cells
             else ()
         )
 
@@ -150,7 +150,7 @@ class DetectModule(BaseModule):
         no motion field yet (projection first runs at the second scan and is
         skipped after a too-large gap): the carry is undefined without one.
         """
-        if not config.seed_carry or prior is None:
+        if config.seed_carry_frames == 0 or prior is None:
             return None
         if "projected_ds" not in prior:
             logger.debug("seed_carry: prior scan has no projected_ds; nothing carried")
