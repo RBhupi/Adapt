@@ -102,7 +102,7 @@ _METHOD_LINES = {
         f"· steps {c.projector.max_projection_steps}"
     ),
     "tracking": lambda c: (
-        f"gap {c.tracker.max_tracking_gap_minutes:g}min "
+        f"gap {c.global_.max_scan_gap_minutes:g}min "
         f"· overlap≥{c.tracker.minimum_candidate_overlap:g} · vmax {c.tracker.max_speed_ms:g}m/s"
     ),
 }

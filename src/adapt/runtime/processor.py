@@ -170,7 +170,9 @@ class RadarProcessor(threading.Thread):
         # Rolling scan history (replaces per-phase segmented_history)
         self._scan_history: list[dict] = []
         self._max_history = config.processor.max_history
-        self._max_time_gap_minutes = config.projector.max_time_interval_minutes
+        # One bound for every stage that pairs frames (see global_.max_scan_gap_minutes):
+        # beyond it no seed is carried, no projection runs and tracking resets.
+        self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
         self._last_skipped = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
