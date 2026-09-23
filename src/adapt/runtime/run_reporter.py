@@ -103,7 +103,8 @@ _METHOD_LINES = {
     ),
     "tracking": lambda c: (
         f"gap {c.global_.max_scan_gap_minutes:g}min "
-        f"· overlap≥{c.tracker.minimum_candidate_overlap:g} · vmax {c.tracker.max_speed_ms:g}m/s"
+        f"· u≤{c.tracker.max_overlap_mismatch:g} · c≤{c.tracker.max_link_cost:g} "
+        f"· vmax {c.tracker.max_speed_ms:g}m/s"
     ),
 }
 

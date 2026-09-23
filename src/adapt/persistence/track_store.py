@@ -204,6 +204,18 @@ def _target_uid(ev: pd.Series):
     return ev.get("target_cell_uid")
 
 
+def _event_source_scan(ev: pd.Series, prev: tuple[str, str] | None) -> tuple[str, str] | None:
+    """(scan_id, scan_time) the source cell was last observed in.
+
+    The previous scan, unless the event names its own — a resumed or an
+    expiring latent track refers back to the scan it vanished after.
+    """
+    scan_id = ev.get("source_scan_id")
+    if scan_id is None or pd.isna(scan_id) or scan_id == (prev[0] if prev else None):
+        return prev
+    return str(scan_id), _to_iso(pd.Timestamp(ev["source_scan_time"]).to_pydatetime())
+
+
 class TrackStore:
     """Read/write track persistence tables in a collection's products.db.
 
@@ -331,7 +343,7 @@ class TrackStore:
             # 4. Retroactively update previous scan's cells_by_scan flags
             prev = self._prev_scan(conn, run_id, scan_iso)
             if prev and not cell_events_df.empty:
-                self._update_retroactive_flags(conn, run_id, prev[0], cell_events_df)
+                self._update_retroactive_flags(conn, run_id, prev, cell_events_df)
 
             # 5. Insert cell_events
             if not cell_events_df.empty:
@@ -677,34 +689,26 @@ class TrackStore:
         self,
         conn: sqlite3.Connection,
         run_id: str,
-        prev_scan_id: str,
+        prev: tuple[str, str],
         cell_events_df: pd.DataFrame,
     ) -> None:
-        """Set is_split_source, is_merge_source, is_terminated_after on prev scan rows."""
-        term_tracks, split_tracks, merge_tracks = set(), set(), set()
+        """Set is_split_source, is_merge_source, is_terminated_after on the source scan's rows."""
+        flags = {
+            "TERMINATION": "is_terminated_after_here",
+            "SPLIT": "is_split_source_here",
+            "MERGE": "is_merge_source_here",
+        }
         for _, ev in cell_events_df.iterrows():
-            etype = ev["event_type"]
-            stid = _source_uid(ev)
-            if pd.isna(stid):
+            flag, stid = flags.get(str(ev["event_type"])), _source_uid(ev)
+            if flag is None or pd.isna(stid):
                 continue
-            if etype == "TERMINATION":
-                term_tracks.add(str(stid))
-            elif etype == "SPLIT":
-                split_tracks.add(str(stid))
-            elif etype == "MERGE":
-                merge_tracks.add(str(stid))
-
-        def _update(flag: str, cell_uids: set) -> None:
-            for tid in cell_uids:
-                conn.execute(
-                    f"UPDATE cells_by_scan SET {flag}=1 "
-                    "WHERE run_id=? AND scan_id=? AND cell_uid=?",
-                    (run_id, prev_scan_id, tid),
-                )
-
-        _update("is_terminated_after_here", term_tracks)
-        _update("is_split_source_here", split_tracks)
-        _update("is_merge_source_here", merge_tracks)
+            source = _event_source_scan(ev, prev)
+            if source is None:
+                continue
+            conn.execute(
+                f"UPDATE cells_by_scan SET {flag}=1 WHERE run_id=? AND scan_id=? AND cell_uid=?",
+                (run_id, source[0], str(stid)),
+            )
 
     def _insert_cell_events(
         self,
@@ -715,7 +719,6 @@ class TrackStore:
         prev: tuple[str, str] | None,
         cell_events_df: pd.DataFrame,
     ) -> None:
-        source_scan_id, source_iso = prev if prev else (None, None)
         cols = [
             "run_id",
             "source_scan_id",
@@ -746,17 +749,8 @@ class TrackStore:
         placeholders = ", ".join("?" * len(all_cols))
         sql = f"INSERT INTO cell_events ({', '.join(all_cols)}) VALUES ({placeholders})"
 
-        def _src_id(etype: str) -> str | None:
-            return None if etype == "INITIATION" else source_scan_id
-
-        def _tgt_id(etype: str) -> str | None:
-            return None if etype == "TERMINATION" else scan_id
-
-        def _src_time(etype: str) -> str | None:
-            return None if etype == "INITIATION" else source_iso
-
-        def _tgt_time(etype: str) -> str | None:
-            return None if etype == "TERMINATION" else target_iso
+        # No target scan for an event that ends or suspends a track.
+        untargeted = {"TERMINATION", "LATENT"}
 
         def _num(ev: pd.Series, col: str) -> float | None:
             val = ev.get(col)
@@ -768,13 +762,14 @@ class TrackStore:
             source_uid = _source_uid(ev)
             target_uid = _target_uid(ev)
             method = ev.get("match_method")
+            source = None if etype == "INITIATION" else _event_source_scan(ev, prev)
             rows.append(
                 (
                     run_id,
-                    _src_id(etype),
-                    _tgt_id(etype),
-                    _src_time(etype),
-                    _tgt_time(etype),
+                    source[0] if source else None,
+                    None if etype in untargeted else scan_id,
+                    source[1] if source else None,
+                    None if etype in untargeted else target_iso,
                     etype,
                     source_uid if pd.notna(source_uid) else None,
                     target_uid if pd.notna(target_uid) else None,
@@ -842,6 +837,8 @@ class TrackStore:
                     split_children[str(ttid)] = (str(stid), gid)
                 elif etype == "TERMINATION" and pd.notna(stid):
                     terminated[str(stid)] = gid
+                    if pd.notna(ttid):  # a merged-away track ending: target is the survivor
+                        merged_into[str(stid)] = (str(ttid), gid)
                 elif etype == "MERGE" and pd.notna(stid) and pd.notna(ttid):
                     merged_into[str(stid)] = (str(ttid), gid)
 

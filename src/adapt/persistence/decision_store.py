@@ -19,6 +19,9 @@ from adapt.utils.time import to_scan_iso
 
 __all__ = ["DecisionStore"]
 
+# Tables whose rows have no natural key: keyed by their order within the scan.
+_SEQUENCED = frozenset({"segmentation_seeds", "tracking_lineage"})
+
 
 class DecisionStore(SqliteStore):
     """One-scan writer for ``decisions.db``."""
@@ -47,10 +50,12 @@ class DecisionStore(SqliteStore):
         match decisions:
             case TrackingDecisions():
                 tables = (
-                    ("tracking_frames", (decisions.frame,)),
-                    ("tracking_candidates", decisions.candidates),
-                    ("tracking_unmatched", decisions.unmatched),
-                    ("tracking_split_merge_tests", decisions.split_merge_tests),
+                    ("tracking_scans", (decisions.scan,)),
+                    ("tracking_cells", decisions.cells),
+                    ("tracking_pairs", decisions.pairs),
+                    ("tracking_lineage", decisions.lineage),
+                    ("tracking_identity", decisions.identity),
+                    ("tracking_latent", decisions.latent),
                 )
             case SegmentationDecisions():
                 tables = (
@@ -64,7 +69,7 @@ class DecisionStore(SqliteStore):
         conn = self._get_connection()
         for table, records in tables:
             rows = [{**stamp, **asdict(record)} for record in records]
-            if table == "segmentation_seeds":
+            if table in _SEQUENCED:
                 for seq, row in enumerate(rows):
                     row["seq"] = seq
             self._replace(conn, table, rows)

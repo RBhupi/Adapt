@@ -18,112 +18,162 @@ from adapt.contracts.pipeline import require
 
 
 @dataclass(frozen=True)
-class TrackingFrame:
-    """One scan pair: how the frame was classified and what each stage yielded."""
+class TrackingScan:
+    """One scan pair: how it was classified and what each step yielded."""
 
     dt_s: float | None
     reset_code: str | None  # FIRST_SCAN | NON_MONOTONIC_TIME | TRACK_GAP_EXCEEDED | NO_PROJECTIONS
     n_prev: int
+    n_latent: int  # latent tracks offered to this scan
     n_curr: int
     n_pairs: int
     n_pass_overlap: int
-    n_pass_kinematic: int
-    n_propagated: int
-    n_hungarian: int
+    n_pass_speed: int
+    n_pass_cost: int
+    n_components: int
+    n_continue: int
+    n_crossing_excluded: int
     n_split: int
     n_merge: int
+    n_resumed: int
+    n_identity_transfer: int
     n_initiation: int
+    n_latent_created: int
     n_termination: int
 
 
 @dataclass(frozen=True)
-class TrackingCandidate:
-    """One (previous cell, current cell) pair that candidate generation produced.
+class TrackingCell:
+    """One current cell: the quantities the decisions used, and its fate.
 
-    ``last_stage`` is the furthest stage the pair reached (OVERLAP, KINEMATIC,
-    ASSIGNMENT); ``outcome`` is CONTINUE, REJECTED_OVERLAP, REJECTED_KINEMATIC
-    or LOST_ASSIGNMENT. Fields of stages the pair never reached are None.
+    ``mass`` is Σe and ``mean_excess`` ē over the cell (e = excess above the
+    cell threshold); the centre is the e²-weighted one (metres); ``score`` is
+    the identity score S. ``core_area_km2`` is diagnostic only.
+    """
+
+    cell_label: int
+    cell_uid: str
+    area_km2: float
+    mass: float
+    mean_excess: float
+    centre_x: float
+    centre_y: float
+    score: float
+    core_area_km2: float
+    fate: str  # CONTINUE | RESUMED | SPLIT_CHILD | INITIATION
+
+
+@dataclass(frozen=True)
+class TrackingPair:
+    """One candidate pair: a footprint (live or latent) against a current cell.
+
+    Every quantity is computed for every pair; ``gate`` names the first check
+    it failed (OVERLAP, SPEED, SPEED_CHANGE, COST) or PASS. ``outcome`` is
+    CONTINUE, RESUMED, LOST (passed, not chosen), CROSSING (excluded because it
+    crossed ``crossing_with_uid``'s link) or REJECTED (failed a gate).
     """
 
     prev_cell_uid: str
     prev_cell_label: int
     curr_cell_label: int
-    track_steps_before: int
-    hull_area_px: int
-    hull_centroid_x: float
-    hull_centroid_y: float
-    curr_area_px: int
-    curr_centroid_x: float
-    curr_centroid_y: float
+    source: str  # LIVE | LATENT
+    steps: int  # scan intervals the link spans
+    growth_radius_km: float
+    footprint_area_px: int
+    footprint_grown_px: int
+    cell_grown_px: int
     intersection_px: int
-    opc: float
-    ocp: float
-    overlap_passed: bool
-    speed_ms: float | None
-    previous_speed_ms: float | None
-    accel_cap_ms: float | None
-    kinematic_code: str | None
-    displacement_m: float | None
-    length_scale_m: float | None
+    o_c: float
+    o_h: float
+    u: float
+    predicted_x: float
+    predicted_y: float
+    curr_centre_x: float
+    curr_centre_y: float
+    d: float
+    speed_ms: float
+    prev_speed_ms: float | None
+    speed_limit_ms: float | None
     heading_change_deg: float | None
-    cost: float | None
-    component_n_prev: int | None
-    component_n_curr: int | None
+    h: float
+    cost: float
+    gate: str
+    component_id: int | None
     cost_rank: int | None
-    match_method: str | None
-    last_stage: str
+    margin: float | None
+    crossing_with_uid: str | None
     outcome: str
 
 
 @dataclass(frozen=True)
-class TrackingUnmatched:
-    """A previous cell that did not continue, or a current cell that was born."""
+class TrackingLineage:
+    """One hypothesis for a cell the assignment left over, and whether it was chosen.
 
-    side: str  # prev | curr
+    Current orphans (side ``curr``) weigh RESUME, SPLIT and INITIATION;
+    unlinked previous cells (side ``prev``) weigh MERGE and LATENT.
+    ``fraction`` is O^c for a split and O^h for a merge; ``cost`` is the
+    resumption cost; ``reason`` says why a hypothesis failed, or IDENTITY when
+    the identity rule made the assigned cell a split child or merge source.
+    """
+
+    side: str
     cell_uid: str
     cell_label: int
-    n_candidates: int
-    best_candidate_label: int | None
-    best_stage: str | None
-    reason: str  # NO_CANDIDATE | ALL_REJECTED_OVERLAP | ALL_REJECTED_KINEMATIC |
-    # LOST_ASSIGNMENT | SPLIT_CHILD | MERGE_SOURCE | RESET | FIRST_SCAN
-    # How close the best candidate came, so a near-miss is distinguishable from
-    # no candidate at all without re-joining tracking_candidates.
-    best_opc: float | None = None
-    best_ocp: float | None = None
-    best_cost: float | None = None
+    hypothesis: str
+    partner_uid: str | None
+    partner_label: int | None
+    fraction: float | None
+    cost: float | None
+    threshold: float | None
+    passed: bool
+    chosen: bool
+    reason: str | None
 
 
 @dataclass(frozen=True)
-class TrackingSplitMergeTest:
-    """Every hull overlap tested — pass or fail.
+class TrackingIdentity:
+    """One contender for an identity contested by a split or a merge.
 
-    MERGE compares ``hull_fraction`` against the merge threshold, SPLIT compares
-    ``cell_fraction`` against the split one; ``overlap_fraction`` always holds
-    whichever was used for the decision.
+    ``identity_uid`` is the identity at stake; ``candidate_label`` is a previous
+    cell (merge) or a current cell (split). ``transferred`` is True when the
+    winner is not the cell the assignment linked.
     """
 
     kind: str  # SPLIT | MERGE
-    continuing_cell_uid: str
-    tested_cell_label: int
-    overlap_fraction: float  # the fraction actually compared against `threshold`
-    threshold: float
-    passed: bool
-    # Both normalisations plus the raw areas, so the choice of denominator stays
-    # auditable: MERGE decides on `hull_fraction`, SPLIT on `cell_fraction`.
-    intersection_px: int | None = None
-    hull_px: int | None = None
-    tested_px: int | None = None
-    hull_fraction: float | None = None
-    cell_fraction: float | None = None
+    identity_uid: str
+    candidate_side: str  # prev | curr
+    candidate_label: int
+    score: float
+    distance: float
+    winner: bool
+    rule: str  # SCORE | NEAREST
+    transferred: bool
+
+
+@dataclass(frozen=True)
+class TrackingLatent:
+    """A latent track at this scan: created, carried, resumed or expired."""
+
+    cell_uid: str
+    last_label: int
+    last_scan_id: str
+    age: int  # scans since the last observation
+    origin: str  # MERGED | TERMINATED
+    merged_into_uid: str | None
+    status: str  # CREATED | CARRIED | RESUMED | EXPIRED
+    footprint_px: int
+    predicted_x: float
+    predicted_y: float
 
 
 @dataclass(frozen=True)
 class TrackingDecisions:
-    frame: TrackingFrame
-    candidates: tuple[TrackingCandidate, ...]
-    unmatched: tuple[TrackingUnmatched, ...]
-    split_merge_tests: tuple[TrackingSplitMergeTest, ...]
+    scan: TrackingScan
+    cells: tuple[TrackingCell, ...]
+    pairs: tuple[TrackingPair, ...]
+    lineage: tuple[TrackingLineage, ...]
+    identity: tuple[TrackingIdentity, ...]
+    latent: tuple[TrackingLatent, ...]
 
 
 # ── Segmentation ─────────────────────────────────────────────────────────────
@@ -207,15 +257,18 @@ def check_tracking_decisions(decisions: TrackingDecisions) -> None:
     require(
         isinstance(decisions, TrackingDecisions), "tracking_decisions must be TrackingDecisions"
     )
-    frame = decisions.frame
+    scan = decisions.scan
     require(
-        frame.n_termination <= frame.n_prev,
-        "tracking_decisions: more terminations than previous cells",
+        scan.n_termination <= scan.n_prev + scan.n_latent,
+        "tracking_decisions: more terminations than previous and latent tracks",
     )
     require(
-        len(decisions.candidates) == frame.n_pairs,
-        f"tracking_decisions: {len(decisions.candidates)} candidate rows for "
-        f"{frame.n_pairs} generated pairs",
+        len(decisions.pairs) == scan.n_pairs,
+        f"tracking_decisions: {len(decisions.pairs)} pair rows for {scan.n_pairs} pairs",
+    )
+    require(
+        len(decisions.cells) == scan.n_curr,
+        f"tracking_decisions: {len(decisions.cells)} cell rows for {scan.n_curr} current cells",
     )
 
 

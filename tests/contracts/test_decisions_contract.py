@@ -12,7 +12,7 @@ from adapt.contracts import (
     SegmentationDecisions,
     SegmentationFrame,
     TrackingDecisions,
-    TrackingFrame,
+    TrackingScan,
     check_segmentation_decisions,
     check_tracking_decisions,
 )
@@ -20,33 +20,33 @@ from adapt.contracts import (
 pytestmark = pytest.mark.unit
 
 
-def _tracking_frame(**kw) -> TrackingFrame:
-    fields = dict.fromkeys(
-        (
-            "n_prev",
-            "n_curr",
-            "n_pairs",
-            "n_pass_overlap",
-            "n_pass_kinematic",
-            "n_propagated",
-            "n_hungarian",
-            "n_split",
-            "n_merge",
-            "n_initiation",
-            "n_termination",
-        ),
-        0,
-    )
-    return TrackingFrame(dt_s=None, reset_code="FIRST_SCAN", **{**fields, **kw})
+def _tracking_scan(**kw) -> TrackingScan:
+    counts = dict.fromkeys((f.name for f in dataclasses.fields(TrackingScan)), 0)
+    counts.update(dt_s=None, reset_code="FIRST_SCAN")
+    return TrackingScan(**{**counts, **kw})
+
+
+def _bundle(scan: TrackingScan) -> TrackingDecisions:
+    return TrackingDecisions(scan, (), (), (), (), ())
 
 
 def test_tracking_bundle_with_no_pairs_is_valid():
-    check_tracking_decisions(TrackingDecisions(_tracking_frame(), (), (), ()))
+    check_tracking_decisions(_bundle(_tracking_scan()))
 
 
-def test_tracking_candidate_rows_must_match_generated_pair_count():
+def test_tracking_pair_rows_must_match_pair_count():
     with pytest.raises(ContractViolation):
-        check_tracking_decisions(TrackingDecisions(_tracking_frame(n_pairs=1), (), (), ()))
+        check_tracking_decisions(_bundle(_tracking_scan(n_pairs=1)))
+
+
+def test_tracking_cell_rows_must_match_current_cell_count():
+    with pytest.raises(ContractViolation):
+        check_tracking_decisions(_bundle(_tracking_scan(n_curr=2)))
+
+
+def test_terminations_cannot_exceed_previous_and_latent_tracks():
+    with pytest.raises(ContractViolation):
+        check_tracking_decisions(_bundle(_tracking_scan(n_prev=1, n_latent=1, n_termination=3)))
 
 
 def test_segmentation_component_rows_must_match_component_count():
@@ -56,6 +56,6 @@ def test_segmentation_component_rows_must_match_component_count():
 
 
 def test_records_are_frozen():
-    frame = _tracking_frame()
+    frame = _tracking_scan()
     with pytest.raises(dataclasses.FrozenInstanceError):
         frame.n_prev = 3  # type: ignore[misc]

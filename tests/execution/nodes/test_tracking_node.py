@@ -50,10 +50,10 @@ class _FakeTracker:
 
     @staticmethod
     def decisions():
-        from adapt.contracts import TrackingDecisions, TrackingFrame
+        from adapt.contracts import TrackingDecisions, TrackingScan
 
-        frame = TrackingFrame(None, "FIRST_SCAN", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-        return TrackingDecisions(frame, (), (), ())
+        scan = TrackingScan(None, "FIRST_SCAN", *([0] * 17))
+        return TrackingDecisions(scan, (), (), (), (), ())
 
 
 def _run_module(module, tracked_per_scan):

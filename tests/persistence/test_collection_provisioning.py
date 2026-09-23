@@ -75,10 +75,12 @@ class TestCollectionProvisioning:
         store.close()
 
         assert _tables(store.root / "collections" / "KILX" / "decisions.db") == {
-            "tracking_frames",
-            "tracking_candidates",
-            "tracking_unmatched",
-            "tracking_split_merge_tests",
+            "tracking_scans",
+            "tracking_cells",
+            "tracking_pairs",
+            "tracking_lineage",
+            "tracking_identity",
+            "tracking_latent",
             "segmentation_frames",
             "segmentation_seeds",
             "segmentation_components",

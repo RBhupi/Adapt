@@ -29,7 +29,7 @@ def test_every_stage_reads_the_same_gap(make_config):
 
 def test_split_and_merge_thresholds_are_independent(make_config):
     param = ParamConfig()
-    assert param.tracker.split_overlap_threshold == 0.6
+    assert param.tracker.split_overlap_threshold == 0.65
     assert param.tracker.merge_overlap_threshold == 0.7
 
     cfg = make_config(tracker={"split_overlap_threshold": 0.5})

@@ -5,108 +5,148 @@
 -- the public API. Rows mirror the frozen record fields plus run/scan stamps.
 -- Config thresholds are not repeated here: join run_id to the run registry.
 
--- user_version 2: split/merge tests carry both normalisations and their areas;
--- tracking_unmatched carries the best candidate's overlaps and cost;
--- segmentation_frames counts size-filter exemptions for carried cells.
--- CREATE TABLE IF NOT EXISTS does not migrate an existing file — a collection
--- written under version 1 keeps its old columns, so start a new base_dir when
--- the new fields are needed.
-PRAGMA user_version = 2;
+-- user_version 3: tracker v2 (grown overlaps, curved gate, additive cost with a
+-- no-link ceiling, crossing test, latent tracks, identity rule). Its records go
+-- to tables with new names — tracking_scans, _cells, _pairs, _lineage,
+-- _identity, _latent — so a decisions.db written by the previous tracker keeps
+-- its tracking_frames/_candidates/_unmatched/_split_merge_tests rows untouched
+-- and still takes new runs. CREATE TABLE IF NOT EXISTS does not migrate an
+-- existing table: a changed column set needs a new table name or a new base_dir.
+PRAGMA user_version = 3;
 
-CREATE TABLE IF NOT EXISTS tracking_frames (
+CREATE TABLE IF NOT EXISTS tracking_scans (
     run_id TEXT NOT NULL,
     scan_id TEXT NOT NULL,
     scan_time TEXT NOT NULL,
     dt_s REAL,
     reset_code TEXT,
     n_prev INTEGER NOT NULL,
+    n_latent INTEGER NOT NULL,
     n_curr INTEGER NOT NULL,
     n_pairs INTEGER NOT NULL,
     n_pass_overlap INTEGER NOT NULL,
-    n_pass_kinematic INTEGER NOT NULL,
-    n_propagated INTEGER NOT NULL,
-    n_hungarian INTEGER NOT NULL,
+    n_pass_speed INTEGER NOT NULL,
+    n_pass_cost INTEGER NOT NULL,
+    n_components INTEGER NOT NULL,
+    n_continue INTEGER NOT NULL,
+    n_crossing_excluded INTEGER NOT NULL,
     n_split INTEGER NOT NULL,
     n_merge INTEGER NOT NULL,
+    n_resumed INTEGER NOT NULL,
+    n_identity_transfer INTEGER NOT NULL,
     n_initiation INTEGER NOT NULL,
+    n_latent_created INTEGER NOT NULL,
     n_termination INTEGER NOT NULL,
     PRIMARY KEY (run_id, scan_id)
 );
 
-CREATE TABLE IF NOT EXISTS tracking_candidates (
+CREATE TABLE IF NOT EXISTS tracking_cells (
+    run_id TEXT NOT NULL,
+    scan_id TEXT NOT NULL,
+    scan_time TEXT NOT NULL,
+    cell_label INTEGER NOT NULL,
+    cell_uid TEXT NOT NULL,
+    area_km2 REAL NOT NULL,
+    mass REAL NOT NULL,             -- Σ e, e = excess above the cell threshold
+    mean_excess REAL NOT NULL,      -- ē = mass / area (per pixel)
+    centre_x REAL NOT NULL,         -- e²-weighted centre, metres
+    centre_y REAL NOT NULL,
+    score REAL NOT NULL,            -- identity score S = log A + γ log ē (−inf: no excess)
+    core_area_km2 REAL NOT NULL,    -- diagnostic, above tracker.core_field_threshold
+    fate TEXT NOT NULL,             -- CONTINUE | RESUMED | SPLIT_CHILD | INITIATION
+    PRIMARY KEY (run_id, scan_id, cell_label)
+);
+CREATE INDEX IF NOT EXISTS idx_tracking_cells_uid ON tracking_cells (run_id, cell_uid);
+
+CREATE TABLE IF NOT EXISTS tracking_pairs (
     run_id TEXT NOT NULL,
     scan_id TEXT NOT NULL,
     scan_time TEXT NOT NULL,
     prev_cell_uid TEXT NOT NULL,
     prev_cell_label INTEGER NOT NULL,
     curr_cell_label INTEGER NOT NULL,
-    track_steps_before INTEGER NOT NULL,
-    hull_area_px INTEGER NOT NULL,
-    hull_centroid_x REAL NOT NULL,
-    hull_centroid_y REAL NOT NULL,
-    curr_area_px INTEGER NOT NULL,
-    curr_centroid_x REAL NOT NULL,
-    curr_centroid_y REAL NOT NULL,
+    source TEXT NOT NULL,           -- LIVE footprint or LATENT track
+    steps INTEGER NOT NULL,         -- scan intervals spanned
+    growth_radius_km REAL NOT NULL,
+    footprint_area_px INTEGER NOT NULL,
+    footprint_grown_px INTEGER NOT NULL,
+    cell_grown_px INTEGER NOT NULL,
     intersection_px INTEGER NOT NULL,
-    opc REAL NOT NULL,
-    ocp REAL NOT NULL,
-    overlap_passed INTEGER NOT NULL,
-    speed_ms REAL,
-    previous_speed_ms REAL,
-    accel_cap_ms REAL,
-    kinematic_code TEXT,
-    displacement_m REAL,
-    length_scale_m REAL,
-    heading_change_deg REAL,
-    cost REAL,
-    component_n_prev INTEGER,
-    component_n_curr INTEGER,
+    o_c REAL NOT NULL,              -- |H+ ∩ M+| / |M+|
+    o_h REAL NOT NULL,              -- |H+ ∩ M+| / |H+|
+    u REAL NOT NULL,                -- 1 − √(o_c o_h)
+    predicted_x REAL NOT NULL,
+    predicted_y REAL NOT NULL,
+    curr_centre_x REAL NOT NULL,
+    curr_centre_y REAL NOT NULL,
+    d REAL NOT NULL,                -- shape-aware residual √(δᵀ Σ⁻¹ δ)
+    speed_ms REAL NOT NULL,
+    prev_speed_ms REAL,
+    speed_limit_ms REAL,            -- v_prev + Δv_max; NULL on a track's first step
+    heading_change_deg REAL,        -- NULL when a step is below two grid lengths
+    h REAL NOT NULL,
+    cost REAL NOT NULL,             -- u + w_d d + h
+    gate TEXT NOT NULL,             -- PASS | OVERLAP | SPEED | SPEED_CHANGE | COST
+    component_id INTEGER,
     cost_rank INTEGER,
-    match_method TEXT,
-    last_stage TEXT NOT NULL,
-    outcome TEXT NOT NULL,
+    margin REAL,
+    crossing_with_uid TEXT,
+    outcome TEXT NOT NULL,          -- CONTINUE | RESUMED | LOST | CROSSING | REJECTED
     PRIMARY KEY (run_id, scan_id, prev_cell_uid, curr_cell_label)
 );
-CREATE INDEX IF NOT EXISTS idx_tracking_candidates_prev
-    ON tracking_candidates (run_id, prev_cell_uid);
+CREATE INDEX IF NOT EXISTS idx_tracking_pairs_prev ON tracking_pairs (run_id, prev_cell_uid);
 
-CREATE TABLE IF NOT EXISTS tracking_unmatched (
+CREATE TABLE IF NOT EXISTS tracking_lineage (
     run_id TEXT NOT NULL,
     scan_id TEXT NOT NULL,
     scan_time TEXT NOT NULL,
-    side TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    side TEXT NOT NULL,             -- curr orphan | prev unlinked cell
     cell_uid TEXT NOT NULL,
     cell_label INTEGER NOT NULL,
-    n_candidates INTEGER NOT NULL,
-    best_candidate_label INTEGER,
-    best_stage TEXT,
-    best_opc REAL,
-    best_ocp REAL,
-    best_cost REAL,
-    reason TEXT NOT NULL,
-    PRIMARY KEY (run_id, scan_id, side, cell_uid)
+    hypothesis TEXT NOT NULL,       -- RESUME | SPLIT | INITIATION | MERGE | LATENT
+    partner_uid TEXT,
+    partner_label INTEGER,
+    fraction REAL,
+    cost REAL,
+    threshold REAL,
+    passed INTEGER NOT NULL,
+    chosen INTEGER NOT NULL,
+    reason TEXT,
+    PRIMARY KEY (run_id, scan_id, seq)
 );
-CREATE INDEX IF NOT EXISTS idx_tracking_unmatched_uid
-    ON tracking_unmatched (run_id, cell_uid);
 
-CREATE TABLE IF NOT EXISTS tracking_split_merge_tests (
+CREATE TABLE IF NOT EXISTS tracking_identity (
     run_id TEXT NOT NULL,
     scan_id TEXT NOT NULL,
     scan_time TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    continuing_cell_uid TEXT NOT NULL,
-    tested_cell_label INTEGER NOT NULL,
-    overlap_fraction REAL NOT NULL,   -- the fraction compared against `threshold`
-    threshold REAL NOT NULL,
-    passed INTEGER NOT NULL,
-    -- Both normalisations and the raw areas: MERGE decides on hull_fraction,
-    -- SPLIT on cell_fraction. Kept side by side so the denominator is auditable.
-    intersection_px INTEGER,
-    hull_px INTEGER,
-    tested_px INTEGER,
-    hull_fraction REAL,
-    cell_fraction REAL,
-    PRIMARY KEY (run_id, scan_id, kind, continuing_cell_uid, tested_cell_label)
+    kind TEXT NOT NULL,             -- SPLIT | MERGE
+    identity_uid TEXT NOT NULL,
+    candidate_side TEXT NOT NULL,
+    candidate_label INTEGER NOT NULL,
+    score REAL NOT NULL,
+    distance REAL NOT NULL,
+    winner INTEGER NOT NULL,
+    rule TEXT NOT NULL,             -- SCORE | NEAREST
+    transferred INTEGER NOT NULL,
+    PRIMARY KEY (run_id, scan_id, kind, identity_uid, candidate_side, candidate_label)
+);
+
+CREATE TABLE IF NOT EXISTS tracking_latent (
+    run_id TEXT NOT NULL,
+    scan_id TEXT NOT NULL,
+    scan_time TEXT NOT NULL,
+    cell_uid TEXT NOT NULL,
+    last_label INTEGER NOT NULL,
+    last_scan_id TEXT NOT NULL,
+    age INTEGER NOT NULL,
+    origin TEXT NOT NULL,           -- MERGED | TERMINATED
+    merged_into_uid TEXT,
+    status TEXT NOT NULL,           -- CREATED | CARRIED | RESUMED | EXPIRED
+    footprint_px INTEGER NOT NULL,
+    predicted_x REAL NOT NULL,
+    predicted_y REAL NOT NULL,
+    PRIMARY KEY (run_id, scan_id, cell_uid)
 );
 
 CREATE TABLE IF NOT EXISTS segmentation_frames (
