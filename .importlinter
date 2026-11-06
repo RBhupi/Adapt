@@ -14,8 +14,8 @@
 # - `exhaustive = true` means every top-level package under adapt MUST be
 #   placed in a layer. Adding a new package fails this check until it is
 #   deliberately assigned a home — that is the point.
-# - This file is mirrored in ARCHITECTURE.md; tests/test_architecture.py
-#   asserts the two stay identical and match the real source tree.
+# - This is the single authoritative layer stack; tests/test_architecture.py
+#   asserts it matches the real source tree.
 # - Scientific-module independence (adapt.modules.X never imports
 #   adapt.modules.Y) is enforced by tests/test_architecture.py, which
 #   auto-discovers module subpackages at runtime.

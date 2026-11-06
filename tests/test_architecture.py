@@ -403,23 +403,11 @@ def test_module_outputs_carry_contracts() -> None:
     )
 
 
-# ── Architecture doc, import-linter config, and source tree stay in sync ──────
-# ARCHITECTURE.md is the human/agent-facing contract; .importlinter is the
-# machine-enforced one; src/adapt is reality. These fitness functions fail the
-# moment any of the three drifts — the exact failure mode of the pre-audit
-# AGENTS.md, which described an architecture that no longer existed.
+# ── import-linter config and source tree stay in sync ────────────────────────
+# .importlinter is the single authoritative layer stack; src/adapt is reality.
 
 _REPO_ROOT = Path(__file__).parents[1]
-_ARCHITECTURE_MD = _REPO_ROOT / "ARCHITECTURE.md"
 _IMPORTLINTER = _REPO_ROOT / ".importlinter"
-
-
-def _doc_layer_lines() -> list[str]:
-    """The lines of the ```layers fenced block in ARCHITECTURE.md."""
-    text = _ARCHITECTURE_MD.read_text(encoding="utf-8")
-    match = re.search(r"```layers\n(.*?)```", text, re.DOTALL)
-    assert match, "ARCHITECTURE.md must contain a ```layers fenced block"
-    return [line.strip() for line in match.group(1).splitlines() if line.strip()]
 
 
 def _importlinter_field(field: str) -> list[str]:
@@ -439,19 +427,11 @@ def _importlinter_field(field: str) -> list[str]:
     return entries
 
 
-def test_architecture_md_layers_match_importlinter() -> None:
-    """The layer stack in ARCHITECTURE.md is identical to the one lint-imports enforces."""
-    assert _doc_layer_lines() == _importlinter_field("layers"), (
-        "ARCHITECTURE.md's ```layers block and .importlinter's `layers =` list "
-        "have diverged — update both in the same change."
-    )
-
-
 def test_layer_stack_covers_the_real_source_tree() -> None:
     """Every top-level package/module under src/adapt is placed in a layer
     (or deliberately listed in exhaustive_ignores). lint-imports enforces this
     too; this test keeps the guarantee even where only pytest runs."""
-    placed = {name for line in _doc_layer_lines() for name in line.split("|")}
+    placed = {name for line in _importlinter_field("layers") for name in line.split("|")}
     placed = {name.strip() for name in placed}
     ignored = set(_importlinter_field("exhaustive_ignores"))
 
@@ -465,7 +445,7 @@ def test_layer_stack_covers_the_real_source_tree() -> None:
         f"Layer stack + exhaustive_ignores != src/adapt tree.\n"
         f"  unplaced packages: {sorted(actual - placed - ignored)}\n"
         f"  phantom entries:   {sorted((placed | ignored) - actual)}\n"
-        "Place new packages in a layer in BOTH ARCHITECTURE.md and .importlinter."
+        "Place new packages in a layer in .importlinter."
     )
     assert not placed & ignored, (
         f"{sorted(placed & ignored)} appear both in the layer stack and in "
