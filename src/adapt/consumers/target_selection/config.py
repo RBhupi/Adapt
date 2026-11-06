@@ -12,7 +12,8 @@ each of which has a documented meaning when absent:
 - ``candidate.hold_gates``: the entry gates also decide whether a target is kept;
 - ``priority.weights.extra``: no score beyond field, area and growth rate;
 - ``selection.allow_switch``: true, a better challenger may take over;
-- ``snapshot.trend_fields``: no trend columns.
+- ``snapshot.trend_fields``: no trend columns;
+- ``snapshot.track_summary``: ``at_scan``, the causal view live selection has.
 """
 
 from pathlib import Path
@@ -25,6 +26,11 @@ from adapt.utils.files import read_yaml_section
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 GateOp = Literal["gt", "ge", "lt", "le"]
+
+# Which track summary (n_scans, duration_seconds, max_area_sqkm, max_reflectivity)
+# a replayed scan sees: as it stood at that scan (what live selection sees), or
+# as it stands at the end of the run (a perfect-knowledge oracle, replay only).
+TrackSummary = Literal["at_scan", "end_of_run"]
 
 
 class QualityGate(BaseModel):
@@ -113,12 +119,14 @@ class SelectionConfig(BaseModel):
 class SnapshotConfig(BaseModel):
     """``trend_fields`` names cells_by_scan columns whose per-minute OLS slope
     over the last ``growth_window_scans`` scans is added to every cell's values
-    as ``trend_<column>_per_min`` (0.0 for a cell seen once)."""
+    as ``trend_<column>_per_min`` (0.0 for a cell seen once). ``track_summary``
+    picks the causal (``at_scan``) or oracle (``end_of_run``) track summary."""
 
     model_config = _FROZEN
 
     growth_window_scans: int = Field(ge=2)
     trend_fields: tuple[str, ...] = ()
+    track_summary: TrackSummary = "at_scan"
 
 
 class OutputConfig(BaseModel):

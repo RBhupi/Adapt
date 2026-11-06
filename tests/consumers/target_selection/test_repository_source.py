@@ -181,6 +181,33 @@ def test_at_replays_earlier_scan(client):
     assert beta.trajectory == ()
 
 
+def test_at_sees_the_track_summary_as_of_that_scan(client):
+    # Replay must not read the future: at T0 beta has been seen once, although
+    # the stored cell_tracks row already counts its later scan at T1.
+    snap = build_snapshot(client, RUN_ID, COLLECTION, growth_window_scans=4, at=T0)
+    beta = _cell(snap, "uid_beta")
+    assert beta.values["n_scans"] == 1
+    assert beta.values["duration_seconds"] == 0.0
+    assert beta.values["max_area_sqkm"] == pytest.approx(100.0)
+    assert beta.values["max_reflectivity"] == pytest.approx(48.1)
+
+
+def test_end_of_run_summary_is_an_explicit_oracle(client):
+    # Perfect-knowledge replay: the track summary as it stands at the end of the run.
+    snap = build_snapshot(
+        client, RUN_ID, COLLECTION, growth_window_scans=4, at=T0, track_summary="end_of_run"
+    )
+    assert _cell(snap, "uid_beta").values["n_scans"] == 2
+
+
+def test_track_summary_spans_the_history_up_to_the_scan(snapshot):
+    beta = _cell(snapshot, "uid_beta")
+    assert beta.values["n_scans"] == 2
+    assert beta.values["duration_seconds"] == pytest.approx(7200.0)
+    assert beta.values["max_area_sqkm"] == pytest.approx(160.0)
+    assert beta.values["max_reflectivity"] == pytest.approx(55.0)
+
+
 def test_first_scan_projections_have_no_lead_times(client):
     # At the first scan of a run, projections exist but no scan cadence does:
     # the trajectory is empty (defined condition), not an error.

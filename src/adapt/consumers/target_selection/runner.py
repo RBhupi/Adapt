@@ -112,6 +112,7 @@ def _snapshot_at(client: StoreClient, config: TSEConfig, collection: str, ref: S
         collection,
         growth_window_scans=config.snapshot.growth_window_scans,
         trend_fields=config.snapshot.trend_fields,
+        track_summary=config.snapshot.track_summary,
         at=ref.scan_time,
     )
     if snapshot.scan_time != ref.scan_time:

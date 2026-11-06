@@ -115,3 +115,23 @@ def test_empty_hold_gates_load_as_no_hold_gates_not_as_absent(tmp_path):
     )
     assert load_config(_write(tmp_path, text)).candidate.hold_gates == ()
     assert load_config(_write(tmp_path, VALID_YAML)).candidate.hold_gates is None
+
+
+def test_track_summary_defaults_to_the_scan_being_replayed(tmp_path):
+    assert load_config(_write(tmp_path, VALID_YAML)).snapshot.track_summary == "at_scan"
+
+
+def test_track_summary_end_of_run_selects_the_oracle(tmp_path):
+    text = VALID_YAML.replace(
+        "    growth_window_scans: 4\n",
+        "    growth_window_scans: 4\n    track_summary: end_of_run\n",
+    )
+    assert load_config(_write(tmp_path, text)).snapshot.track_summary == "end_of_run"
+
+
+def test_unknown_track_summary_raises(tmp_path):
+    text = VALID_YAML.replace(
+        "    growth_window_scans: 4\n", "    growth_window_scans: 4\n    track_summary: future\n"
+    )
+    with pytest.raises(ValidationError, match="track_summary"):
+        load_config(_write(tmp_path, text))

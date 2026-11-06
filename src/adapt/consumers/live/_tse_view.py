@@ -406,6 +406,7 @@ class TargetSelectionTab:
                 self.ctx.collection(),
                 growth_window_scans=self._cfg.snapshot.growth_window_scans,
                 trend_fields=self._cfg.snapshot.trend_fields,
+                track_summary=self._cfg.snapshot.track_summary,
                 at=scan_ts,
             )
             selection = self._engine.select(snap)
@@ -574,6 +575,7 @@ class TargetSelectionTab:
                     collection,
                     growth_window_scans=cfg.snapshot.growth_window_scans,
                     trend_fields=cfg.snapshot.trend_fields,
+                    track_summary=cfg.snapshot.track_summary,
                     at=times[i],
                 )
                 selection = engine.select(snap)
