@@ -6,7 +6,7 @@ dependencies:
   - xarray
   - pandas
   - scipy
-  - arm_pyart
+  - arm_pyart>=2.3.0
   - opencv
   - scikit-image
   - matplotlib

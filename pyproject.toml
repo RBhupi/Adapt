@@ -36,7 +36,7 @@ dependencies = [
     "netCDF4",
     "pydantic>=2.0",
     "pyyaml",
-    "arm_pyart",
+    "arm_pyart>=2.3.0",
     "opencv-python",
     "boto3",
     "cmweather",
@@ -81,6 +81,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "adapt.configuration" = ["*.yaml"]
 "adapt.configuration.schemas" = ["*.sql"]
+"adapt.consumers.target_selection.presets" = ["*.yaml"]
 
 [tool.setuptools_scm]
 version_scheme = "post-release"
