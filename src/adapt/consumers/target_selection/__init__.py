@@ -11,17 +11,22 @@ from adapt.consumers.target_selection.config import TSEConfig, load_config
 from adapt.consumers.target_selection.engine import CurrentTarget, TargetSelectionEngine
 from adapt.consumers.target_selection.repository_source import build_snapshot
 from adapt.consumers.target_selection.rules import is_candidate, total_score
-from adapt.consumers.target_selection.selection import SelectionReason, TargetSelection
+from adapt.consumers.target_selection.selection import (
+    ScanSelection,
+    SelectionReason,
+    TargetSelection,
+)
 from adapt.consumers.target_selection.snapshot import (
     CellSnapshot,
     Snapshot,
     TrajectoryPoint,
 )
-from adapt.consumers.target_selection.writer import append_selection
+from adapt.consumers.target_selection.writer import append_selection, write_current_selection
 
 __all__ = [
     "CellSnapshot",
     "CurrentTarget",
+    "ScanSelection",
     "SelectionReason",
     "Snapshot",
     "TSEConfig",
@@ -33,4 +38,5 @@ __all__ = [
     "is_candidate",
     "load_config",
     "total_score",
+    "write_current_selection",
 ]

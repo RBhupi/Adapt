@@ -14,6 +14,7 @@ from adapt.api.domain import (
 )
 from adapt.api.selection import FilterSpec
 from adapt.api.store_client import StoreClient, TrackGraph
+from adapt.persistence.errors import StoreError
 
 __all__ = [
     "Collection",
@@ -24,6 +25,7 @@ __all__ = [
     "ScanRaster",
     "ScanRef",
     "StoreClient",
+    "StoreError",
     "Track",
     "TrackGraph",
 ]

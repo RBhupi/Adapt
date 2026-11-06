@@ -31,3 +31,17 @@ class TargetSelection:
     trajectory: tuple[TrajectoryPoint, ...]
     observation_window: tuple[datetime, datetime]
     predicted_hulls: tuple | None = None
+
+
+@dataclass(frozen=True)
+class ScanSelection:
+    """The engine's decision tied to the scan it was made on.
+
+    ``selection`` is None when no cell is selected at that scan.
+    """
+
+    collection: str
+    run_id: str
+    scan_id: str
+    scan_time: datetime
+    selection: TargetSelection | None

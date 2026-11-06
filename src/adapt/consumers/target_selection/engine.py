@@ -62,9 +62,18 @@ class TargetSelectionEngine:
             self._current = None
             return self._start_new(snapshot, candidates, scored, exclude=exclude)
 
-        uid, reason = continue_or_switch(
-            current.cell_uid, scored, self._config.selection.switch_margin
-        )
+        # A held target may have left the entry set (hold gates are looser than
+        # entry gates); it is still scored so challengers are judged against it.
+        assert current_cell is not None
+        if current.cell_uid not in scored:
+            candidates = {**candidates, current.cell_uid: current_cell}
+            scored = {**scored, current.cell_uid: total_score(current_cell, self._config)}
+        if self._config.selection.allow_switch:
+            uid, reason = continue_or_switch(
+                current.cell_uid, scored, self._config.selection.switch_margin
+            )
+        else:
+            uid, reason = current.cell_uid, SelectionReason.CONTINUATION
         if reason is SelectionReason.SWITCH:
             current = CurrentTarget(uid, snapshot.scan_time)
             self._current = current

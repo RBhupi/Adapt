@@ -9,7 +9,7 @@ engine never sees pandas or the StoreClient.
 """
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 
 import numpy as np
@@ -27,6 +27,7 @@ from adapt.utils.time import from_scan_iso, to_scan_iso
 # Per-track lifecycle columns merged into each cell's `values` mapping
 # (cells_by_scan carries none of these).
 _TRACK_COLUMNS = ("n_scans", "duration_seconds", "max_area_sqkm", "max_reflectivity")
+_TRACK_TEXT_COLUMNS = ("origin_type",)
 
 
 def build_snapshot(
@@ -37,11 +38,17 @@ def build_snapshot(
     growth_window_scans: int,
     at: datetime | None = None,
     tracking_field: str | None = None,
+    trend_fields: Sequence[str] = (),
 ) -> Snapshot:
     """Return the latest scan of a run as a frozen Snapshot.
 
     With ``at``, the run is replayed as of that instant: only scans at or
     before ``at`` are visible (growth rates and scan cadence included).
+
+    ``trend_fields`` names cells_by_scan columns whose per-minute OLS slope
+    over the last ``growth_window_scans`` scans is added to ``values`` as
+    ``trend_<column>_per_min``; ``values`` also carries ``origin_is_split``
+    (1.0 for a split child, 0.0 otherwise) from cell_tracks.
 
     ``tracking_field`` names the canonical field whose per-cell max fills
     ``CellSnapshot.field_max``. Default: resolved once from the run's
@@ -67,12 +74,18 @@ def build_snapshot(
     scan_interval = _scan_interval_seconds(scan_times)
 
     latest = history[history["scan_time"] == latest_iso]
-    merged = latest.merge(
-        tracks[["cell_uid", *_TRACK_COLUMNS]], on="cell_uid", how="left"
-    ).sort_values("cell_uid")
+    track_cols = [c for c in (*_TRACK_COLUMNS, *_TRACK_TEXT_COLUMNS) if c in tracks.columns]
+    merged = latest.merge(tracks[["cell_uid", *track_cols]], on="cell_uid", how="left").sort_values(
+        "cell_uid"
+    )
+    missing = [c for c in trend_fields if c not in history.columns]
+    if missing:
+        raise ValueError(
+            f"trend_fields {missing} not in cells_by_scan; available: {sorted(history.columns)}"
+        )
 
     cells = tuple(
-        _to_cell(row, history, scan_interval, growth_window_scans, tracking_field)
+        _to_cell(row, history, scan_interval, growth_window_scans, tracking_field, trend_fields)
         for _, row in merged.iterrows()
     )
     return Snapshot(scan_time=from_scan_iso(latest_iso), cells=cells)
@@ -84,6 +97,7 @@ def _to_cell(
     scan_interval: float | None,
     growth_window_scans: int,
     tracking_field: str,
+    trend_fields: Sequence[str] = (),
 ) -> CellSnapshot:
     uid = row["cell_uid"]
     cell_history = history[history["cell_uid"] == uid].sort_values("scan_time")
@@ -92,6 +106,9 @@ def _to_cell(
         for col, v in row.items()
         if isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool)
     }
+    values["origin_is_split"] = 1.0 if row.get("origin_type") == "SPLIT" else 0.0
+    for col in trend_fields:
+        values[f"trend_{col}_per_min"] = _trend(cell_history, col, growth_window_scans)
     return CellSnapshot(
         uid=uid,
         lat=float(row["cell_centroid_mass_lat"]),
@@ -110,13 +127,27 @@ def _growth_rate(cell_history: pd.DataFrame, window: int) -> float:
 
     A cell seen in fewer than two scans has no measurable growth: 0.0.
     """
+    return _trend(cell_history, "cell_area_sqkm", window)
+
+
+def _trend(cell_history: pd.DataFrame, column: str, window: int) -> float:
+    """OLS slope of `column` vs time (min) over the last `window` scans of one cell.
+
+    Fewer than two scans, or fewer than two finite values: 0.0 (no measurable
+    trend) rather than NaN, so a trend can always be gated and weighted.
+    """
     rows = cell_history.tail(window)
     if len(rows) < 2:
         return 0.0
     start = from_scan_iso(rows["scan_time"].iloc[0])
-    minutes = [(from_scan_iso(s) - start).total_seconds() / 60.0 for s in rows["scan_time"]]
-    areas = rows["cell_area_sqkm"].to_numpy(dtype=float)
-    return float(np.polyfit(minutes, areas, 1)[0])
+    minutes = np.array(
+        [(from_scan_iso(t) - start).total_seconds() / 60.0 for t in rows["scan_time"]]
+    )
+    y = rows[column].to_numpy(dtype=float)
+    ok = np.isfinite(y)
+    if ok.sum() < 2:
+        return 0.0
+    return float(np.polyfit(minutes[ok], y[ok], 1)[0])
 
 
 _PROJECTION_LAT = re.compile(r"^cell_centroid_projection(\d+)_lat$")

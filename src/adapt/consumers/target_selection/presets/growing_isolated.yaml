@@ -1,0 +1,60 @@
+# Target selection preset: catch growing convective cells early.
+#
+# Problem. A sector or RHI campaign on one cell has to commit while the cell is
+# still developing, so the decision is taken at the cell's SECOND observation
+# (n_scans >= 2), from the change over its last two scans. The 15-17 June 2025
+# KHTX hindcast (2 199 cells observed twice) gave, for cells that pass the gates
+# below, a median of 5-6 further scans (vs 3 for all cells), 61-70 % surviving
+# four more scans (vs 44 %), the reflectivity maximum still ahead in 51 %
+# (vs 41 %) and a 21 % chance of reaching 50 dBZ (vs 11 %). Growth of the
+# 40 dBZ area was the single strongest predictor; split children were worse on
+# every outcome and are excluded; isolation raised survival at no cost in
+# intensity, so it is a preference in the score rather than a gate (a hard gate
+# would leave a candidate in only 1 scan in 3).
+#
+# Everything here is a column of cells_by_scan / cell_tracks or a per-minute
+# trend of one over the last growth_window_scans scans (trend_<column>_per_min).
+
+target_selection:
+  candidate:
+    gates:
+      - {field: n_scans,                            op: ge, value: 2}     # decided at the 2nd observation or later
+      - {field: n_scans,                            op: le, value: 4}     # ... but not on mature cells: the growth phase is over by then
+      - {field: origin_is_split,                    op: le, value: 0}     # not born by splitting
+      - {field: trend_area_40dbz_km2_per_min,       op: gt, value: 0}     # 40 dBZ core growing
+      - {field: trend_radar_reflectivity_max_per_min, op: gt, value: 0}   # and intensifying
+      - {field: radar_reflectivity_max,             op: ge, value: 40}    # has a core at all
+    min_age_seconds: 0
+    hold_gates: []            # once selected, stay on the cell until the tracker ends it or the cap is reached
+                              # (leaving the key out would make the entry gates the hold gates, dropping the
+                              # target as soon as it stops growing).
+    # NOT used as a hold gate: area_40dbz_km2 > 0. The 40 dBZ core flickers at single-scan resolution, and
+    # dropping the target when it vanishes ended only 11 % of episodes at the cell's end (vs 71 % below).
+
+  priority:
+    weights:
+      field: 0.0            # dBZ: not used for ranking — the gate already requires a core
+      area: 0.0             # km2: not used — size favours mature cells
+      growth_rate: 0.0      # km2/min of total area: weaker than the 40 dBZ trend, not used
+      extra:
+        trend_area_40dbz_km2_per_min: 10.0     # points per (km2/min) of 40 dBZ area growth: the ranking variable
+        radar_differential_reflectivity_max: 5.0 # points per dB: young cells carry more Z_DR at the same Z (size sorting)
+        n_adjacent_cells: -10.0                # penalty per touching neighbour: prefer isolated cells (cleaner sampling, longer life)
+
+  site_preference:
+    projection_steps: 3     # use the +1..+3 scan projections (about 15 min)
+    sites: []               # add {name, lat, lon, radius_km, bonus} to favour cells heading over an instrumented site
+
+  selection:
+    allow_switch: false           # never abandon a target for a better-scoring newcomer. In the 15-17 June 2025
+                                  # replay, switching with a 5-point margin held targets for 1 scan (median) and
+                                  # covered 16 % of their life cycles; never switching with the 60-min cap held them
+                                  # for 10 scans, covered 77 %, captured the reflectivity peak in 91 % of episodes
+                                  # and followed 71 % to the cell's end (58 cells in two days).
+    switch_margin: 5.0            # unused while allow_switch is false
+    max_observation_seconds: 3600 # 60 min: long enough for the median cell's full life; a cap of 30 min halved
+                                  # the fraction followed to the end, no cap gained little and sampled fewer cells
+
+  snapshot:
+    growth_window_scans: 2        # trends over the last two scans, as the problem is posed
+    trend_fields: [area_40dbz_km2, radar_reflectivity_max]

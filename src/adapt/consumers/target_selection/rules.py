@@ -17,6 +17,7 @@ from adapt.consumers.target_selection._geo import haversine_km
 from adapt.consumers.target_selection.config import (
     CandidateConfig,
     PriorityWeights,
+    QualityGate,
     SitePreferenceConfig,
     TSEConfig,
 )
@@ -39,15 +40,10 @@ class StopReason(Enum):
     MAX_DURATION = "MAX_DURATION"
 
 
-def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
-    """Candidate rule: every quality gate plus the age gate must pass.
-
-    Being in the snapshot at all is the "active" clause — snapshots hold
-    only latest-scan cells. A NaN gate value (SQL NULL) is a defined
-    data condition: not a candidate. A missing gate column is a
-    configuration error: raise.
-    """
-    for gate in cfg.gates:
+def passes_gates(cell: CellSnapshot, gates: Sequence[QualityGate]) -> bool:
+    """True when every gate passes. A NaN gate value (SQL NULL) is a defined
+    data condition: fail. A missing gate column is a configuration error: raise."""
+    for gate in gates:
         if gate.field not in cell.values:
             raise ValueError(
                 f"Gate field {gate.field!r} not found for cell {cell.uid!r}; "
@@ -56,11 +52,28 @@ def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
         value = cell.values[gate.field]
         if math.isnan(value) or not _GATE_OPS[gate.op](value, gate.value):
             return False
-    return cell.age_seconds >= cfg.min_age_seconds
+    return True
+
+
+def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
+    """Candidate rule: every entry gate plus the age gate must pass.
+
+    Being in the snapshot at all is the "active" clause — snapshots hold
+    only latest-scan cells.
+    """
+    return passes_gates(cell, cfg.gates) and cell.age_seconds >= cfg.min_age_seconds
+
+
+def holds(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
+    """Hold rule for the current target: the hold gates if configured, else the
+    entry gates (age cannot regress, so it is not re-checked)."""
+    gates = cfg.hold_gates if cfg.hold_gates is not None else cfg.gates
+    return passes_gates(cell, gates)
 
 
 def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
-    """Priority rule: weighted sum of tracked-field max, area, growth rate.
+    """Priority rule: weighted sum of tracked-field max, area, growth rate,
+    plus any ``extra`` weights on named snapshot values.
 
     NaN components must never rank: 0 * NaN is still NaN, and a NaN score
     makes ``select_best`` pick an arbitrary cell silently.
@@ -70,6 +83,13 @@ def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
         "area_sqkm": cell.area_sqkm,
         "growth_rate_sqkm_per_min": cell.growth_rate_sqkm_per_min,
     }
+    for name in weights.extra:
+        if name not in cell.values:
+            raise ValueError(
+                f"priority_score: weight on {name!r} but cell {cell.uid!r} has no such "
+                f"value; available columns: {sorted(cell.values)}"
+            )
+        components[name] = cell.values[name]
     bad = [name for name, value in components.items() if math.isnan(value)]
     if bad:
         raise ValueError(
@@ -81,6 +101,7 @@ def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
         weights.field * cell.field_max
         + weights.area * cell.area_sqkm
         + weights.growth_rate * cell.growth_rate_sqkm_per_min
+        + sum(w * cell.values[name] for name, w in weights.extra.items())
     )
 
 
@@ -124,12 +145,12 @@ def continue_or_switch(
 def should_stop(
     cell: CellSnapshot | None, cfg: TSEConfig, observed_seconds: float
 ) -> StopReason | None:
-    """Stop rule, checked in order: target gone from the snapshot, quality
-    gate no longer passed (age cannot regress, so quality is the only
-    failable clause of is_candidate), max observation duration reached."""
+    """Stop rule, checked in order: target gone from the snapshot, hold gates
+    no longer passed (the entry gates when no hold gates are configured), max
+    observation duration reached."""
     if cell is None:
         return StopReason.TARGET_LOST
-    if not is_candidate(cell, cfg.candidate):
+    if not holds(cell, cfg.candidate):
         return StopReason.QUALITY_DROPPED
     if observed_seconds >= cfg.selection.max_observation_seconds:
         return StopReason.MAX_DURATION
