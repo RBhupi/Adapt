@@ -29,6 +29,7 @@ used. Any value from it can be overridden with CLI flags. See ``adapt <command>
 
 import argparse
 import logging
+import math
 import os
 import signal
 import sys
@@ -476,6 +477,117 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sub-commands: tse run, radar-command run  (file-driven consumers)
+# ---------------------------------------------------------------------------
+
+
+def _add_consumer_parser(subparsers, name: str, help_text: str) -> argparse.ArgumentParser:
+    """Add ``adapt <name> run`` and return the ``run`` action's parser."""
+    actions = subparsers.add_parser(name, help=help_text, description=help_text).add_subparsers(
+        dest="action", metavar="ACTION"
+    )
+    actions.required = True
+    return actions.add_parser("run", help=help_text, description=help_text)
+
+
+def _poll_seconds(text: str) -> float:
+    """A polling interval: a finite number of seconds above zero."""
+    seconds = float(text)
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise argparse.ArgumentTypeError(f"must be a finite number of seconds > 0, got {text!r}")
+    return seconds
+
+
+def _build_consumer_run_parser(sub: argparse.ArgumentParser) -> None:
+    """Arguments shared by the consumer ``run`` actions."""
+    sub.add_argument("--repo", required=True, help="Path to the Adapt store to read.")
+    sub.add_argument(
+        "--config",
+        required=True,
+        help="Consumer YAML file (sections target_selection: and radar_command:).",
+    )
+    sub.add_argument(
+        "--selection-file",
+        dest="selection_file",
+        required=True,
+        help="Target selection JSON file (written by tse, read by radar-command).",
+    )
+    sub.add_argument("--follow", action="store_true", help="Keep following for new input.")
+    sub.add_argument(
+        "--poll-seconds",
+        dest="poll_seconds",
+        type=_poll_seconds,
+        default=10.0,
+        help="Polling interval while following, in seconds (default: 10).",
+    )
+
+
+def _build_tse_run_parser(sub: argparse.ArgumentParser) -> None:
+    _build_consumer_run_parser(sub)
+    sub.add_argument("--collection", required=True, help="Collection to select on (e.g. KLOT).")
+    sub.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="Run to select on (default: the collection's most recently started run).",
+    )
+
+
+def _tse_run_cmd(args: argparse.Namespace) -> None:
+    """Select a target on every complete scan of a run; write the selection file."""
+    from adapt.api import StoreClient
+    from adapt.consumers.target_selection.config import load_config
+    from adapt.consumers.target_selection.runner import TSEJob, run
+
+    config = load_config(args.config)
+    with StoreClient(args.repo) as client:
+        run_id = args.run_id
+        if run_id is None:
+            latest = client.latest_run(args.collection)
+            if latest is None:
+                raise ValueError(
+                    f"No runs of collection '{args.collection}' in store {client.root}; "
+                    "nothing to select on."
+                )
+            run_id = latest.run_id
+        job = TSEJob(
+            collection=args.collection,
+            run_id=run_id,
+            selection_path=Path(args.selection_file),
+            follow=args.follow,
+            poll_seconds=args.poll_seconds,
+        )
+        count = run(client, config, job)
+    print(f"tse: {count} scans of run {run_id} ({args.collection}) -> {job.selection_path}")
+
+
+def _radar_command_run_cmd(args: argparse.Namespace) -> None:
+    """Plan and publish the radar command for the target in the selection file."""
+    from adapt.api import StoreClient
+    from adapt.consumers.radar_command import RadarCommandJob, load_config, run
+    from adapt.consumers.radar_command.ledger import summary
+    from adapt.consumers.radar_command.runner import FAILED_OUTCOMES
+
+    if args.follow:  # following logs one line per outcome; show them
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    cfg = load_config(args.config)
+    with StoreClient(args.repo) as client:
+        outcome = run(
+            client,
+            cfg,
+            RadarCommandJob(
+                selection_path=Path(args.selection_file),
+                follow=args.follow,
+                poll_seconds=args.poll_seconds,
+            ),
+        )
+    if outcome.event in FAILED_OUTCOMES:
+        print(summary(outcome), file=sys.stderr)
+        sys.exit(1)
+    print(summary(outcome))
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -540,6 +652,18 @@ def main() -> None:
     )
     _build_postprocess_parser(postprocess_parser)
     postprocess_parser.set_defaults(func=_postprocess_cmd)
+
+    tse_run_parser = _add_consumer_parser(
+        subparsers, "tse", "Select which tracked cell to observe, scan by scan."
+    )
+    _build_tse_run_parser(tse_run_parser)
+    tse_run_parser.set_defaults(func=_tse_run_cmd)
+
+    radar_command_run_parser = _add_consumer_parser(
+        subparsers, "radar-command", "Write radar command files for the selected target."
+    )
+    _build_consumer_run_parser(radar_command_run_parser)
+    radar_command_run_parser.set_defaults(func=_radar_command_run_cmd)
 
     args = parser.parse_args()
     try:
