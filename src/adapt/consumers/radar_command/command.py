@@ -3,8 +3,13 @@
 
 """Radar command model and its JSON wire format.
 
-The wire format lives only here. The command carries no ApiToken: the future
-transport injects it when sending, so command files never hold a credential.
+The wire format lives only here: the sandbox API takes one flat target box,
+so every planned minute is merged into the single box that covers them all.
+The command carries no API key: the sender adds it as a request header, so
+command files never hold a credential.
+
+Units of the extents (metres, full width) are an assumption until the radar
+side confirms them; ``_payload`` is the one place to change.
 """
 
 import json
@@ -13,8 +18,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
 
-from adapt.consumers.radar_command.extent import GeoExtent
-from adapt.utils.time import to_scan_iso
+from adapt.consumers.radar_command.extent import EARTH_RADIUS_KM, GeoExtent
+
+_M_PER_DEG = EARTH_RADIUS_KM * 1000 * math.pi / 180
 
 
 @dataclass(frozen=True)
@@ -27,11 +33,11 @@ class TargetEntry:
 
 @dataclass(frozen=True)
 class RadarCommand:
-    """One command: radar command/pattern/user plus time-ordered target entries."""
+    """One command: scan pattern, user and target ids, plus time-ordered target entries."""
 
-    command: str
-    pattern: str
-    user: str
+    scan_pattern: str
+    user_id: str
+    target_id: str
     entries: tuple[TargetEntry, ...]
 
 
@@ -43,7 +49,12 @@ def validate(cmd: RadarCommand) -> None:
     """Raise CommandValidationError naming the first rule the command breaks."""
     if not cmd.entries:
         raise CommandValidationError("RadarCommand: needs at least one target entry, got none")
-    for name, value in (("command", cmd.command), ("pattern", cmd.pattern), ("user", cmd.user)):
+    identities = (
+        ("scan_pattern", cmd.scan_pattern),
+        ("user_id", cmd.user_id),
+        ("target_id", cmd.target_id),
+    )
+    for name, value in identities:
         if not value:
             raise CommandValidationError(f"RadarCommand: {name} must be a non-empty string")
     for i, entry in enumerate(cmd.entries):
@@ -98,24 +109,33 @@ def _check_extent(i: int, extent: GeoExtent) -> None:
 
 
 def to_json(cmd: RadarCommand) -> str:
-    """Validate, then serialise: box centre + full widths (deg), altitude centre + depth (m)."""
+    """Validate, then serialise as the flat payload: the box covering every entry."""
     validate(cmd)
-    target_data = {to_scan_iso(entry.time): _target(entry.extent) for entry in cmd.entries}
-    wire = {
-        "Command": cmd.command,
-        "Pattern": cmd.pattern,
-        "User": cmd.user,
-        "TargetData": target_data,
-    }
-    return json.dumps(wire, indent=2) + "\n"
+    return json.dumps(_payload(cmd), indent=2) + "\n"
 
 
-def _target(extent: GeoExtent) -> dict[str, float]:
+def _payload(cmd: RadarCommand) -> dict[str, float | str]:
+    """Box centre (deg, m AMSL) and full extents (m) over all entries."""
+    boxes = [entry.extent for entry in cmd.entries]
+    south = min(b.lat_center_deg - b.lat_width_deg / 2 for b in boxes)
+    north = max(b.lat_center_deg + b.lat_width_deg / 2 for b in boxes)
+    # Longitudes relative to the first box, so boxes straddling the antimeridian stay narrow.
+    ref = boxes[0].lon_center_deg
+    offsets = [math.remainder(b.lon_center_deg - ref, 360.0) for b in boxes]
+    west = min(o - b.lon_width_deg / 2 for o, b in zip(offsets, boxes, strict=True))
+    east = max(o + b.lon_width_deg / 2 for o, b in zip(offsets, boxes, strict=True))
+    bottom = min(b.alt_bottom_m for b in boxes)
+    top = max(b.alt_top_m for b in boxes)
+    lat = (south + north) / 2
+    lon = math.remainder(ref + (west + east) / 2, 360.0)
     return {
-        "lat": extent.lat_center_deg,
-        "lon": extent.lon_center_deg,
-        "alt": (extent.alt_bottom_m + extent.alt_top_m) / 2,
-        "dLat": extent.lat_width_deg,
-        "dLon": extent.lon_width_deg,
-        "dAlt": extent.alt_top_m - extent.alt_bottom_m,
+        "lat": lat,
+        "lon": -180.0 if lon == 180.0 else lon,
+        "alt": (bottom + top) / 2,
+        "lat_extent": (north - south) * _M_PER_DEG,
+        "lon_extent": (east - west) * _M_PER_DEG * math.cos(math.radians(lat)),
+        "alt_extent": top - bottom,
+        "user_id": cmd.user_id,
+        "target_id": cmd.target_id,
+        "scan_pattern": cmd.scan_pattern,
     }

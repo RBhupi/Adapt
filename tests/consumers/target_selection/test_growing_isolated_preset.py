@@ -144,14 +144,14 @@ def test_hold_gates_keep_a_target_that_left_the_entry_set():
     t0 = datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
     eng = TargetSelectionEngine(cfg)
     young = make_cell("a", age=300.0, values={"growing": 1.0, "core": 5.0})
-    assert eng.select(Snapshot(t0, (young,))).cell_uid == "a"
+    assert eng.decide(Snapshot(t0, (young,))).selection.cell_uid == "a"
     # next scan: no longer growing (fails entry) but still has a core (passes hold) -> continue
     held = make_cell("a", age=600.0, values={"growing": -1.0, "core": 3.0})
-    sel = eng.select(Snapshot(t0 + timedelta(minutes=5), (held,)))
+    sel = eng.decide(Snapshot(t0 + timedelta(minutes=5), (held,))).selection
     assert sel is not None and sel.cell_uid == "a" and sel.reason.value == "CONTINUATION"
     # core gone -> stop, and with no other candidate, no selection
     dead = make_cell("a", age=900.0, values={"growing": -1.0, "core": 0.0})
-    assert eng.select(Snapshot(t0 + timedelta(minutes=10), (dead,))) is None
+    assert eng.decide(Snapshot(t0 + timedelta(minutes=10), (dead,))).selection is None
 
 
 def test_without_hold_gates_entry_gates_still_govern_the_stop():
@@ -164,15 +164,17 @@ def test_without_hold_gates_entry_gates_still_govern_the_stop():
     t0 = datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
     eng = TargetSelectionEngine(cfg)
     assert (
-        eng.select(Snapshot(t0, (make_cell("a", age=300.0, values={"growing": 1.0}),))).cell_uid
+        eng.decide(
+            Snapshot(t0, (make_cell("a", age=300.0, values={"growing": 1.0}),))
+        ).selection.cell_uid
         == "a"
     )
     assert (
-        eng.select(
+        eng.decide(
             Snapshot(
                 t0 + timedelta(minutes=5), (make_cell("a", age=600.0, values={"growing": -1.0}),)
             )
-        )
+        ).selection
         is None
     )
 
@@ -189,8 +191,8 @@ def test_allow_switch_false_keeps_the_target_against_a_better_challenger():
     )
     t0 = datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
     eng = TargetSelectionEngine(cfg)
-    assert eng.select(Snapshot(t0, (make_cell("a", refl=40.0),))).cell_uid == "a"
-    sel = eng.select(
+    assert eng.decide(Snapshot(t0, (make_cell("a", refl=40.0),))).selection.cell_uid == "a"
+    sel = eng.decide(
         Snapshot(t0 + timedelta(minutes=5), (make_cell("a", refl=40.0), make_cell("b", refl=60.0)))
-    )
+    ).selection
     assert sel.cell_uid == "a" and sel.reason.value == "CONTINUATION"

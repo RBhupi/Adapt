@@ -5,7 +5,8 @@
 
 import pytest
 
-from adapt.consumers.target_selection.rules import StopReason, should_stop
+from adapt.consumers.target_selection.rules import should_stop
+from adapt.consumers.target_selection.selection import StopReason
 from tests.consumers.target_selection.factories import make_cell, make_config
 
 pytestmark = pytest.mark.unit

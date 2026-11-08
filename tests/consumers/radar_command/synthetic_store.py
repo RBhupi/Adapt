@@ -58,6 +58,16 @@ class _Module(SimpleNamespace):
     """Minimal module stand-in: name + declared persistence specs."""
 
 
+# The 3D grid only completes the scan (gridded3d is a required scan product),
+# so target selection sees the scans; nothing reads its contents.
+_INGEST = _Module(
+    name="ingest",
+    persistence=(
+        NetcdfArtifact(
+            key="grid_ds", product_type="gridded3d", producer="ingest", description="grid"
+        ),
+    ),
+)
 _ANALYSIS = _Module(
     name="projection",
     persistence=(
@@ -155,6 +165,7 @@ def _result(index: int, ds: xr.Dataset) -> dict:
         ]
     )
     return {
+        "grid_ds": ds,
         "analysis_ds": ds,
         "cell_stats": pd.DataFrame(
             {
@@ -220,7 +231,7 @@ def add_run(built: SimpleNamespace, run_id: str, volume_scans: tuple[int, ...]) 
             run_id=run_id,
             collection_id=COLLECTION,
             config_hash=f"hash-{run_id}",
-            config_json="{}",
+            config_json='{"global_": {"tracking_field": "reflectivity"}}',
             pipeline_version="1.0",
             environment_json="{}",
         )
@@ -233,7 +244,7 @@ def add_run(built: SimpleNamespace, run_id: str, volume_scans: tuple[int, ...]) 
         message = acquirer.acquire_file(path, source_uri=str(path), scan_time=scan_time)
         meta = _meta(run_id, index, message["scan_id"])
         ds = _analysis_ds(scan_time, projected=index > 0, absent_frame=built.absent_frame)
-        modules = [_ANALYSIS, _TRACKING] + ([_VOLUME] if index in volume_scans else [])
+        modules = [_INGEST, _ANALYSIS, _TRACKING] + ([_VOLUME] if index in volume_scans else [])
         router.persist(modules, _result(index, ds), meta)
         scan_ids.append(message["scan_id"])
     registry.finalize_run(run_id, "completed", scans_processed=len(SCAN_TIMES))

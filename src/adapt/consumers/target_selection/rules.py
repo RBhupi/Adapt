@@ -11,7 +11,6 @@ appear and disappear (the stability switch_margin relies on).
 import math
 import operator
 from collections.abc import Callable, Mapping, Sequence
-from enum import Enum
 
 from adapt.consumers.target_selection._geo import haversine_km
 from adapt.consumers.target_selection.config import (
@@ -21,7 +20,7 @@ from adapt.consumers.target_selection.config import (
     SitePreferenceConfig,
     TSEConfig,
 )
-from adapt.consumers.target_selection.selection import SelectionReason
+from adapt.consumers.target_selection.selection import SelectionReason, StopReason
 from adapt.consumers.target_selection.snapshot import CellSnapshot, TrajectoryPoint
 
 # Gate operator → comparison. Keyed by the validated config Literal, so an
@@ -32,12 +31,6 @@ _GATE_OPS: dict[str, Callable[[float, float], bool]] = {
     "lt": operator.lt,
     "le": operator.le,
 }
-
-
-class StopReason(Enum):
-    TARGET_LOST = "TARGET_LOST"
-    QUALITY_DROPPED = "QUALITY_DROPPED"
-    MAX_DURATION = "MAX_DURATION"
 
 
 def passes_gates(cell: CellSnapshot, gates: Sequence[QualityGate]) -> bool:

@@ -8,7 +8,7 @@ Every threshold and weight lives here, under the file's top-level
 are ignored). Unknown keys raise, and so does any missing key except these,
 each of which has a documented meaning when absent:
 
-- ``output`` (and its ``jsonl_path``): no JSONL log;
+- ``output`` (and its ``decision_log``): no decision log;
 - ``candidate.hold_gates``: the entry gates also decide whether a target is kept;
 - ``priority.weights.extra``: no score beyond field, area and growth rate;
 - ``selection.allow_switch``: true, a better challenger may take over;
@@ -16,6 +16,7 @@ each of which has a documented meaning when absent:
 - ``snapshot.track_summary``: ``at_scan``, the causal view live selection has.
 """
 
+import hashlib
 from pathlib import Path
 from typing import Literal
 
@@ -130,9 +131,11 @@ class SnapshotConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
+    """``decision_log``: JSONL log with one line per scan, target or not."""
+
     model_config = _FROZEN
 
-    jsonl_path: str | None = None
+    decision_log: str | None = None
 
 
 class TSEConfig(BaseModel):
@@ -149,3 +152,12 @@ class TSEConfig(BaseModel):
 def load_config(path: str | Path) -> TSEConfig:
     """Load and validate the ``target_selection`` section. Raises on any invalid content."""
     return TSEConfig.model_validate(read_yaml_section(path, "target_selection"))
+
+
+def config_hash(cfg: TSEConfig) -> str:
+    """16-hex-char identity of the effective rules: equal configs hash equal.
+
+    ``output`` is excluded — where decisions are written does not change them.
+    """
+    rules = cfg.model_dump_json(exclude={"output"})
+    return hashlib.sha256(rules.encode()).hexdigest()[:16]

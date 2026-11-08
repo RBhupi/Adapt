@@ -11,7 +11,11 @@ be finite. A missing key raises too, except these:
 - ``extent.vertical_band``: none, so a run without cell_volume_stats has no
   vertical extent;
 - ``output.current_file`` / ``output.history_directory``: ``current_targets.json``
-  and ``history`` inside ``output.directory``.
+  and ``history`` inside ``output.directory``;
+- ``api``: none, so commands are only written to files (a dry run).
+
+The API key never appears here: ``api.api_key_env`` names the environment
+variable that holds it.
 """
 
 import hashlib
@@ -52,9 +56,18 @@ class PlanningConfig(BaseModel):
 class RadarConfig(BaseModel):
     model_config = _FROZEN
 
-    command: str = Field(min_length=1)
-    pattern: str = Field(min_length=1)
-    user: str = Field(min_length=1)
+    scan_pattern: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+
+
+class ApiConfig(BaseModel):
+    """Where published commands are POSTed (``{base_url}/publish/command``)."""
+
+    model_config = _FROZEN
+
+    base_url: str = Field(pattern=r"^https?://\S+$")
+    api_key_env: str = Field(min_length=1)
+    timeout_seconds: float = Field(gt=0)
 
 
 class AltitudeBand(BaseModel):
@@ -107,6 +120,7 @@ class RadarCommandConfig(BaseModel):
     radar: RadarConfig
     extent: ExtentConfig
     output: OutputConfig
+    api: ApiConfig | None = None
 
 
 def load_config(path: str | Path) -> RadarCommandConfig:

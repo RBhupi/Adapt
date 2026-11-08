@@ -6,7 +6,7 @@
 import pytest
 from pydantic import ValidationError
 
-from adapt.consumers.target_selection.config import load_config
+from adapt.consumers.target_selection.config import config_hash, load_config
 
 pytestmark = pytest.mark.unit
 
@@ -32,7 +32,7 @@ target_selection:
   snapshot:
     growth_window_scans: 4
   output:
-    jsonl_path: /data/tse/selections.jsonl
+    decision_log: /data/tse/decisions.jsonl
 """
 
 
@@ -52,7 +52,7 @@ def test_load_valid_yaml(tmp_path):
     assert cfg.site_preference.sites[0].radius_km == 20.0
     assert cfg.selection.switch_margin == 5.0
     assert cfg.snapshot.growth_window_scans == 4
-    assert cfg.output.jsonl_path == "/data/tse/selections.jsonl"
+    assert cfg.output.decision_log == "/data/tse/decisions.jsonl"
 
 
 def test_config_is_frozen(tmp_path):
@@ -104,7 +104,7 @@ def test_sibling_section_is_ignored(tmp_path):
 def test_output_optional(tmp_path):
     text = VALID_YAML.split("output:")[0]
     cfg = load_config(_write(tmp_path, text))
-    assert cfg.output.jsonl_path is None
+    assert cfg.output.decision_log is None
 
 
 def test_empty_hold_gates_load_as_no_hold_gates_not_as_absent(tmp_path):
@@ -135,3 +135,23 @@ def test_unknown_track_summary_raises(tmp_path):
     )
     with pytest.raises(ValidationError, match="track_summary"):
         load_config(_write(tmp_path, text))
+
+
+def test_config_hash_is_the_same_for_the_same_rules(tmp_path):
+    assert config_hash(load_config(_write(tmp_path, VALID_YAML))) == config_hash(
+        load_config(_write(tmp_path, VALID_YAML))
+    )
+
+
+def test_config_hash_changes_with_a_rule(tmp_path):
+    changed = VALID_YAML.replace("switch_margin: 5.0", "switch_margin: 6.0")
+    assert config_hash(load_config(_write(tmp_path, VALID_YAML))) != config_hash(
+        load_config(_write(tmp_path, changed))
+    )
+
+
+def test_config_hash_ignores_where_decisions_are_written(tmp_path):
+    moved = VALID_YAML.replace("/data/tse/decisions.jsonl", "/elsewhere/decisions.jsonl")
+    assert config_hash(load_config(_write(tmp_path, VALID_YAML))) == config_hash(
+        load_config(_write(tmp_path, moved))
+    )

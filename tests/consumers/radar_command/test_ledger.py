@@ -22,6 +22,7 @@ def _record(event=Event.SELECTION_RECEIVED):
         source_scan_time=datetime(2024, 6, 1, 14, 0, 42, tzinfo=UTC),
         cell_uid="uid_beta",
         config_hash="fedcba9876543210",
+        selection_config_hash="0123456789abcdef",
     )
 
 
@@ -33,6 +34,7 @@ _FULL = LedgerRecord(
     source_scan_time=datetime(2024, 6, 1, 14, 0, 42, tzinfo=UTC),
     cell_uid="uid_beta",
     config_hash="fedcba9876543210",
+    selection_config_hash="0123456789abcdef",
     plan_id="aaaabbbbccccdddd",
     n_entries=12,
     truncated=False,
@@ -47,6 +49,7 @@ _NO_TARGET = LedgerRecord(
     source_scan_time=datetime(2024, 6, 1, 14, 0, 42, tzinfo=UTC),
     cell_uid=None,
     config_hash="fedcba9876543210",
+    selection_config_hash="0123456789abcdef",
 )
 
 
@@ -80,6 +83,7 @@ _LINE_WITHOUT_DETAIL = {
     "source_scan_time": "2024-06-01T14:00:42Z",
     "cell_uid": None,
     "config_hash": "fedcba9876543210",
+    "selection_config_hash": "0123456789abcdef",
     "plan_id": None,
     "n_entries": None,
     "truncated": None,

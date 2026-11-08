@@ -10,11 +10,11 @@ import pytest
 
 from adapt.consumers.radar_command.selection import SelectionRef, read_selection
 from adapt.consumers.target_selection.selection import (
-    ScanSelection,
     SelectionReason,
     TargetSelection,
 )
 from adapt.consumers.target_selection.writer import write_current_selection
+from tests.consumers.target_selection.factories import make_scan_decision
 
 pytestmark = pytest.mark.unit
 
@@ -33,7 +33,7 @@ def _write(path, cell_uid="uid_beta"):
             observation_window=(_SCAN_TIME, _SCAN_TIME),
         )
     write_current_selection(
-        path, ScanSelection("KTST", "run_a", "0123456789abcdef", _SCAN_TIME, selection)
+        path, make_scan_decision("KTST", "run_a", "0123456789abcdef", _SCAN_TIME, selection)
     )
 
 
@@ -47,7 +47,17 @@ def test_reads_the_selection_written_by_target_selection(tmp_path):
         scan_id="0123456789abcdef",
         scan_time=datetime(2024, 6, 1, 14, 0, 37, tzinfo=UTC),
         cell_uid="uid_beta",
+        config_hash="0123456789abcdef",
     )
+
+
+def test_a_selection_file_of_another_schema_raises_naming_both(tmp_path):
+    path = tmp_path / "current_selection.json"
+    _write(path)
+    _edit(path, lambda obj: obj.update(schema=99))
+
+    with pytest.raises(ValueError, match=r"schema 99.*expected 1"):
+        read_selection(path)
 
 
 def test_no_selected_cell_reads_as_a_null_cell_uid(tmp_path):
@@ -101,6 +111,9 @@ def test_scan_time_not_in_the_utc_scan_format_raises_naming_the_key(tmp_path, sc
         ("cell_uid", 3),
         ("reason", 1),
         ("score", "72.0"),
+        ("config_hash", None),
+        ("stop_reason", 1),
+        ("previous_cell_uid", 2),
     ],
 )
 def test_value_of_the_wrong_type_raises_naming_the_key(tmp_path, key, value):

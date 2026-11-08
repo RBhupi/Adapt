@@ -28,11 +28,17 @@ class Event(StrEnum):
     OUT_OF_ORDER = "OUT_OF_ORDER"
     PUBLISHED = "PUBLISHED"
     PUBLISH_FAILED = "PUBLISH_FAILED"
+    SENT = "SENT"
+    SEND_FAILED = "SEND_FAILED"
 
 
 @dataclass(frozen=True)
 class LedgerRecord:
-    """One ledger line: what happened, when, and for which scan, cell and config."""
+    """One ledger line: what happened, when, and for which scan, cell and config.
+
+    ``config_hash`` identifies the radar command config; ``selection_config_hash``
+    the target selection rules that chose the cell.
+    """
 
     event: Event
     recorded_at: datetime
@@ -41,6 +47,7 @@ class LedgerRecord:
     source_scan_time: datetime
     cell_uid: str | None
     config_hash: str
+    selection_config_hash: str
     plan_id: str | None = None
     n_entries: int | None = None
     truncated: bool | None = None

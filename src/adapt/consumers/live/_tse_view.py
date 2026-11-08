@@ -409,7 +409,7 @@ class TargetSelectionTab:
                 track_summary=self._cfg.snapshot.track_summary,
                 at=scan_ts,
             )
-            selection = self._engine.select(snap)
+            selection = self._engine.decide(snap).selection
             candidates = [c.uid for c in snap.cells if is_candidate(c, self._cfg.candidate)]
         except Exception:
             logger.exception("Target selection failed at scan %s", scan_ts)
@@ -578,7 +578,7 @@ class TargetSelectionTab:
                     track_summary=cfg.snapshot.track_summary,
                     at=times[i],
                 )
-                selection = engine.select(snap)
+                selection = engine.decide(snap).selection
                 cands = [c.uid for c in snap.cells if is_candidate(c, cfg.candidate)]
                 return snap, selection, cands
 

@@ -4,7 +4,7 @@
 """Headless TSE: one engine decision per complete scan of a run, written to a file.
 
 Reads only through StoreClient; writes only the current-selection file (and the
-optional JSONL log). Radar-agnostic — acting on the selection is another
+optional decision log). Radar-agnostic — acting on the selection is another
 consumer's job.
 """
 
@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from adapt.api import ScanRef, StoreClient
-from adapt.consumers.target_selection.config import TSEConfig
+from adapt.consumers.target_selection.config import TSEConfig, config_hash
 from adapt.consumers.target_selection.engine import TargetSelectionEngine
 from adapt.consumers.target_selection.repository_source import build_snapshot
-from adapt.consumers.target_selection.selection import ScanSelection
+from adapt.consumers.target_selection.selection import ScanDecision
 from adapt.consumers.target_selection.snapshot import Snapshot
 from adapt.consumers.target_selection.writer import (
-    append_selection,
-    start_selection_log,
+    append_decision,
+    start_decision_log,
     write_current_selection,
 )
 from adapt.utils.time import to_scan_iso
@@ -52,8 +52,10 @@ def run(client: StoreClient, config: TSEConfig, job: TSEJob) -> int:
             f"Run '{job.run_id}' belongs to collection '{owner}', not '{job.collection}'"
         )
     engine = TargetSelectionEngine(config)
-    if config.output.jsonl_path is not None:
-        start_selection_log(config.output.jsonl_path)
+    rules_hash = config_hash(config)
+    log_path = config.output.decision_log
+    if log_path is not None:
+        start_decision_log(log_path)
     watermark: ScanRef | None = None
     count = 0
     while True:
@@ -69,14 +71,12 @@ def run(client: StoreClient, config: TSEConfig, job: TSEJob) -> int:
                 f"{job.run_id!r} is complete but has no tracking rows, and the run is "
                 f"{status!r}: they will never be written"
             )
-        latest: ScanSelection | None = None
+        latest: ScanDecision | None = None
         for ref in ready:
-            selection = engine.select(_snapshot_at(client, config, job.collection, ref))
-            latest = ScanSelection(
-                job.collection, job.run_id, ref.scan_id, ref.scan_time, selection
-            )
-            if config.output.jsonl_path is not None and selection is not None:
-                append_selection(config.output.jsonl_path, latest)
+            decision = engine.decide(_snapshot_at(client, config, job.collection, ref))
+            latest = ScanDecision(job.collection, job.run_id, ref.scan_id, rules_hash, decision)
+            if log_path is not None:
+                append_decision(log_path, latest)
         if latest is not None:
             # Only the newest decision is current; a reader must never act on a
             # scan the replay has already moved past.

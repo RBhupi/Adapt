@@ -20,9 +20,8 @@ target_selection:
 
 RADAR_BLOCK = """\
   radar:
-    command: track
-    pattern: sector_rhi
-    user: synthetic_user
+    scan_pattern: sector_rhi
+    user_id: synthetic_user
 """
 
 VALID_YAML = (
@@ -61,7 +60,7 @@ def test_valid_file_loads_with_defaults(tmp_path):
     cfg = load_config(_write(tmp_path, VALID_YAML))
     assert cfg.planning.horizon_minutes == 12
     assert cfg.planning.interval_seconds == 60
-    assert cfg.radar.pattern == "sector_rhi"
+    assert cfg.radar.scan_pattern == "sector_rhi"
     assert cfg.extent.vertical_band.altitude_max_m == 15000.0
     assert cfg.output.directory == "/data/radar_command"
     assert cfg.output.current_file == "current_targets.json"
@@ -188,9 +187,8 @@ def test_output_name_not_plain_raises(tmp_path, field, value):
 @pytest.mark.parametrize(
     ("loc", "line"),
     [
-        ("radar.command", "command: track"),
-        ("radar.pattern", "pattern: sector_rhi"),
-        ("radar.user", "user: synthetic_user"),
+        ("radar.scan_pattern", "scan_pattern: sector_rhi"),
+        ("radar.user_id", "user_id: synthetic_user"),
         ("output.directory", "directory: /data/radar_command"),
     ],
 )
@@ -220,9 +218,8 @@ def test_unknown_key_anywhere_raises(tmp_path, anchor, unknown):
 
 RADAR_BLOCK_REORDERED = """\
   radar:
-    user: synthetic_user
-    pattern: sector_rhi
-    command: track
+    user_id: synthetic_user
+    scan_pattern: sector_rhi
 """
 
 
@@ -248,7 +245,7 @@ def test_config_hash_equal_for_identical_configs(tmp_path):
     ("old", "new"),
     [
         ("radar_command:\n", "radar_command:\n  planning:\n    horizon_minutes: 15\n"),
-        ("pattern: sector_rhi", "pattern: sector_ppi"),
+        ("scan_pattern: sector_rhi", "scan_pattern: sector_ppi"),
         ("altitude_min_m: 500.0", "altitude_min_m: 501.0"),
         ("horizontal_buffer_km: 2.0", "horizontal_buffer_km: 0.0"),
         ("altitude_max_m: 15000.0", "altitude_max_m: 14000.0"),
@@ -262,3 +259,44 @@ def test_config_hash_differs_when_a_value_changes(tmp_path, old, new):
 
 def test_config_hash_is_16_hex_chars(tmp_path):
     assert re.fullmatch(r"[0-9a-f]{16}", _hash_of(tmp_path, "a.yaml", VALID_YAML))
+
+
+# --- api ----------------------------------------------------------------------
+
+API_BLOCK = """\
+  api:
+    base_url: https://radar.example.test/sandbox
+    api_key_env: ADAPT_TEST_RADAR_KEY
+    timeout_seconds: 30
+"""
+
+
+def test_without_an_api_section_commands_are_only_written_to_files(tmp_path):
+    assert load_config(_write(tmp_path, VALID_YAML)).api is None
+
+
+def test_api_section_names_the_endpoint_and_the_key_variable(tmp_path):
+    cfg = load_config(_write(tmp_path, VALID_YAML + API_BLOCK))
+    assert cfg.api.base_url == "https://radar.example.test/sandbox"
+    assert cfg.api.api_key_env == "ADAPT_TEST_RADAR_KEY"
+    assert cfg.api.timeout_seconds == 30
+
+
+def test_api_key_itself_is_refused_in_the_config(tmp_path):
+    text = VALID_YAML + API_BLOCK + "    api_key: s3cret\n"
+    with pytest.raises(ValidationError, match="api_key"):
+        load_config(_write(tmp_path, text))
+
+
+@pytest.mark.parametrize("url", ["ftp://radar.example.test", "radar.example.test", ""])
+def test_api_base_url_must_be_http_or_https(tmp_path, url):
+    text = VALID_YAML + API_BLOCK.replace("https://radar.example.test/sandbox", url)
+    with pytest.raises(ValidationError, match="base_url"):
+        load_config(_write(tmp_path, text))
+
+
+@pytest.mark.parametrize("seconds", [0, -1])
+def test_api_timeout_must_be_positive(tmp_path, seconds):
+    text = VALID_YAML + API_BLOCK.replace("timeout_seconds: 30", f"timeout_seconds: {seconds}")
+    with pytest.raises(ValidationError, match="timeout_seconds"):
+        load_config(_write(tmp_path, text))

@@ -17,17 +17,23 @@ from adapt.utils.time import from_scan_iso
 
 @dataclass(frozen=True)
 class SelectionRef:
-    """Which cell was selected at which scan; ``cell_uid`` is None when none was."""
+    """Which cell was selected at which scan, by which rules (``config_hash``);
+    ``cell_uid`` is None when none was."""
 
     collection: str
     run_id: str
     scan_id: str
     scan_time: datetime
     cell_uid: str | None
+    config_hash: str
 
+
+# The version of the selection file this reader understands.
+SCHEMA = 1
 
 # Exactly the keys write_current_selection emits, with their JSON types.
 _TYPES: dict[str, tuple[type, ...]] = {
+    "schema": (int,),
     "collection": (str,),
     "run_id": (str,),
     "scan_id": (str,),
@@ -35,6 +41,9 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "cell_uid": (str, type(None)),
     "reason": (str, type(None)),
     "score": (int, float, type(None)),
+    "config_hash": (str,),
+    "stop_reason": (str, type(None)),
+    "previous_cell_uid": (str, type(None)),
 }
 
 
@@ -53,6 +62,11 @@ def read_selection(path: str | Path) -> SelectionRef:
                 f"{path}: selection key '{key}' has type {type(obj[key]).__name__}, "
                 f"expected {' or '.join(t.__name__ for t in types)}"
             )
+    if obj["schema"] != SCHEMA:
+        raise ValueError(
+            f"{path}: selection file has schema {obj['schema']}, expected {SCHEMA}; "
+            "target selection and radar command versions do not match"
+        )
     try:
         scan_time = from_scan_iso(obj["scan_time"])
     except ValueError as exc:
@@ -65,4 +79,5 @@ def read_selection(path: str | Path) -> SelectionRef:
         scan_id=obj["scan_id"],
         scan_time=scan_time,
         cell_uid=obj["cell_uid"],
+        config_hash=obj["config_hash"],
     )

@@ -71,9 +71,10 @@ def build_plan(geometry: TargetGeometry, ref: SelectionRef, cfg: RadarCommandCon
             f"Cell '{ref.cell_uid}' is not projected to the first plan time "
             f"{to_scan_iso(times[0])} after scan '{ref.scan_id}' of run '{ref.run_id}'"
         )
-    command = RadarCommand(cfg.radar.command, cfg.radar.pattern, cfg.radar.user, tuple(entries))
+    pid = plan_id(ref, config_hash(cfg))
+    command = RadarCommand(cfg.radar.scan_pattern, cfg.radar.user_id, pid, tuple(entries))
     return Plan(
-        plan_id=plan_id(ref, config_hash(cfg)),
+        plan_id=pid,
         command=command,
         truncated=len(entries) < len(times),
         vertical_source=geometry.vertical.source,

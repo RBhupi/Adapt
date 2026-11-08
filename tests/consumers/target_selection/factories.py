@@ -3,7 +3,10 @@
 
 """Synthetic factories shared by the target-selection tests."""
 
+from datetime import datetime
+
 from adapt.consumers.target_selection.config import TSEConfig
+from adapt.consumers.target_selection.selection import Decision, ScanDecision, TargetSelection
 from adapt.consumers.target_selection.snapshot import CellSnapshot, TrajectoryPoint
 
 
@@ -44,7 +47,7 @@ def make_config(
     switch_margin: float = 5.0,
     max_observation_seconds: float = 1800.0,
     growth_window_scans: int = 4,
-    jsonl_path: str | None = None,
+    decision_log: str | None = None,
 ) -> TSEConfig:
     return TSEConfig.model_validate(
         {
@@ -68,6 +71,24 @@ def make_config(
                 "max_observation_seconds": max_observation_seconds,
             },
             "snapshot": {"growth_window_scans": growth_window_scans},
-            "output": {"jsonl_path": jsonl_path},
+            "output": {"decision_log": decision_log},
         }
+    )
+
+
+def make_scan_decision(
+    collection: str,
+    run_id: str,
+    scan_id: str,
+    scan_time: datetime,
+    selection: TargetSelection | None,
+) -> ScanDecision:
+    """A decision with no stop, no previous target and no ranked field — enough
+    to write a current-selection file naming ``selection``'s cell (or none)."""
+    return ScanDecision(
+        collection,
+        run_id,
+        scan_id,
+        "0123456789abcdef",
+        Decision(scan_time, selection, None, None, ()),
     )

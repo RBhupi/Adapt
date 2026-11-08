@@ -5,7 +5,7 @@
 
 State is exactly one field — the currently observed target. All time
 comes from snapshots (never the wall clock), so identical snapshot
-sequences produce identical selections.
+sequences produce identical decisions.
 """
 
 from collections.abc import Iterable
@@ -14,15 +14,19 @@ from datetime import datetime, timedelta
 
 from adapt.consumers.target_selection.config import TSEConfig
 from adapt.consumers.target_selection.rules import (
-    SelectionReason,
-    StopReason,
     continue_or_switch,
     is_candidate,
     select_best,
     should_stop,
     total_score,
 )
-from adapt.consumers.target_selection.selection import TargetSelection
+from adapt.consumers.target_selection.selection import (
+    Decision,
+    RankedCandidate,
+    SelectionReason,
+    StopReason,
+    TargetSelection,
+)
 from adapt.consumers.target_selection.snapshot import CellSnapshot, Snapshot
 
 
@@ -43,31 +47,50 @@ class TargetSelectionEngine:
     def current_target(self) -> CurrentTarget | None:
         return self._current
 
-    def select(self, snapshot: Snapshot) -> TargetSelection | None:
-        """Apply the science rules to one snapshot and update state."""
+    def decide(self, snapshot: Snapshot) -> Decision:
+        """Apply the science rules to one snapshot, update state, and say what happened."""
+        previous = self._current
         candidates = {c.uid: c for c in snapshot.cells if is_candidate(c, self._config.candidate)}
         scored = {uid: total_score(c, self._config) for uid, c in candidates.items()}
+        stop: StopReason | None = None
 
-        if self._current is None:
-            return self._start_new(snapshot, candidates, scored, exclude=())
+        if previous is None:
+            selection = self._start_new(snapshot, candidates, scored, exclude=())
+        else:
+            current_cell = _find(snapshot.cells, previous.cell_uid)
+            observed = (snapshot.scan_time - previous.started_at).total_seconds()
+            stop = should_stop(current_cell, self._config, observed)
+            if stop is not None:
+                # A max-duration target would immediately win again on score;
+                # exclude it from re-selection within this call only.
+                exclude = (previous.cell_uid,) if stop is StopReason.MAX_DURATION else ()
+                self._current = None
+                selection = self._start_new(snapshot, candidates, scored, exclude=exclude)
+            else:
+                # A held target may have left the entry set (hold gates are looser
+                # than entry gates); it is still scored so challengers are judged
+                # against it.
+                assert current_cell is not None
+                if previous.cell_uid not in scored:
+                    candidates = {**candidates, previous.cell_uid: current_cell}
+                    scored = {**scored, previous.cell_uid: total_score(current_cell, self._config)}
+                selection = self._continue(snapshot, previous, candidates, scored)
 
-        current = self._current
-        current_cell = _find(snapshot.cells, current.cell_uid)
-        observed = (snapshot.scan_time - current.started_at).total_seconds()
-        stop = should_stop(current_cell, self._config, observed)
-        if stop is not None:
-            # A max-duration target would immediately win again on score;
-            # exclude it from re-selection within this call only.
-            exclude = (current.cell_uid,) if stop is StopReason.MAX_DURATION else ()
-            self._current = None
-            return self._start_new(snapshot, candidates, scored, exclude=exclude)
+        return Decision(
+            scan_time=snapshot.scan_time,
+            selection=selection,
+            stop_reason=stop,
+            previous_cell_uid=None if previous is None else previous.cell_uid,
+            candidates=_ranked(scored),
+        )
 
-        # A held target may have left the entry set (hold gates are looser than
-        # entry gates); it is still scored so challengers are judged against it.
-        assert current_cell is not None
-        if current.cell_uid not in scored:
-            candidates = {**candidates, current.cell_uid: current_cell}
-            scored = {**scored, current.cell_uid: total_score(current_cell, self._config)}
+    def _continue(
+        self,
+        snapshot: Snapshot,
+        current: CurrentTarget,
+        candidates: dict[str, CellSnapshot],
+        scored: dict[str, float],
+    ) -> TargetSelection:
         if self._config.selection.allow_switch:
             uid, reason = continue_or_switch(
                 current.cell_uid, scored, self._config.selection.switch_margin
@@ -120,6 +143,12 @@ class TargetSelectionEngine:
             trajectory=cell.trajectory,
             observation_window=(snapshot.scan_time, window_end),
         )
+
+
+def _ranked(scored: dict[str, float]) -> tuple[RankedCandidate, ...]:
+    """Candidates best first; ties break to the smallest uid, as in select_best."""
+    order = sorted(scored, key=lambda uid: (-scored[uid], uid))
+    return tuple(RankedCandidate(uid, scored[uid]) for uid in order)
 
 
 def _find(cells: Iterable[CellSnapshot], uid: str) -> CellSnapshot | None:

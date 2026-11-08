@@ -43,7 +43,7 @@ def _engine():
 
 def test_first_selection_new_target():
     engine = _engine()
-    sel = engine.select(_snap(T0, _cell_a(), _cell_b()))
+    sel = engine.decide(_snap(T0, _cell_a(), _cell_b())).selection
     assert sel.cell_uid == "cell_a"
     assert sel.reason is SelectionReason.NEW_TARGET
     assert sel.score == 62.0
@@ -56,16 +56,16 @@ def test_first_selection_new_target():
 
 def test_no_candidates_none_idle():
     engine = _engine()
-    sel = engine.select(_snap(T0, _cell_a(age=100.0), _cell_b(age=100.0)))
+    sel = engine.decide(_snap(T0, _cell_a(age=100.0), _cell_b(age=100.0))).selection
     assert sel is None
     assert engine.current_target is None
 
 
 def test_continuation_at_exact_margin():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a(), _cell_b()))
+    engine.decide(_snap(T0, _cell_a(), _cell_b()))
     # cell_b at 67.0 == 62.0 + margin(5.0): strict > means no switch.
-    sel = engine.select(_snap(T5, _cell_a(), _cell_b(refl=62.0)))
+    sel = engine.decide(_snap(T5, _cell_a(), _cell_b(refl=62.0))).selection
     assert sel.cell_uid == "cell_a"
     assert sel.reason is SelectionReason.CONTINUATION
     assert sel.observation_window == (T5, T30)  # end fixed, window shrinks
@@ -74,8 +74,8 @@ def test_continuation_at_exact_margin():
 
 def test_switch_resets_window():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a(), _cell_b()))
-    sel = engine.select(_snap(T5, _cell_a(), _cell_b(refl=67.0)))  # 72.0 > 62 + 5
+    engine.decide(_snap(T0, _cell_a(), _cell_b()))
+    sel = engine.decide(_snap(T5, _cell_a(), _cell_b(refl=67.0))).selection  # 72.0 > 62 + 5
     assert sel.cell_uid == "cell_b"
     assert sel.reason is SelectionReason.SWITCH
     assert sel.observation_window == (T5, T35)
@@ -84,8 +84,8 @@ def test_switch_resets_window():
 
 def test_target_lost_reselects():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a(), _cell_b()))
-    sel = engine.select(_snap(T5, _cell_b()))
+    engine.decide(_snap(T0, _cell_a(), _cell_b()))
+    sel = engine.decide(_snap(T5, _cell_b())).selection
     assert sel.cell_uid == "cell_b"
     assert sel.reason is SelectionReason.NEW_TARGET
     assert engine.current_target.started_at == T5
@@ -93,17 +93,17 @@ def test_target_lost_reselects():
 
 def test_quality_drop_stops():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a(), _cell_b()))
-    sel = engine.select(_snap(T5, _cell_a(values={"n_scans": 1.0}), _cell_b()))
+    engine.decide(_snap(T0, _cell_a(), _cell_b()))
+    sel = engine.decide(_snap(T5, _cell_a(values={"n_scans": 1.0}), _cell_b())).selection
     assert sel.cell_uid == "cell_b"
     assert sel.reason is SelectionReason.NEW_TARGET
 
 
 def test_max_duration_excludes_stopped_uid():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a(), _cell_b()))
+    engine.decide(_snap(T0, _cell_a(), _cell_b()))
     # At T30 observed == 1800 s; cell_a still scores highest but is excluded.
-    sel = engine.select(_snap(T30, _cell_a(), _cell_b()))
+    sel = engine.decide(_snap(T30, _cell_a(), _cell_b())).selection
     assert sel.cell_uid == "cell_b"
     assert sel.reason is SelectionReason.NEW_TARGET
     assert sel.observation_window == (T30, datetime(2024, 6, 1, 13, 0, tzinfo=UTC))
@@ -111,8 +111,8 @@ def test_max_duration_excludes_stopped_uid():
 
 def test_max_duration_no_alternative_returns_none_idle():
     engine = _engine()
-    engine.select(_snap(T0, _cell_a()))
-    sel = engine.select(_snap(T30, _cell_a()))
+    engine.decide(_snap(T0, _cell_a()))
+    sel = engine.decide(_snap(T30, _cell_a())).selection
     assert sel is None
     assert engine.current_target is None
 
@@ -127,6 +127,6 @@ def test_identical_sequences_identical_selections():
 
     def run():
         engine = _engine()
-        return [engine.select(s) for s in snapshots]
+        return [engine.decide(s).selection for s in snapshots]
 
     assert run() == run()

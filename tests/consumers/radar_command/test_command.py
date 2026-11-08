@@ -39,67 +39,60 @@ def _extent(**overrides):
 def _command(entries=None, **overrides):
     if entries is None:
         entries = (TargetEntry(time=_T1, extent=_extent()),)
-    fields = {"command": "add_targets", "pattern": "ppi_sector", "user": "operator"}
+    fields = {"scan_pattern": "3rhi_7ppi", "user_id": "operator", "target_id": "plan-1"}
     return RadarCommand(**(fields | overrides), entries=tuple(entries))
 
 
-def test_two_entry_command_serialises_to_wire_format():
-    cmd = _command(
-        entries=(
-            TargetEntry(time=_T1, extent=_extent()),
-            TargetEntry(
-                time=_T2,
-                extent=_extent(
-                    lat_center_deg=36.65,
-                    lon_center_deg=-97.45,
-                    lat_width_deg=0.5,
-                    lon_width_deg=0.6,
-                    alt_bottom_m=1500.0,
-                    alt_top_m=11500.0,
-                ),
-            ),
-        )
-    )
+_M_PER_DEG = 6371000.0 * math.pi / 180
 
-    expected = """{
-  "Command": "add_targets",
-  "Pattern": "ppi_sector",
-  "User": "operator",
-  "TargetData": {
-    "2026-06-01T12:01:00Z": {
-      "lat": 36.6,
-      "lon": -97.5,
-      "alt": 5000.0,
-      "dLat": 0.4,
-      "dLon": 0.5,
-      "dAlt": 8000.0
-    },
-    "2026-06-01T12:02:00Z": {
-      "lat": 36.65,
-      "lon": -97.45,
-      "alt": 6500.0,
-      "dLat": 0.5,
-      "dLon": 0.6,
-      "dAlt": 10000.0
+
+def test_one_entry_command_serialises_to_the_flat_sandbox_payload():
+    payload = json.loads(to_json(_command()))
+
+    assert payload == {
+        "lat": pytest.approx(36.6),
+        "lon": pytest.approx(-97.5),
+        "alt": 5000.0,
+        "lat_extent": pytest.approx(0.4 * _M_PER_DEG),
+        "lon_extent": pytest.approx(0.5 * _M_PER_DEG * math.cos(math.radians(36.6))),
+        "alt_extent": 8000.0,
+        "user_id": "operator",
+        "target_id": "plan-1",
+        "scan_pattern": "3rhi_7ppi",
     }
-  }
-}
-"""
-    assert to_json(cmd) == expected
+    assert list(payload) == [
+        "lat",
+        "lon",
+        "alt",
+        "lat_extent",
+        "lon_extent",
+        "alt_extent",
+        "user_id",
+        "target_id",
+        "scan_pattern",
+    ]
 
 
-def test_altitude_is_band_midpoint_and_depth_is_band_thickness():
-    extent = _extent(alt_bottom_m=1234.5, alt_top_m=10234.5)
-    cmd = _command(entries=(TargetEntry(time=_T1, extent=extent),))
+def test_the_single_box_covers_every_planned_minute():
+    # 12:01 box spans lat 36.4..36.8, lon -97.75..-97.25, 1-9 km;
+    # 12:02 box spans lat 36.6..37.0, lon -97.5..-97.0, 2-11 km.
+    later = _extent(
+        lat_center_deg=36.8, lon_center_deg=-97.25, alt_bottom_m=2000.0, alt_top_m=11000.0
+    )
+    cmd = _command(entries=(TargetEntry(_T1, _extent()), TargetEntry(_T2, later)))
 
-    target = json.loads(to_json(cmd))["TargetData"]["2026-06-01T12:01:00Z"]
+    payload = json.loads(to_json(cmd))
 
-    assert target["alt"] == 5734.5
-    assert target["dAlt"] == 9000.0
+    assert payload["lat"] == pytest.approx(36.7)
+    assert payload["lon"] == pytest.approx(-97.375)
+    assert payload["lat_extent"] == pytest.approx(0.6 * _M_PER_DEG)
+    assert payload["lon_extent"] == pytest.approx(0.75 * _M_PER_DEG * math.cos(math.radians(36.7)))
+    assert (payload["alt"], payload["alt_extent"]) == (6000.0, 10000.0)
 
 
-def test_command_file_carries_no_api_token():
-    assert "ApiToken" not in to_json(_command())
+def test_command_file_carries_no_api_key():
+    text = to_json(_command()).lower()
+    assert "key" not in text and "token" not in text
 
 
 def test_validate_rejects_command_without_entries():
@@ -107,7 +100,7 @@ def test_validate_rejects_command_without_entries():
         validate(_command(entries=()))
 
 
-@pytest.mark.parametrize("field", ["command", "pattern", "user"])
+@pytest.mark.parametrize("field", ["scan_pattern", "user_id", "target_id"])
 def test_validate_rejects_empty_identity_string(field):
     with pytest.raises(CommandValidationError, match=field):
         validate(_command(**{field: ""}))

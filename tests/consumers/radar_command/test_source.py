@@ -36,7 +36,9 @@ def without_stats(tmp_path_factory):
 
 
 def _ref(built, scan=1, cell_uid=UID_A):
-    return SelectionRef(COLLECTION, RUN, built.scan_ids[scan], SCAN_TIMES[scan], cell_uid)
+    return SelectionRef(
+        COLLECTION, RUN, built.scan_ids[scan], SCAN_TIMES[scan], cell_uid, "0123456789abcdef"
+    )
 
 
 def _pairs(footprint):
@@ -110,7 +112,9 @@ def test_run_without_volume_stats_uses_the_band_when_another_run_wrote_them(tmp_
     built = build_store(tmp_path, volume_stats=True)
     add_run(built, "run-2", volume_scans=())
     band = AltitudeBand(altitude_min_m=500.0, altitude_max_m=12000.0)
-    ref = SelectionRef(COLLECTION, "run-2", built.scan_ids[1], SCAN_TIMES[1], UID_A)
+    ref = SelectionRef(
+        COLLECTION, "run-2", built.scan_ids[1], SCAN_TIMES[1], UID_A, "0123456789abcdef"
+    )
     with StoreClient(built.root) as client:
         geometry = load_target(client, ref, vertical_band=band)
 
@@ -148,7 +152,9 @@ def test_scan_without_projection_frames_is_unavailable(with_stats):
 
 
 def test_unknown_scan_raises_the_store_error(with_stats):
-    ref = SelectionRef(COLLECTION, RUN, "ffffffffffffffff", SCAN_TIMES[1], UID_A)
+    ref = SelectionRef(
+        COLLECTION, RUN, "ffffffffffffffff", SCAN_TIMES[1], UID_A, "0123456789abcdef"
+    )
     with (
         StoreClient(with_stats.root) as client,
         pytest.raises(StoreError, match="ffffffffffffffff"),

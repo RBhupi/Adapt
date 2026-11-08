@@ -36,6 +36,7 @@ def _record(plan_id, scan_time):
         source_scan_time=scan_time,
         cell_uid="uid_beta",
         config_hash="fedcba9876543210",
+        selection_config_hash="0123456789abcdef",
         plan_id=plan_id,
         n_entries=12,
         truncated=False,

@@ -28,7 +28,7 @@ _GRID_ORIGIN = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 def _config(planning=None, buffer_km=0.0):
     return RadarCommandConfig(
         planning=planning or PlanningConfig(),
-        radar=RadarConfig(command="track", pattern="ppi_sector", user="operator"),
+        radar=RadarConfig(scan_pattern="ppi_sector", user_id="operator"),
         extent=ExtentConfig(horizontal_buffer_km=buffer_km),
         output=OutputConfig(directory="out"),
     )
@@ -55,7 +55,9 @@ def _geometry(frames=15, absent=None, step_minutes=1):
 
 
 def _ref(scan_time=datetime(2026, 6, 1, 12, 0, tzinfo=UTC), cell_uid="uid-a"):
-    return SelectionRef("KTST", "run-1", "0123456789abcdef", scan_time, cell_uid)
+    return SelectionRef(
+        "KTST", "run-1", "0123456789abcdef", scan_time, cell_uid, "0123456789abcdef"
+    )
 
 
 @pytest.mark.parametrize("second", [0, 37])

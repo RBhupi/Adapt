@@ -17,7 +17,7 @@ def test_imports():
         TargetSelectionEngine,
         TrajectoryPoint,
         TSEConfig,
-        append_selection,
+        append_decision,
         build_snapshot,
         is_candidate,
         load_config,
@@ -26,7 +26,7 @@ def test_imports():
 
     assert callable(load_config)
     assert callable(build_snapshot)
-    assert callable(append_selection)
+    assert callable(append_decision)
     assert callable(is_candidate)
     assert callable(total_score)
     assert TargetSelectionEngine and TSEConfig and Snapshot

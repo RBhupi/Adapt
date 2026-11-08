@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from adapt.api import StoreClient
+from adapt.consumers.target_selection.config import config_hash
 from adapt.consumers.target_selection.runner import TSEJob, run
 from adapt.contracts.persistence import PersistenceMeta
 from adapt.persistence.output_router import StoreOutputRouter
@@ -92,13 +93,17 @@ def test_selection_file_names_last_complete_scan_and_target(tmp_path, built, cli
     run(client, config, job)
     # Score at 12:05 = 1.0 * 46 dBZ + 0.05 * 20 km2 + 2.0 * (20 - 10) km2 / 5 min = 51.0
     assert _read(job.selection_path) == {
+        "schema": 1,
         "collection": "KTST",
         "run_id": "run-1",
         "scan_id": built.scan_ids[1],
         "scan_time": "2026-06-01T12:05:00Z",
+        "config_hash": config_hash(config),
         "cell_uid": "uid-1",
         "reason": "CONTINUATION",
         "score": pytest.approx(51.0),
+        "stop_reason": None,
+        "previous_cell_uid": "uid-1",
     }
 
 
@@ -126,24 +131,24 @@ def test_returns_the_number_of_scans_processed(tmp_path, client):
     assert run(client, config, _job(tmp_path)) == 2
 
 
-def test_jsonl_log_gets_one_line_per_selection(tmp_path, client):
-    log = tmp_path / "selections.jsonl"
+def test_decision_log_gets_one_line_per_scan(tmp_path, client):
+    log = tmp_path / "decisions.jsonl"
     config = make_config(
-        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, jsonl_path=str(log)
+        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, decision_log=str(log)
     )
     run(client, config, _job(tmp_path))
     lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert [(rec["cell_uid"], rec["reason"], rec["selection_time"]) for rec in lines] == [
+    assert [(rec["cell_uid"], rec["reason"], rec["scan_time"]) for rec in lines] == [
         ("uid-1", "NEW_TARGET", "2026-06-01T12:00:00Z"),
         ("uid-1", "CONTINUATION", "2026-06-01T12:05:00Z"),
     ]
 
 
-def test_running_again_leaves_one_log_line_per_selecting_scan(tmp_path, built, client):
+def test_running_again_leaves_one_log_line_per_scan(tmp_path, built, client):
     # A second invocation (or a restart of a follow) replays the run from its first scan.
-    log = tmp_path / "selections.jsonl"
+    log = tmp_path / "decisions.jsonl"
     config = make_config(
-        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, jsonl_path=str(log)
+        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, decision_log=str(log)
     )
     run(client, config, _job(tmp_path))
     run(client, config, _job(tmp_path))
@@ -170,6 +175,19 @@ def test_no_candidate_writes_a_null_target(tmp_path, built, client):
         None,
         None,
     )
+
+
+def test_scans_without_a_target_are_logged_too(tmp_path, client):
+    log = tmp_path / "decisions.jsonl"
+    config = make_config(
+        gates=({"field": "radar_reflectivity_max", "op": "ge", "value": 50.0},),
+        min_age_seconds=0.0,
+        growth_window_scans=2,
+        decision_log=str(log),
+    )
+    run(client, config, _job(tmp_path))
+    lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert [rec["cell_uid"] for rec in lines] == [None, None]
 
 
 def test_complete_scan_without_tracking_rows_in_an_ended_run_raises(tmp_path, built, client):

@@ -3,18 +3,21 @@
 
 """Radar command end to end: a target selection file in, a published command out."""
 
+import io
 import json
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
 from adapt.api import StoreClient
 from adapt.consumers.radar_command import RadarCommandJob, load_config, process_selection, run
-from adapt.consumers.radar_command.config import RadarConfig
+from adapt.consumers.radar_command.config import ApiConfig, RadarConfig
 from adapt.consumers.radar_command.ledger import Event, read_records
 from adapt.consumers.target_selection.selection import (
-    ScanSelection,
     SelectionReason,
     TargetSelection,
 )
@@ -28,6 +31,7 @@ from tests.consumers.radar_command.synthetic_store import (
     add_volume_stats,
     build_store,
 )
+from tests.consumers.target_selection.factories import make_scan_decision
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +54,7 @@ def cfg(tmp_path):
         f"""\
 target_selection: {{}}
 radar_command:
-  radar: {{command: track, pattern: ppi_sector, user: operator}}
+  radar: {{scan_pattern: ppi_sector, user_id: operator}}
   extent: {{horizontal_buffer_km: 1.0}}
   output: {{directory: '{out}'}}
 """,
@@ -78,26 +82,104 @@ def _select(tmp_path, built, scan=1, cell_uid=UID_A):
     path = tmp_path / "current_selection.json"
     write_current_selection(
         path,
-        ScanSelection(
+        make_scan_decision(
             COLLECTION, RUN, built.scan_ids[scan], SCAN_TIMES[scan], _target(scan, cell_uid)
         ),
     )
     return path
 
 
-def test_selection_publishes_the_twelve_minute_command(tmp_path, built, client, cfg):
+def test_selection_publishes_one_box_named_by_its_plan(tmp_path, built, client, cfg):
     outcome = process_selection(client, cfg, _select(tmp_path, built))
 
     assert outcome.event is Event.PUBLISHED
+    assert outcome.n_entries == 12  # whole minutes 12:06 .. 12:17 after the 12:05:37 scan
     command = json.loads((tmp_path / "out" / "current_targets.json").read_text(encoding="utf-8"))
-    # Scan at 12:05:37: whole minutes 12:06 .. 12:17.
-    assert list(command["TargetData"]) == [
-        f"2026-06-01T12:{minute:02d}:00Z" for minute in range(6, 18)
-    ]
-    # At 12:06 uid-a covers rows 4-5 (40.04, 40.05 N), cols 3-5 (87.97 .. 87.95 W).
-    first = command["TargetData"]["2026-06-01T12:06:00Z"]
-    assert first["lat"] == pytest.approx(40.045)
-    assert first["lon"] == pytest.approx(-87.96)
+    assert (command["scan_pattern"], command["user_id"], command["target_id"]) == (
+        "ppi_sector",
+        "operator",
+        outcome.plan_id,
+    )
+    # The box covers where uid-a is at 12:06: rows 4-5 (40.04, 40.05 N).
+    half = command["lat_extent"] / 2 / 111_194.93
+    assert command["lat"] - half < 40.04 and command["lat"] + half > 40.05
+
+
+class _Accepted:
+    status = 200
+
+    def read(self):
+        return b"accepted"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def api_cfg(cfg):
+    api = ApiConfig(
+        base_url="https://radar.example.test", api_key_env="ADAPT_TEST_KEY", timeout_seconds=5
+    )
+    return cfg.model_copy(update={"api": api})
+
+
+@pytest.fixture
+def posted(monkeypatch):
+    bodies = []
+
+    def urlopen(request, timeout):
+        bodies.append(request.data.decode("utf-8"))
+        return _Accepted()
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return bodies
+
+
+def test_with_an_api_the_published_command_is_sent_and_logged(
+    tmp_path, built, client, api_cfg, posted
+):
+    outcome = process_selection(client, api_cfg, _select(tmp_path, built), SecretStr("k"))
+
+    assert outcome.event is Event.SENT
+    assert outcome.detail == "HTTP 200: accepted"
+    assert posted == [(tmp_path / "out" / "current_targets.json").read_text(encoding="utf-8")]
+
+
+def test_a_duplicate_selection_is_not_sent_again(tmp_path, built, client, api_cfg, posted):
+    path = _select(tmp_path, built)
+    process_selection(client, api_cfg, path, SecretStr("k"))
+    process_selection(client, api_cfg, path, SecretStr("k"))
+
+    assert len(posted) == 1
+
+
+def test_a_refused_command_is_logged_as_send_failed_without_the_key(
+    tmp_path, built, client, api_cfg, monkeypatch
+):
+    def urlopen(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 403, "no", {}, io.BytesIO(b"denied"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    outcome = process_selection(client, api_cfg, _select(tmp_path, built), SecretStr("k-secret"))
+
+    assert outcome.event is Event.SEND_FAILED
+    assert "HTTP 403: denied" in outcome.detail
+    ledger = (tmp_path / "out" / "history" / "activity.jsonl").read_text(encoding="utf-8")
+    assert "k-secret" not in ledger
+
+
+def test_run_with_an_api_but_no_key_fails_before_reading_any_selection(
+    tmp_path, built, client, api_cfg, monkeypatch
+):
+    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)
+    job = RadarCommandJob(_select(tmp_path, built), follow=False, poll_seconds=1.0)
+
+    with pytest.raises(ValueError, match="ADAPT_TEST_KEY"):
+        run(client, api_cfg, job)
+    assert not (tmp_path / "out" / "history" / "activity.jsonl").exists()
 
 
 def _events(tmp_path):
@@ -112,6 +194,13 @@ def test_published_selection_is_logged_received_planned_published(tmp_path, buil
         Event.PLAN_GENERATED,
         Event.PUBLISHED,
     ]
+
+
+def test_every_ledger_record_names_the_rules_that_chose_the_cell(tmp_path, built, client, cfg):
+    process_selection(client, cfg, _select(tmp_path, built))
+
+    records = read_records(tmp_path / "out" / "history" / "activity.jsonl")
+    assert {r.selection_config_hash for r in records} == {"0123456789abcdef"}
 
 
 def _current(tmp_path):
@@ -165,7 +254,7 @@ def test_command_failing_validation_is_logged_and_not_published(tmp_path, built,
     # Pydantic forbids an empty command; model_construct bypasses it to reach the
     # last check before anything is written for the radar.
     bad = cfg.model_copy(
-        update={"radar": RadarConfig.model_construct(command="", pattern="p", user="u")}
+        update={"radar": RadarConfig.model_construct(scan_pattern="", user_id="u")}
     )
 
     outcome = process_selection(client, bad, _select(tmp_path, built))
@@ -231,7 +320,9 @@ def test_follow_retries_a_target_whose_volume_stats_arrive_late(tmp_path, cfg, m
     add_run(built, "run-2", volume_scans=(0,))
     write_current_selection(
         tmp_path / "current_selection.json",
-        ScanSelection(COLLECTION, "run-2", built.scan_ids[1], SCAN_TIMES[1], _target(1, UID_A)),
+        make_scan_decision(
+            COLLECTION, "run-2", built.scan_ids[1], SCAN_TIMES[1], _target(1, UID_A)
+        ),
     )
     steps = iter([lambda: add_volume_stats(built, "run-2", 1)])
 
