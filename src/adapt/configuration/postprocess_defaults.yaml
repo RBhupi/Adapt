@@ -4,7 +4,11 @@
 #
 # These modules are run ONLY by the PostProcessor (`adapt postprocess`), never by
 # the live pipeline. To add a post-process module: write the module class and add
-# its dotted import path here — no CLI or framework code changes required.
+# its dotted import path here — no CLI or framework code changes required. If the
+# module needs a store-backed input that no other module produces, register a
+# provider for that key in adapt/runtime/store_inputs.py (one function + one
+# register call). Select the target run with `adapt postprocess --run-id RUNID`
+# (default: latest).
 #
 postprocess:
   modules:

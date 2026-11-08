@@ -35,6 +35,7 @@ from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry as module_registry
 from adapt.execution.pipeline_builder import _ensure_modules_registered, resolve_enabled_modules
+from adapt.modules.base import POSTPROCESS_PHASE
 from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.runtime.diagnostics import silence_hdf5_errors
@@ -131,6 +132,13 @@ class RadarProcessor(threading.Thread):
             exclude=config.exclude_modules,
         )
         logger.info("Enabled modules: [%s]", ", ".join(m.name for m in modules))
+
+        rogue = sorted(m.name for m in modules if m.pipeline_phase >= POSTPROCESS_PHASE)
+        if rogue:
+            raise ValueError(
+                f"Post-process module(s) {', '.join(rogue)} cannot run in the live "
+                "pipeline; run them with 'adapt postprocess --module ...'"
+            )
 
         in_pipeline = [m for m in modules if m.pipeline_phase != 3]
         post_persist = [m for m in modules if m.pipeline_phase == 3]

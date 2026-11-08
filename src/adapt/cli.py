@@ -418,16 +418,23 @@ def _build_postprocess_parser(sub: argparse.ArgumentParser) -> None:
         default=None,
         help="Input directory for the selected module(s) (e.g. xLMA flash-sorted NetCDF).",
     )
+    sub.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="Run to post-process (default: the store's most recent run).",
+    )
     sub.add_argument("--config", default=None, help="Optional YAML config file.")
     sub.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
 
 
-def _open_store(repo_root: str, config_path: str | None):
-    """Discover the latest run in an existing store and reload its config.
+def _open_store(repo_root: str, config_path: str | None, run_id: str | None = None):
+    """Open an existing store, pick a run, and reload that run's config.
 
-    Returns ``(collection, registry, run_id, InternalConfig)``. The run's
-    exact config comes from the registry's run record; an explicit
-    ``--config`` file overrides module params on top of it.
+    Returns ``(collection, registry, run_id, InternalConfig)``. ``run_id``
+    selects a specific run (unknown ids raise); the default is the most
+    recent run. The run's exact config comes from the registry's run record;
+    an explicit ``--config`` file overrides module params on top of it.
     """
     from adapt.configuration.schemas.internal import InternalConfig
     from adapt.persistence.store import Store
@@ -435,7 +442,7 @@ def _open_store(repo_root: str, config_path: str | None):
 
     store = Store.open(repo_root)
     registry = StoreRegistry.get_instance(store.root)
-    run = registry.latest_run()
+    run = registry.get_run(run_id) if run_id else registry.latest_run()
     if run is None:
         raise ValueError(f"No runs found in store: {store.root}")
     run_id = run["run_id"]
@@ -458,6 +465,11 @@ def _open_store(repo_root: str, config_path: str | None):
 
 def _postprocess_cmd(args: argparse.Namespace) -> None:
     """Run post-process extension modules over an existing repository."""
+    import random
+    import time
+    from datetime import UTC, datetime
+
+    from adapt.runtime.observability import ObsSettings, build_observability
     from adapt.runtime.postprocessor import PostProcessor
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
@@ -465,7 +477,7 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
     if not args.module:
         raise ValueError("Specify at least one module to run, e.g. --module xlma_stat.")
 
-    collection, registry, run_id, config = _open_store(args.repository, args.config)
+    collection, registry, run_id, config = _open_store(args.repository, args.config, args.run_id)
 
     if args.input_dir:
         merged = dict(config.module_params)
@@ -473,7 +485,17 @@ def _postprocess_cmd(args: argparse.Namespace) -> None:
             merged[name] = {**merged.get(name, {}), "input_dir": args.input_dir}
         config = config.model_copy(update={"module_params": merged})
 
-    PostProcessor(collection, registry, run_id, config).run(modules=args.module)
+    # Real clocks/rng are legal only at composition roots (orchestrator pattern):
+    # post-hoc executions record run_modules audit rows like the live pipeline.
+    observability = build_observability(
+        ObsSettings(),
+        clock=time.perf_counter,
+        wall_clock=lambda: datetime.now(UTC),
+        rng=random.Random(),
+    )
+    PostProcessor(collection, registry, run_id, config, observability=observability).run(
+        modules=args.module
+    )
 
 
 # ---------------------------------------------------------------------------
