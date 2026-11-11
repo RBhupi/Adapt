@@ -1,7 +1,8 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""End-to-end: `adapt postprocess --module xlma_stat` over a small stored run.
+"""End-to-end: post-processing a small stored run with xlma_stat
+(a pipeline file's `postprocessing: [xlma_stat]`).
 
 Exercises the whole chain — PostProcessor discovery/resolution, minute-mask
 injection (read_minute_masks over the analysis NetCDFs), flash-sorted NetCDF
@@ -30,7 +31,7 @@ LAT0, LON0 = 40.0, -88.0
 
 def _write(store_env, ds, scan_time: str):
     objects = ObjectStore(store_env.collection.objects_dir, store_env.collection.catalog)
-    handle = objects.begin(suffix=".nc")
+    handle = objects.begin(f"fixture/{scan_time.replace(':', '')}.nc")
     ds.to_netcdf(handle.staging_path)
     objects.commit(
         handle,

@@ -12,7 +12,7 @@ def test_real_aws_listing(make_config, fake_gateway):
     Uses a known radar ID (KMOB) to ensure we get real data from AWS.
     Skips if no scans are available (expected during low-activity periods).
     """
-    config = make_config(radar_id="KHTX")  # Use a known radar with consistent data
+    config = make_config(radar="KHTX")  # Use a known radar with consistent data
     d = AwsNexradDownloader(config, acquire=fake_gateway)
     end = datetime.now(UTC)
     start = end - timedelta(minutes=60)

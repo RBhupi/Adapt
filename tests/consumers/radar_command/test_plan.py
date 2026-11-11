@@ -10,7 +10,6 @@ import pytest
 
 from adapt.consumers.radar_command.config import (
     ExtentConfig,
-    OutputConfig,
     PlanningConfig,
     RadarCommandConfig,
     RadarConfig,
@@ -30,7 +29,6 @@ def _config(planning=None, buffer_km=0.0):
         planning=planning or PlanningConfig(),
         radar=RadarConfig(scan_pattern="ppi_sector", user_id="operator"),
         extent=ExtentConfig(horizontal_buffer_km=buffer_km),
-        output=OutputConfig(directory="out"),
     )
 
 

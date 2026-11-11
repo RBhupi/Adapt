@@ -78,14 +78,19 @@ def log_event(
     return logged
 
 
+_COMMAND_FATES = {Event.PUBLISHED: "written", Event.SENT: "sent"}
+
+
 def summary(record: LedgerRecord) -> str:
-    """One human-readable line: the event, its plan, the selection, and any detail."""
-    plan = f" plan {record.plan_id}" if record.plan_id is not None else ""
+    """One human-readable line: what happened, to which plan, cell and scan, and any detail."""
+    plan = f" {record.plan_id}" if record.plan_id is not None else ""
+    if record.event in _COMMAND_FATES:
+        what = f"command{plan} {_COMMAND_FATES[record.event]}"
+    else:
+        what = record.event.value.lower().replace("_", " ") + plan
+    cell = f" for cell {record.cell_uid}" if record.cell_uid is not None else ""
     detail = f": {record.detail}" if record.detail is not None else ""
-    return (
-        f"radar-command: {record.event.value}{plan} for cell {record.cell_uid} "
-        f"at scan {record.scan_id} of run {record.run_id}{detail}"
-    )
+    return f"radar_command: {what}{cell} at scan {record.scan_id} of run {record.run_id}{detail}"
 
 
 def read_records(path: Path) -> list[LedgerRecord]:

@@ -116,7 +116,7 @@ def test_stop_processor_reports_clean_shutdown_when_scan_finishes(pipeline_confi
 
     assert orch.processor.stop_called is True
     messages = " ".join(r.message.lower() for r in caplog.records)
-    assert "please wait" in messages
+    assert "scan in progress to finish" in messages
     assert "shutdown clean" in messages
     assert not any(r.levelname == "WARNING" for r in caplog.records)
 

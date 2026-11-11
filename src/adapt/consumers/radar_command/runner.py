@@ -9,7 +9,7 @@ command is also POSTed to the radar API; without it, nothing leaves the files.
 """
 
 import logging
-import time
+import threading
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,44 +36,48 @@ FAILED_OUTCOMES = frozenset(
 
 @dataclass(frozen=True)
 class RadarCommandJob:
-    """Which selection file to act on, and whether to keep watching it."""
+    """Which selection file to follow, where to write, and when to stop."""
 
     selection_path: Path
-    follow: bool
+    output_dir: Path
     poll_seconds: float
+    stop: threading.Event
 
 
-def run(client: StoreClient, cfg: RadarCommandConfig, job: RadarCommandJob) -> LedgerRecord:
-    """Process the selection file once and return the outcome as logged; with
-    ``job.follow``, process it whenever it names a new scan.
+def run(client: StoreClient, cfg: RadarCommandConfig, job: RadarCommandJob) -> None:
+    """Follow the selection file, processing it whenever it names a new scan,
+    until ``job.stop`` is set.
 
-    Following never returns: it polls every ``job.poll_seconds``, logs every
-    outcome, and waits while the selection file does not exist yet. A
-    TARGET_UNAVAILABLE selection is retried at every poll until it resolves or a
-    new selection replaces it: data such as cell_volume_stats lands after the
-    scan is complete. With ``cfg.api``, its key is read once, first: a missing
-    key raises ValueError before any selection is processed.
+    It polls every ``job.poll_seconds``, logs every outcome, and waits while the
+    selection file does not exist yet. A TARGET_UNAVAILABLE selection is retried
+    at every poll until it resolves or a new selection replaces it: data such as
+    cell_volume_stats lands after the scan is complete. Once stopped, one last
+    poll still processes the final selection. With ``cfg.api``, its key is read
+    once, first: a missing key raises ValueError before any selection is processed.
     """
     key = None if cfg.api is None else api_key(cfg.api)
-    if not job.follow:
-        return process_selection(client, cfg, job.selection_path, key)
     done: tuple[str, str] | None = None
     while True:
+        # Read before the poll, so a selection written just before the stop is
+        # still processed by it.
+        last = job.stop.is_set()
         if job.selection_path.exists():
             ref = read_selection(job.selection_path)
             if (ref.run_id, ref.scan_id) != done:
                 # Processing re-reads the file, which may have been replaced since:
                 # what is done is the selection the outcome records.
-                outcome = _process(client, cfg, job.selection_path, key)
+                outcome = _process(client, cfg, job, key)
                 if outcome.event is not Event.TARGET_UNAVAILABLE:
                     done = (outcome.run_id, outcome.scan_id)
-        time.sleep(job.poll_seconds)
+        if last:
+            return
+        job.stop.wait(job.poll_seconds)
 
 
 def _process(
-    client: StoreClient, cfg: RadarCommandConfig, selection_path: Path, key: SecretStr | None
+    client: StoreClient, cfg: RadarCommandConfig, job: RadarCommandJob, key: SecretStr | None
 ) -> LedgerRecord:
-    outcome = process_selection(client, cfg, selection_path, key)
+    outcome = process_selection(client, cfg, job.selection_path, job.output_dir, key)
     level = logging.WARNING if outcome.event in FAILED_OUTCOMES else logging.INFO
     logger.log(level, summary(outcome))
     return outcome
@@ -83,14 +87,18 @@ def process_selection(
     client: StoreClient,
     cfg: RadarCommandConfig,
     selection_path: Path,
+    output_dir: Path,
     key: SecretStr | None = None,
 ) -> LedgerRecord:
     """Plan and publish a command for the selection at ``selection_path``, and send
-    it when ``cfg.api`` is set (``key`` is then required); return the outcome as logged."""
-    output = Path(cfg.output.directory)
-    history = output / cfg.output.history_directory
+    it when ``cfg.api`` is set (``key`` is then required); return the outcome as logged.
+
+    Writes ``output_dir/current_targets.json`` and, in ``output_dir/history/``,
+    every published plan, the ``activity.jsonl`` ledger and the publish lock.
+    """
+    history = output_dir / "history"
     paths = OutputPaths(
-        output / cfg.output.current_file,
+        output_dir / "current_targets.json",
         history,
         history / "activity.jsonl",
         history / "publish.lock",

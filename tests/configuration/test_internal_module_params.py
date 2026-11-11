@@ -23,7 +23,7 @@ class TestInternalConfigModuleParams:
         from adapt.configuration.schemas.user import UserConfig
 
         user = UserConfig(base_dir=str(temp_dir))
-        cfg = resolve_config(param_config, user, None)
+        cfg = resolve_config(param_config, user)
         # model_copy with a module_params payload validates the field type
         updated = cfg.model_copy(
             update={"module_params": {"analysis_3d": {"dbz_levels": [30, 40]}}}

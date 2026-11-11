@@ -112,6 +112,32 @@ class Catalog(SqliteStore):
             ).fetchone()
         return dict(row) if row else None
 
+    def find_by_object_name(self, object_name: str) -> dict | None:
+        """The artifact stored under one object name.
+
+        Letter case is ignored: on a case-insensitive filesystem (macOS,
+        Windows) two names differing only in case are one file.
+        """
+        conn = self._get_connection()
+        with self._lock:
+            row = conn.execute(
+                "SELECT * FROM artifacts WHERE object_name = ? COLLATE NOCASE", (object_name,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_artifact(self, artifact_id: str, checksum_sha256: str, size_bytes: int) -> None:
+        """Record that an object's bytes were rewritten by its owner; identity is kept."""
+        conn = self._get_connection()
+        with self._lock:
+            updated = conn.execute(
+                "UPDATE artifacts SET checksum_sha256 = ?, size_bytes = ?, created_at = ? "
+                "WHERE artifact_id = ?",
+                (checksum_sha256, size_bytes, datetime.now(UTC).isoformat(), artifact_id),
+            ).rowcount
+            conn.commit()
+        if not updated:
+            raise StoreError(f"Cannot update artifact '{artifact_id}': it is not cataloged")
+
     def find_by_source_uri(self, source_uri: str) -> dict | None:
         """Newest artifact acquired from one source URI (skip-if-downloaded lookup)."""
         conn = self._get_connection()

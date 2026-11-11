@@ -4,11 +4,15 @@
 """Acquisition gateway: raw scans become cataloged store objects at the boundary.
 
 The runtime builds one ``StoreAcquirer`` per run and injects it into the
-ingress source — acquisition modules never import persistence. Acquisition is
+ingress source — acquisition modules never import persistence. A raw file is
+stored under its original name (``objects/raw/<name>``). Acquisition is
 idempotent per ``source_uri`` within a collection: bytes already in the store
 are reused (never rewritten), and the scan is registered for the acquiring
-run. The returned message is the processor queue contract:
-``{artifact_id, scan_id, scan_time, queued_at}``.
+run. A file whose name is already stored is never fetched again, whichever
+source lists it (``is_acquired``). Bytes handed in under a stored name
+(``acquire_file``) reuse the stored object when identical and are refused when
+different. The returned message is the
+processor queue contract: ``{artifact_id, scan_id, scan_time, queued_at}``.
 """
 
 import time
@@ -17,7 +21,7 @@ from pathlib import Path
 
 from adapt.contracts.persistence import ScanRecord
 from adapt.persistence.errors import StoreError
-from adapt.persistence.objects import ArtifactMeta, ObjectStore
+from adapt.persistence.objects import ArtifactMeta, ObjectStore, raw_object_name
 from adapt.persistence.store import Collection
 from adapt.utils.identity import scan_id_from_bytes
 
@@ -33,8 +37,16 @@ class StoreAcquirer:
         self._run_id = run_id
 
     def is_acquired(self, source_uri: str) -> bool:
-        """True when this source's bytes are already objects in the store."""
-        return self._collection.catalog.find_by_source_uri(source_uri) is not None
+        """True when this source's file is already in the store: never fetch it again."""
+        return self._stored(source_uri) is not None
+
+    def _stored(self, source_uri: str) -> dict | None:
+        """The stored raw object for ``source_uri``: acquired from it before, or
+        stored under its file name from another source."""
+        catalog = self._collection.catalog
+        return catalog.find_by_source_uri(source_uri) or catalog.find_by_object_name(
+            raw_object_name(Path(source_uri).name)
+        )
 
     def acquire_file(
         self, path: str | Path, *, source_uri: str, scan_time: datetime | None
@@ -57,7 +69,20 @@ class StoreAcquirer:
 
         data = file_path.read_bytes()
         scan_id = scan_id_from_bytes(data)
-        handle = self._objects.begin(suffix=file_path.suffix)
+        object_name = raw_object_name(file_path.name)
+        stored = self._collection.catalog.find_by_object_name(object_name)
+        if stored is not None:
+            # The name is taken by another source. Identical bytes are the same
+            # scan: reuse the object. Different bytes must never share a name.
+            if stored["scan_id"] != scan_id:
+                raise StoreError(
+                    f"Cannot acquire '{file_path.name}' from '{source_uri}' (scan "
+                    f"{scan_id}): the store already holds a different file of that name "
+                    f"from '{stored['source_uri']}' (scan {stored['scan_id']})"
+                )
+            return self._register(stored["artifact_id"], scan_id, scan_time, file_path.name)
+
+        handle = self._objects.begin(object_name)
         handle.staging_path.write_bytes(data)
         record = self._objects.commit(
             handle,
@@ -75,7 +100,7 @@ class StoreAcquirer:
 
     def acquire_existing(self, source_uri: str, *, scan_time: datetime | None) -> dict:
         """Register this run against an already-stored source (skip-if-downloaded)."""
-        existing = self._collection.catalog.find_by_source_uri(source_uri)
+        existing = self._stored(source_uri)
         if existing is None:
             raise StoreError(f"No stored object for source '{source_uri}' — download it first")
         if scan_time is None:

@@ -4,8 +4,8 @@
 """UserConfig must let every InternalConfig section be overridden.
 
 Previously sections with no explicit UserConfig field (tracker, visualization,
-output, logging, processor, reader) were silently dropped. Generated config.yaml
-exposes them, so an edit there must reach the resolved InternalConfig.
+output, logging, processor, reader) were silently dropped. A pipeline file's
+`params:` sets them, so an edit there must reach the resolved InternalConfig.
 """
 
 import pytest

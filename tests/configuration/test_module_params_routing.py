@@ -23,12 +23,12 @@ class TestModuleParamsRouting:
             radar="KLOT",
             module_params={"analysis_3d": {"dbz_levels": [0, 10, 20, 30, 40, 50]}},
         )
-        cfg = resolve_config(ParamConfig(), user, None)
+        cfg = resolve_config(ParamConfig(), user)
         assert cfg.module_params["analysis_3d"]["dbz_levels"] == [0, 10, 20, 30, 40, 50]
 
     def test_absent_module_params_defaults_empty(self, tmp_path):
         user = UserConfig(base_dir=str(tmp_path), radar="KLOT")
-        cfg = resolve_config(ParamConfig(), user, None)
+        cfg = resolve_config(ParamConfig(), user)
         assert cfg.module_params == {}
 
     def test_to_internal_overrides_includes_module_params(self):

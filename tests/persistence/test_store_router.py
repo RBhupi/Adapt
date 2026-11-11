@@ -28,9 +28,8 @@ SCAN_TIME = datetime(2026, 8, 13, 17, 31, 58, tzinfo=UTC)
 RUN = "run-1"
 SID = "abc123"
 
-NC_SPEC = NetcdfArtifact(
-    key="analysis_ds", product_type="segmentation2d", producer="processor", description="test"
-)
+NC_SPEC = NetcdfArtifact(key="analysis_ds", product_type="segmentation2d", description="test")
+NC_NAME = "run-1/tracking/KILX20260813_173158_V06.segmentation2d.nc"
 TABLE_SPEC = ProductTableWrite(
     key="cell_stats", table="cell_stats", primary_key=("run_id", "scan_id", "cell_label")
 )
@@ -46,11 +45,13 @@ def _module(name: str, *specs) -> SimpleNamespace:
     return SimpleNamespace(name=name, persistence=tuple(specs))
 
 
-def _meta(scan_id: str | None = SID, scan_time: datetime | None = SCAN_TIME) -> PersistenceMeta:
+def _meta(
+    scan_id: str | None = SID, scan_time: datetime | None = SCAN_TIME, run_id: str = RUN
+) -> PersistenceMeta:
     return PersistenceMeta(
         scan_time=scan_time,
         scan_id=scan_id,
-        run_id=RUN,
+        run_id=run_id,
         source_file="KILX20260813_173158_V06",
         collection_id="KILX",
     )
@@ -92,7 +93,7 @@ def raw_artifact_id(collection):
     from adapt.persistence.objects import ArtifactMeta, ObjectStore
 
     objects = ObjectStore(collection.objects_dir, collection.catalog)
-    handle = objects.begin(suffix=".raw")
+    handle = objects.begin("raw/KILX20260813_173158_V06")
     handle.staging_path.write_bytes(b"level2")
     record = objects.commit(
         handle,
@@ -143,7 +144,7 @@ class TestNetcdfArtifact:
         artifact_id = products["segmentation2d"]["artifact_id"]
         row = collection.catalog.get_artifact(artifact_id)
         assert row["artifact_type"] == "segmentation2d"
-        assert row["producer"] == "processor"
+        assert row["producer"] == "tracking"  # the module that declares the file
         assert row["observation_time"] == "2026-08-13T17:31:58Z"
         object_path = collection.objects_dir / row["object_name"]
         assert object_path.exists()
@@ -156,6 +157,106 @@ class TestNetcdfArtifact:
             assert reopened.attrs["radar"] == "KILX"
         finally:
             reopened.close()
+
+    def test_the_file_is_named_for_its_run_module_source_and_product(
+        self, router, collection, raw_artifact_id
+    ):
+        router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": _dataset()}, _meta())
+
+        artifact_id = collection.catalog.scan_products(RUN, SID)["segmentation2d"]["artifact_id"]
+        assert collection.catalog.get_artifact(artifact_id)["object_name"] == NC_NAME
+        assert (collection.objects_dir / NC_NAME).is_file()
+
+    def test_writing_a_scan_again_replaces_the_file_and_keeps_its_identity(
+        self, router, collection, raw_artifact_id
+    ):
+        module = _module("tracking", NC_SPEC)
+        router.persist([module], {"analysis_ds": _dataset()}, _meta())
+        first = collection.catalog.scan_products(RUN, SID)["segmentation2d"]["artifact_id"]
+
+        second_pass = xr.Dataset({"reflectivity": ("x", [7.0, 8.0, 9.0])})
+        router.persist([module], {"analysis_ds": second_pass}, _meta())
+
+        rows = collection.catalog.list_artifacts(artifact_type="segmentation2d")
+        assert [row["artifact_id"] for row in rows] == [first]
+        assert collection.catalog.scan_products(RUN, SID)["segmentation2d"]["artifact_id"] == first
+        assert collection.catalog.parents_of(first) == [raw_artifact_id]
+        reopened = xr.open_dataset(collection.objects_dir / NC_NAME)
+        try:
+            assert reopened["reflectivity"].values.tolist() == [7.0, 8.0, 9.0]
+        finally:
+            reopened.close()
+
+    def test_two_runs_over_one_scan_each_keep_their_own_file(
+        self, router, collection, raw_artifact_id
+    ):
+        collection.catalog.register_scan(
+            ScanRecord(
+                run_id="run-2",
+                scan_id=SID,
+                scan_time=SCAN_TIME,
+                source_file_name="KILX20260813_173158_V06",
+            )
+        )
+        module = _module("tracking", NC_SPEC)
+
+        router.persist([module], {"analysis_ds": _dataset()}, _meta())
+        router.persist([module], {"analysis_ds": _dataset()}, _meta(run_id="run-2"))
+
+        names = sorted(
+            row["object_name"]
+            for row in collection.catalog.list_artifacts(artifact_type="segmentation2d")
+        )
+        assert names == [NC_NAME, NC_NAME.replace("run-1", "run-2")]
+
+    def test_the_file_is_named_for_the_file_this_run_read(
+        self, router, collection, raw_artifact_id
+    ):
+        """The same bytes stored later under another name must not rename this run's file."""
+        from adapt.persistence.objects import ArtifactMeta, ObjectStore
+
+        objects = ObjectStore(collection.objects_dir, collection.catalog)
+        handle = objects.begin("raw/KILX20260813_173158_V06_renamed")
+        handle.staging_path.write_bytes(b"level2")
+        objects.commit(
+            handle,
+            ArtifactMeta(
+                artifact_type="raw_volume",
+                producer="acquisition",
+                run_id="run-2",
+                scan_id=SID,
+                observation_time=SCAN_TIME,
+                original_filename="KILX20260813_173158_V06_renamed",
+            ),
+        )
+
+        router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": _dataset()}, _meta())
+
+        artifact_id = collection.catalog.scan_products(RUN, SID)["segmentation2d"]["artifact_id"]
+        assert collection.catalog.get_artifact(artifact_id)["object_name"] == NC_NAME
+
+    def test_a_scan_the_run_never_registered_cannot_be_written(self, router, collection):
+        from adapt.persistence.objects import ArtifactMeta, ObjectStore
+
+        objects = ObjectStore(collection.objects_dir, collection.catalog)
+        handle = objects.begin("raw/KILX20260813_173158_V06")
+        handle.staging_path.write_bytes(b"level2")
+        objects.commit(
+            handle,
+            ArtifactMeta(
+                artifact_type="raw_volume",
+                producer="acquisition",
+                run_id="run-0",
+                scan_id=SID,
+                observation_time=SCAN_TIME,
+                original_filename="KILX20260813_173158_V06",
+            ),
+        )
+
+        with pytest.raises(StoreError, match="not registered"):
+            router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": _dataset()}, _meta())
+
+        assert collection.catalog.list_artifacts(artifact_type="segmentation2d") == []
 
     def test_without_raw_artifact_raises(self, router, collection):
         collection.catalog.register_scan(
@@ -229,9 +330,7 @@ class TestTrackTablesWrite:
 
 class TestCompletenessThroughRouter:
     def test_required_products_complete_the_scan(self, router, collection, raw_artifact_id):
-        grid_spec = NetcdfArtifact(
-            key="grid_ds", product_type="gridded3d", producer="ingest", description="grid"
-        )
+        grid_spec = NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid")
         result = {
             "grid_ds": _dataset(),
             "analysis_ds": _dataset(),

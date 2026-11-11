@@ -55,9 +55,8 @@ def test_build_config_passes_seed_carry_fields(make_config):
 @pytest.mark.parametrize(
     "selection",
     [
-        {"exclude_modules": ["projection"]},
-        {"only_modules": ["ingest", "detection"]},
-        {"modules": ["ingest", "detection", "analysis"]},
+        {"modules": ["ingest", "detection"]},
+        {"modules": ["ingest", "detection", "analysis", "tracking"]},
     ],
 )
 def test_build_config_raises_when_seed_carry_is_on_without_projection(make_config, selection):

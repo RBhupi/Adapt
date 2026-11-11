@@ -144,3 +144,15 @@ class TestInstanceCache:
     def test_uninitialized_root_raises_naming_adapt_init(self, tmp_path):
         with pytest.raises(StoreError, match="adapt init"):
             StoreRegistry(tmp_path)
+
+
+def test_finalizing_a_resumed_run_adds_its_scan_counts(registry):
+    registry.register_collection("KILX", source_kind="nexrad")
+    registry.begin_run(_start("run-1"))
+    registry.finalize_run("run-1", "cancelled", scans_processed=3, scans_failed=1)
+    registry.resume_run("run-1")
+
+    registry.finalize_run("run-1", "completed", scans_processed=2, scans_failed=0)
+
+    row = registry.get_run("run-1")
+    assert (row["scans_processed"], row["scans_failed"]) == (5, 1)

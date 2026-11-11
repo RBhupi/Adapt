@@ -3,9 +3,9 @@
 
 """cell_volume_stats — post-persistence enrichment node (pipeline_phase = 3).
 
-Computes per-cell 3D statistics from the stored gridded volume and writes one row
+Computes per-cell 3D statistics from the gridded volume and writes one row
 per (run_id, scan_id, cell_uid) to the cell_volume_stats table, joinable to
-cells_by_scan. The 3D grid arrives in-memory as grid_ds_3d from the processor.
+cells_by_scan. The 3D grid is ingest's in-memory ``grid_ds``.
 
 Output columns (authoritative — documented here, schema inferred from the frame):
   run_id, scan_time, cell_uid, cell_label                     : index
@@ -18,8 +18,6 @@ Output columns (authoritative — documented here, schema inferred from the fram
   multilayer_fraction, mean_nlayers, max_nlayers              : storm structure
 """
 
-import logging
-
 import pandas as pd
 
 from adapt.contracts import CELL_LABELS_VAR, ProductTableWrite, check_cell_volume_stats
@@ -27,8 +25,6 @@ from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
 from adapt.modules.cell_volume_stats.module import CellVolumeStatsAlgorithm
-
-logger = logging.getLogger(__name__)
 
 
 class CellVolumeStatsModule(BaseModule):
@@ -45,7 +41,7 @@ class CellVolumeStatsModule(BaseModule):
     )
     inputs = [
         "cell_volume_stats_config",
-        "grid_ds_3d",
+        "grid_ds",
         "segmented_ds",
         "tracked_cells",
     ]
@@ -77,19 +73,13 @@ class CellVolumeStatsModule(BaseModule):
 
     def run(self, context: dict) -> dict:
         config = context["cell_volume_stats_config"]
-        grid_3d = context.get("grid_ds_3d")
-        segmented = context.get("segmented_ds")
-        tracked = context.get("tracked_cells")
+        grid_3d = context["grid_ds"]
+        tracked = context["tracked_cells"]
 
-        if grid_3d is None:
-            logger.warning(
-                "cell_volume_stats: grid_ds_3d unavailable — ingest did not produce grid_ds"
-            )
-            return {"cell_volume_stats_rows": pd.DataFrame()}
-        if segmented is None or tracked is None or tracked.empty:
+        if tracked.empty:
             return {"cell_volume_stats_rows": pd.DataFrame()}
 
-        cell_labels_2d = segmented[config.labels_var].values
+        cell_labels_2d = context["segmented_ds"][config.labels_var].values
         algo = CellVolumeStatsAlgorithm(config)
         rows = [
             algo.compute_cell(

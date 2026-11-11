@@ -28,7 +28,7 @@ def config():
         param.tracker.split_overlap_threshold = 0.4
         param.tracker.merge_overlap_threshold = 0.4
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user, None)
+        internal = resolve_config(param, user)
         return TrackingModule.build_config(internal)
     finally:
         shutil.rmtree(d, ignore_errors=True)
@@ -272,7 +272,7 @@ def _make_config(split_overlap=0.4):
         param.tracker.split_overlap_threshold = split_overlap
         param.tracker.merge_overlap_threshold = split_overlap
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user, None)
+        internal = resolve_config(param, user)
         return TrackingModule.build_config(internal)
     finally:
         shutil.rmtree(d, ignore_errors=True)

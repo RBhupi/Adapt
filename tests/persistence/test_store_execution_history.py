@@ -129,3 +129,12 @@ class TestFinalize:
         assert run["status"] == run_status
         assert run["scans_processed"] == 3
         assert run["scans_failed"] == 1
+
+    @pytest.mark.parametrize(
+        ("summary_status", "run_status"),
+        [("success", "completed"), ("cancelled", "cancelled"), ("failed", "failed")],
+    )
+    def test_finalize_returns_the_recorded_run_status(
+        self, history, registry, summary_status, run_status
+    ):
+        assert history.finalize_run(_summary(summary_status)) == run_status

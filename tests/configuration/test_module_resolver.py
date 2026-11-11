@@ -13,6 +13,8 @@ pytestmark = pytest.mark.unit
 
 from adapt.execution.pipeline_builder import _ensure_modules_registered  # noqa: E402
 
+_CORE = ["ingest", "detection", "projection", "analysis", "tracking"]
+
 
 @pytest.fixture(autouse=True)
 def _register_core_modules():
@@ -24,7 +26,7 @@ class TestResolveModuleConfigs:
     def test_returns_all_core_module_config_keys(self, internal_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-        configs = resolve_module_configs(internal_config)
+        configs = resolve_module_configs(internal_config, _CORE)
         for key in (
             "ingest_config",
             "detection_config",
@@ -37,7 +39,7 @@ class TestResolveModuleConfigs:
     def test_detection_method_params_match_internal_config(self, internal_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-        configs = resolve_module_configs(internal_config)
+        configs = resolve_module_configs(internal_config, _CORE)
         detection = configs["detection_config"]
         seg = internal_config.segmenter
         assert detection.method == seg.method
@@ -46,7 +48,7 @@ class TestResolveModuleConfigs:
     def test_analysis_cross_reference_to_projector(self, internal_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-        configs = resolve_module_configs(internal_config)
+        configs = resolve_module_configs(internal_config, _CORE)
         assert (
             configs["analysis_config"].max_projection_steps
             == internal_config.projector.max_projection_steps
@@ -66,7 +68,31 @@ class TestResolveModuleConfigs:
 
         registry.register(_NoConfig)
         try:
-            configs = resolve_module_configs(internal_config)
+            configs = resolve_module_configs(internal_config, [*_CORE, "no_config_probe"])
             assert "no_config_probe_config" not in configs
         finally:
             registry.unregister("no_config_probe")
+
+    def test_only_the_named_modules_are_configured(self, internal_config):
+        """A registered module that does not run is not configured, so its
+        requirements (here: always refusing) cannot fail a run without it."""
+        from adapt.configuration.schemas.module_resolver import resolve_module_configs
+        from adapt.execution.module_registry import registry
+        from adapt.modules.base import BaseModule
+
+        class _Unconfigurable(BaseModule):
+            name = "unconfigurable_probe"
+
+            @classmethod
+            def build_config(cls, internal_config):
+                raise ValueError("unconfigurable_probe needs params it was not given")
+
+            def run(self, context):
+                return {}
+
+        registry.register(_Unconfigurable)
+        try:
+            configs = resolve_module_configs(internal_config, ["detection"])
+        finally:
+            registry.unregister("unconfigurable_probe")
+        assert set(configs) == {"detection_config"}

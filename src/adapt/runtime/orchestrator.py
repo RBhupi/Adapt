@@ -14,10 +14,11 @@ import logging
 import queue
 import random
 import sys
+import threading
 import time
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from adapt.contracts.execution_history import RunStart, RunSummary
 from adapt.persistence.errors import StoreError
@@ -29,7 +30,7 @@ from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.console_status import ConsoleStatus
 from adapt.runtime.history_handler import HistoryLogHandler
 from adapt.runtime.logging_setup import configure_logging, shutdown_logging
-from adapt.runtime.observability import ObsSettings, build_observability
+from adapt.runtime.observability import build_observability, obs_settings
 from adapt.runtime.processor import RadarProcessor
 from adapt.runtime.provenance import capture_provenance, config_hash
 from adapt.runtime.run_reporter import RunReporter
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from adapt.contracts.observability import Observability
     from adapt.contracts.source import ScanSource
 
-__all__ = ["PipelineOrchestrator"]
+__all__ = ["PipelineOrchestrator", "RunFollowers"]
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,17 @@ _STATUS_TICK_SECONDS = 0.5
 # warning after this grace means the thread is genuinely wedged, not just busy.
 _PROCESSOR_SHUTDOWN_GRACE_SECONDS = 60.0
 _DOWNLOADER_SHUTDOWN_GRACE_SECONDS = 5.0
+
+
+class RunFollowers(Protocol):
+    """What follows a run while it is written, e.g. a launcher's consumers."""
+
+    def start(self) -> None:
+        """Begin following: called once the run is recorded, before any scan."""
+
+    def finish(self) -> None:
+        """End following: called once the run is finalized, while its log file
+        and run_events still take what is logged."""
 
 
 class PipelineOrchestrator:
@@ -109,17 +121,13 @@ class PipelineOrchestrator:
 
     Example usage::
 
+        from adapt.configuration.pipeline_file import load_pipeline_file
+        from adapt.configuration.pipeline_run import run_config
         from adapt.runtime.orchestrator import PipelineOrchestrator
 
-        config = {
-            "mode": "realtime",
-            "downloader": {"radar": "KDIX", ...},
-            "output_dirs": {...},
-            ...
-        }
-
-        orch = PipelineOrchestrator(config)
-        orch.start(max_runtime=60)  # Run for 60 minutes then stop
+        path = Path("nexrad.yaml")  # a pipeline file in an initialized store
+        config = run_config(load_pipeline_file(path), path)
+        status = PipelineOrchestrator(config).start(max_runtime=60)  # stop after 60 min
     """
 
     def __init__(
@@ -133,7 +141,7 @@ class PipelineOrchestrator:
         Parameters
         ----------
         config : InternalConfig
-            Fully resolved runtime configuration from init_runtime_config().
+            Fully resolved runtime configuration (from ``pipeline_run.run_config``).
             Already contains all directory paths, run ID, and validated settings.
 
         max_queue_size : int, optional
@@ -167,8 +175,16 @@ class PipelineOrchestrator:
 
         # Lifecycle state
         self._stop_event = False
-        self._stop_requested = False  # external break request (separate from the stop() guard)
-        self._interrupted = False  # Track user interrupt (Ctrl+C) vs normal completion
+        # External stop request (Ctrl+C / SIGTERM via request_stop()); separate from
+        # the stop() guard. A requested stop finalizes the run as 'cancelled'.
+        self._stop_requested = False
+        self._failed = False  # a worker thread died, or start() raised after registration
+        # Set right after the run row is committed (begun or resumed): from then on
+        # the run is visible to readers of the store, e.g. consumers following it.
+        self.run_registered = threading.Event()
+        # Terminal status start() returns; replaced by the status the registry
+        # records — stays 'failed' only if that record could not be written.
+        self._run_status = "failed"
         self._start_time: float | None = None
         self._max_duration: float | None = None
         self._close_repository_on_stop = close_repository_on_stop
@@ -180,20 +196,8 @@ class PipelineOrchestrator:
         self._history_handler: HistoryLogHandler | None = None
         self._reporter: RunReporter | None = None
         self._status: ConsoleStatus | None = None
-
-    def _obs_settings(self) -> ObsSettings:
-        """Translate the resolved logging/observability config into ObsSettings."""
-        lc = self.config.logging
-        return ObsSettings(
-            enabled=lc.enabled,
-            traces=lc.traces,
-            metrics=lc.metrics,
-            json_logs=lc.json_logs,
-            console_logs=lc.console_logs,
-            level=lc.level,
-            console_level=lc.console_level,
-            progress_every=lc.progress_every,
-        )
+        self._followers: RunFollowers | None = None  # given to start()
+        self.summary: RunSummary | None = None  # the end-of-run summary, once finalized
 
     def _build_observability(self) -> "Observability":
         """Build the telemetry provider from the resolved config.
@@ -202,22 +206,17 @@ class PipelineOrchestrator:
         legal for telemetry). Trace ids are random per run.
         """
         return build_observability(
-            self._obs_settings(),
+            obs_settings(self.config.logging),
             clock=time.perf_counter,
             wall_clock=lambda: datetime.now(UTC),
             rng=random.Random(),
         )
 
     def _enabled_module_names(self) -> tuple[str, ...]:
-        """All enabled module names — in-pipeline AND post-persistence (phase-3).
-
-        The header is built from this, so phase-3 enrichment modules (e.g.
-        cell_volume_stats) are surfaced, not just the phase 0-2 pipeline.
-        """
+        """The processor's enabled per-scan modules, core then extended (the header lists them)."""
         if not self.processor:
             return ()
-        mods = (*self.processor._pipeline_modules, *self.processor._post_modules)
-        return tuple(m.name for m in mods)
+        return self.processor.module_names
 
     def _record_run_start(self, radar: str) -> None:
         """Begin the ONE run lifecycle in the registry and print the console header."""
@@ -253,6 +252,7 @@ class PipelineOrchestrator:
         else:
             # --run-id continuation: reopen the ONE run record.
             self.registry.resume_run(self.run_id or "")
+        self.run_registered.set()
         header = RunStart(
             run_id=self.run_id or "",
             pipeline=self.config.source,
@@ -263,7 +263,7 @@ class PipelineOrchestrator:
             mode=self.config.mode,
             start_time=datetime.now(UTC),
             configuration_hash=config_hash(config_json),
-            configuration_file="",
+            configuration_file="" if self.config.pipeline is None else self.config.pipeline.file,
             provenance=prov,
             enabled_modules=modules,
         )
@@ -285,9 +285,7 @@ class PipelineOrchestrator:
             warnings, errors = self._history_handler.drain()
 
         summary = self._build_run_summary(
-            "cancelled" if self._interrupted else "success",
-            warnings=len(warnings),
-            errors=len(errors),
+            self._outcome(), warnings=len(warnings), errors=len(errors)
         )
         if self._reporter is not None:
             self._reporter.summary(summary)
@@ -300,9 +298,31 @@ class PipelineOrchestrator:
                 self.history.record_warnings(run_id, warnings)
             if errors:
                 self.history.record_errors(run_id, errors)
-            self.history.finalize_run(summary)
+            self.summary = summary
+            self._run_status = self.history.finalize_run(summary)
         except Exception:
             logger.exception("Failed to persist execution history on shutdown")
+
+    def _record_late_events(self) -> None:
+        """Persist the warnings/errors logged after the run was finalized."""
+        if self._history_handler is None or self.history is None:
+            return
+        warnings, errors = self._history_handler.drain()
+        run_id = self.run_id or ""
+        try:
+            if warnings:
+                self.history.record_warnings(run_id, warnings)
+            if errors:
+                self.history.record_errors(run_id, errors)
+        except Exception:
+            logger.exception("Failed to persist the execution history logged after the run")
+
+    def _outcome(self) -> str:
+        """The run's summary status: failed, else cancelled (stop requested), else success."""
+        violated = self.processor is not None and self.processor.contract_violated()
+        if self._failed or violated:
+            return "failed"
+        return "cancelled" if self._stop_requested else "success"
 
     def _build_run_summary(self, status: str, *, warnings: int, errors: int) -> RunSummary:
         """Aggregate the end-of-run summary from in-memory telemetry metrics.
@@ -356,57 +376,67 @@ class PipelineOrchestrator:
             acquire=StoreAcquirer(self.collection, self.run_id or ""),
         )
 
-    def start(self, max_runtime: int | None = None):
-        """Start the pipeline and run until completion or user interrupt.
+    def start(self, max_runtime: int | None = None, followers: RunFollowers | None = None) -> str:
+        """Start the pipeline and run until completion or a stop request.
 
-        This is a blocking call that starts the downloader and processor
-        threads, then enters a monitoring loop. The loop logs status every 30 seconds
-        and handles mode-specific exit conditions.
+        This is a blocking call that builds the processor and the ingress source,
+        records the run (setting ``run_registered``), starts ``followers``, starts
+        both worker threads, then enters a monitoring loop. The loop logs status
+        every 30 seconds and handles mode-specific exit conditions. Once the run
+        is finalized, ``followers`` are finished before the run's log and events
+        close, so what they log then is recorded with the run too.
 
-        **Realtime Mode:** Runs until you press Ctrl+C or max_runtime is exceeded.
+        **Realtime Mode:** Runs until ``request_stop()`` or max_runtime is exceeded.
 
         **Historical Mode:** Automatically exits when all files within the
-        start_time/end_time range are queued, processed, and plotted.
+        start_time/end_time range are queued and processed.
 
-        All output (console + file) logged to logs/{radar}_pipeline.log
+        All output (console + file) logged to logs/pipeline_{radar}.log
         at the level specified in config["logging"]["level"].
 
         Parameters
         ----------
         max_runtime : int, optional
             Maximum runtime in minutes (realtime mode only).
-            If None, runs until KeyboardInterrupt (Ctrl+C).
+            If None, runs until ``request_stop()``.
             Ignored in historical mode (uses file completion instead).
+        followers : RunFollowers, optional
+            Started once the run is recorded, finished once it is finalized.
+
+        Returns
+        -------
+        str
+            The run's terminal status: ``completed``; ``cancelled`` after
+            ``request_stop()``; ``failed`` after a contract violation, a worker
+            thread dying, or an error raised once the run was recorded.
 
         Raises
         ------
-        KeyboardInterrupt
-            User pressed Ctrl+C. Pipeline stops gracefully.
-
-        Notes
-        -----
-        To stop the pipeline gracefully, press Ctrl+C. Do NOT force-kill.
-        The stop() method is called automatically to close threads and save results.
+        Exception
+            Whatever failed during startup or monitoring, after stop() ran. A
+            processor or source that cannot be built fails before the run is
+            recorded, so it never leaves a run 'running'.
 
         Examples
         --------
         Run for 60 minutes in realtime mode::
 
             orch = PipelineOrchestrator(config)
-            orch.start(max_runtime=60)
+            status = orch.start(max_runtime=60)
 
         Run historical mode until all files processed::
 
             orch = PipelineOrchestrator(config)  # mode="historical" in config
-            orch.start()  # Runs until all files between start_time/end_time processed
+            status = orch.start()  # Runs until all files between start/end processed
         """
         radar = self.config.downloader.radar
+        self._followers = followers
 
         # Logging is configured first so that everything below it — repository
         # construction, telemetry setup, and any failure in either — lands in the
         # run's log file rather than being emitted before any handler exists.
         # Live status line (spinner) — TTY only; self-disables when piped or quiet.
-        settings = self._obs_settings()
+        settings = obs_settings(self.config.logging)
         self._status = ConsoleStatus(
             sys.stderr,
             enabled=settings.console_logs and sys.stderr.isatty(),
@@ -445,34 +475,39 @@ class PipelineOrchestrator:
             self.config.mode.upper(),
         )
 
-        # Open the ONE run record and print the console header, then start ingress.
-        self._record_run_start(radar)
-        self.downloader = self._create_source()
-        self.downloader.start()
-
-        # Start Processor thread
-        assert self.collection is not None
-        assert self.registry is not None and self.history is not None
-        self.processor = RadarProcessor(
-            input_queue=self.downloader_queue,
-            config=self.config,
-            collection=self.collection,
-            registry=self.registry,
-            run_id=self.run_id,
-            history=self.history,
-            observability=self._obs,
-            root_trace_id=self._root_trace_id,
-            reporter=self._reporter,
-        )
-        self.processor.start()
-
-        mode = self.config.mode
-        logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
-
         try:
+            # Build both workers before the run is recorded: a module set or source
+            # that cannot be built fails here and never leaves a run 'running'.
+            self.processor = RadarProcessor(
+                input_queue=self.downloader_queue,
+                config=self.config,
+                collection=self.collection,
+                registry=self.registry,
+                run_id=self.run_id,
+                history=self.history,
+                observability=self._obs,
+                root_trace_id=self._root_trace_id,
+                reporter=self._reporter,
+            )
+            self.downloader = self._create_source()
+
+            # Open the ONE run record and print the console header, then start the
+            # followers and both workers.
+            self._record_run_start(radar)
+            if followers is not None:
+                followers.start()
+            self.downloader.start()
+            self.processor.start()
+
+            mode = self.config.mode
+            logger.debug("Pipeline running in %s mode. Press Ctrl+C to stop.", mode.upper())
             self._main_loop(mode)
+        except Exception:
+            self._failed = True  # finalizes a recorded run as 'failed' in stop()
+            raise
         finally:
             self.stop()
+        return self._run_status
 
     def _main_loop(self, mode: str):
         """Monitoring loop: check exit conditions and log status."""
@@ -501,6 +536,7 @@ class PipelineOrchestrator:
 
             if not self.processor.is_alive():
                 logger.critical("Processor thread died unexpectedly. Exiting.")
+                self._failed = True
                 break
 
             if not self.downloader.is_alive():
@@ -508,6 +544,7 @@ class PipelineOrchestrator:
                     logger.info("Downloader exited after historical completion.")
                     break
                 logger.critical("Downloader thread died unexpectedly. Exiting.")
+                self._failed = True
                 break
 
             # 3. Mode-specific exit conditions
@@ -613,7 +650,7 @@ class PipelineOrchestrator:
                 break
 
     def request_stop(self) -> None:
-        """Ask the monitoring loop to exit so the orchestrator's own thread finalizes.
+        """Interrupt the run: the monitoring loop exits and the run is 'cancelled'.
 
         Called from the CLI on SIGINT/SIGTERM. Distinct from ``stop()`` so signalling
         the loop never trips ``stop()``'s "already finalized" guard — finalize +
@@ -621,6 +658,8 @@ class PipelineOrchestrator:
         the process kills on exit.
         """
         self._stop_requested = True
+        if self.processor is not None:
+            self.processor.stop()  # the in-flight scan finishes; no new scan starts
 
     def stop(self):
         """Stop the pipeline gracefully and finalize all results.
@@ -633,13 +672,15 @@ class PipelineOrchestrator:
         1. Signals all worker threads to stop
         2. Waits for each thread to finish (bounded grace periods)
         3. Finalizes the run record in the store registry
-        4. Closes store connections and logs the runtime
+        4. Finishes the followers given to start(), and records what they logged
+        5. Closes store connections and logs the runtime
 
         Notes
         -----
-        This method should complete within ~20 seconds. If a thread does not
-        respond to the stop signal within its timeout, a warning is logged but
-        the shutdown continues (graceful degradation).
+        Apart from the followers' finish, this method should complete within
+        ~20 seconds. If a thread does not respond to the stop signal within its
+        timeout, a warning is logged but the shutdown continues (graceful
+        degradation).
 
         Files processed before the final save() will have their statistics
         in the SQLite database. The database is safe to query even while the
@@ -670,8 +711,14 @@ class PipelineOrchestrator:
         self._stop_processor()
 
         # Execution history: flush captured warnings/errors, finalize the ONE run
-        # record in the registry, and print the console summary.
-        self._finalize_history()
+        # record in the registry, and print the console summary. A run that was
+        # never recorded (startup failed first) has nothing to finalize. Then the
+        # followers finish on the finalized run, and what they logged is recorded.
+        if self.run_registered.is_set():
+            self._finalize_history()
+            if self._followers is not None:
+                self._followers.finish()
+            self._record_late_events()
 
         # Release store handles (collections + registry). SqliteStore.close() is
         # reopen-safe, so cached registry instances survive a later start().
@@ -701,9 +748,7 @@ class PipelineOrchestrator:
             return
         busy = proc.current_activity() is not None
         if busy:
-            self._report(
-                "Finishing the current scan and saving its data before exit — please wait..."
-            )
+            self._report("Waiting for the scan in progress to finish and save its data...")
         proc.stop()
         proc.join(timeout=_PROCESSOR_SHUTDOWN_GRACE_SECONDS)
         if proc.is_alive():

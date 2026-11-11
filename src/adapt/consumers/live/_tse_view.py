@@ -410,7 +410,7 @@ class TargetSelectionTab:
                 at=scan_ts,
             )
             selection = self._engine.decide(snap).selection
-            candidates = [c.uid for c in snap.cells if is_candidate(c, self._cfg.candidate)]
+            candidates = [c.uid for c in snap.cells if is_candidate(c, self._cfg.entry)]
         except Exception:
             logger.exception("Target selection failed at scan %s", scan_ts)
             return None
@@ -579,7 +579,7 @@ class TargetSelectionTab:
                     at=times[i],
                 )
                 selection = engine.decide(snap).selection
-                cands = [c.uid for c in snap.cells if is_candidate(c, cfg.candidate)]
+                cands = [c.uid for c in snap.cells if is_candidate(c, cfg.entry)]
                 return snap, selection, cands
 
             def draw(fig, k):

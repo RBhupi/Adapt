@@ -46,7 +46,7 @@ class ConvStratRautParams(AdaptBaseModel):
         1.5, description="Wavelet threshold separating all convection from stratiform"
     )
     conv_scale_km: float = Field(
-        25.0, description="Approx. scale break (km) between convective and stratiform scales"
+        25.0, description="Approximate scale break (km) between convective and stratiform scales"
     )
     min_reflectivity: float = Field(
         5.0, description="Minimum reflectivity (dBZ); below this is unclassified"

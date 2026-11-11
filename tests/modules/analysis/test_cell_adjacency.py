@@ -21,7 +21,7 @@ def config():
 
         param = ParamConfig()
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user, None)
+        internal = resolve_config(param, user)
         return AnalysisModule.build_config(internal)
     finally:
         shutil.rmtree(d, ignore_errors=True)

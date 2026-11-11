@@ -1,61 +1,17 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Tests for CLI dispatch, PID-file handling, and config-command branches."""
+"""CLI dispatch: the command set, usage errors and --version.
 
-import argparse
-import os
+The single-instance PID file is exercised through ``adapt run`` (test_run_checks,
+test_run_live).
+"""
 
 import pytest
 
-from adapt import cli
+from adapt import __version__, cli
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def pid_file(tmp_path, monkeypatch):
-    path = tmp_path / "pipeline.pid"
-    monkeypatch.setattr(cli, "_PID_FILE", path)
-    return path
-
-
-class TestSingleInstance:
-    def test_no_pid_file_passes(self, pid_file):
-        cli._check_single_instance()
-
-    def test_live_pid_exits_with_error(self, pid_file, capsys):
-        pid_file.write_text(str(os.getpid()), encoding="utf-8")  # our own PID is always alive
-
-        with pytest.raises(SystemExit) as exc:
-            cli._check_single_instance()
-
-        assert exc.value.code == 1
-        assert "already running" in capsys.readouterr().out
-
-    def test_stale_pid_is_ignored(self, pid_file, monkeypatch):
-        pid_file.write_text("12345", encoding="utf-8")
-
-        def gone(pid, sig):
-            raise ProcessLookupError
-
-        monkeypatch.setattr(cli.os, "kill", gone)
-        cli._check_single_instance()
-
-    def test_malformed_pid_file_is_ignored(self, pid_file):
-        pid_file.write_text("not-a-pid", encoding="utf-8")
-
-        cli._check_single_instance()
-
-    def test_write_then_remove_pid(self, pid_file):
-        cli._write_pid()
-        assert pid_file.read_text(encoding="utf-8") == str(os.getpid())
-
-        cli._remove_pid()
-        assert not pid_file.exists()
-
-    def test_remove_missing_pid_is_noop(self, pid_file):
-        cli._remove_pid()
 
 
 class TestMainDispatch:
@@ -67,6 +23,20 @@ class TestMainDispatch:
 
         assert exc.value.code == 2
 
+    @pytest.mark.parametrize(
+        "argv",
+        [["tse", "run"], ["radar-command", "run"], ["run-nexrad"], ["postprocess"]],
+    )
+    def test_retired_commands_are_gone(self, monkeypatch, capsys, argv):
+        # A pipeline file runs the pipeline, its consumers and its post-processing.
+        monkeypatch.setattr("sys.argv", ["adapt", *argv])
+
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+
+        assert exc.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
+
     def test_version_prints_and_exits(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["adapt", "--version"])
 
@@ -76,75 +46,11 @@ class TestMainDispatch:
         assert exc.value.code == 0
         assert "adapt" in capsys.readouterr().out
 
-    def test_config_command_writes_template(self, monkeypatch, tmp_path):
-        out = tmp_path / "config.yaml"
-        monkeypatch.setattr("sys.argv", ["adapt", "config", str(out)])
 
-        cli.main()
+def test_version_prints_the_version_and_the_install_path_on_two_lines(adapt, capsys):
+    assert adapt("--version") == 0
 
-        assert out.exists()
-        assert "radar" in out.read_text(encoding="utf-8")
-
-
-class TestConfigCommand:
-    def _args(self, output, **kw):
-        return argparse.Namespace(output=str(output), pipeline="nexrad", extensions=None, **kw)
-
-    def test_directory_output_appends_filename(self, tmp_path):
-        cli._config_cmd(self._args(tmp_path))
-
-        assert (tmp_path / "config.yaml").exists()
-
-    def test_existing_file_aborts_when_not_confirmed(self, tmp_path, monkeypatch, capsys):
-        out = tmp_path / "config.yaml"
-        out.write_text("keep me", encoding="utf-8")
-        monkeypatch.setattr("builtins.input", lambda *_: "n")
-
-        cli._config_cmd(self._args(out))
-
-        assert out.read_text(encoding="utf-8") == "keep me"
-        assert "Aborted" in capsys.readouterr().out
-
-    def test_existing_file_overwritten_when_confirmed(self, tmp_path, monkeypatch):
-        out = tmp_path / "config.yaml"
-        out.write_text("old", encoding="utf-8")
-        monkeypatch.setattr("builtins.input", lambda *_: "y")
-
-        cli._config_cmd(self._args(out))
-
-        assert out.read_text(encoding="utf-8") != "old"
-
-    def test_unknown_pipeline_raises(self, tmp_path):
-        args = argparse.Namespace(output=str(tmp_path / "c.yaml"), pipeline="goes", extensions=None)
-
-        with pytest.raises(ValueError, match="goes"):
-            cli._config_cmd(args)
-
-    def test_extensions_are_included_in_template(self, tmp_path):
-        out = tmp_path / "config.yaml"
-        args = argparse.Namespace(
-            output=str(out),
-            pipeline="nexrad",
-            extensions="adapt.execution.nodes.cell_volume_stats",
-        )
-
-        cli._config_cmd(args)
-
-        assert "cell_volume_stats" in out.read_text(encoding="utf-8")
-
-
-class TestPostprocessCommand:
-    def test_missing_module_raises(self):
-        args = argparse.Namespace(
-            repository=".", module=None, input_dir=None, config=None, verbose=False
-        )
-
-        with pytest.raises(ValueError, match="module"):
-            cli._postprocess_cmd(args)
-
-    def test_open_store_without_runs_raises(self, tmp_path):
-        from adapt.persistence.store import init_store
-
-        root = init_store(tmp_path / "store")
-        with pytest.raises(ValueError, match="No runs found"):
-            cli._open_store(str(root), None)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == f"adapt {__version__}"
+    assert lines[1].startswith("Installed at: ")
+    assert len(lines) == 2

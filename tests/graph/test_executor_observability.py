@@ -62,7 +62,9 @@ def test_executor_opens_one_span_per_node_with_real_durations() -> None:
     obs = _obs_seq_clock([0.0, 1.0, 1.0, 3.0])  # ingest enter/exit, detection enter/exit
     ingest = _Stub("ingest", [], ["g"])
     detection = _Stub("detection", ["g"], ["c"])
-    GraphExecutor(GraphBuilder([detection, ingest]).build(), observability=obs).run({})
+    GraphExecutor(
+        GraphBuilder([detection, ingest], provided=frozenset()).build(), observability=obs
+    ).run({}, history=0)
     spans = {s.name: s for s in obs.drain_spans()}
     assert set(spans) == {"ingest", "detection"}
     assert spans["ingest"].duration_s == 1.0
@@ -77,7 +79,10 @@ def test_node_runs_inside_its_own_stage_context() -> None:
         seen["stage"] = obs.current().stage
         return {"g": 1}
 
-    GraphExecutor(GraphBuilder([_Stub("ingest", [], ["g"], fn)]).build(), observability=obs).run({})
+    GraphExecutor(
+        GraphBuilder([_Stub("ingest", [], ["g"], fn)], provided=frozenset()).build(),
+        observability=obs,
+    ).run({}, history=0)
     assert seen["stage"] == "ingest"
 
 
@@ -87,9 +92,9 @@ def test_node_failure_records_error_on_span_and_propagates() -> None:
     def boom(ctx):
         raise ValueError("kaboom")
 
-    nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)]).build()
+    nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)], provided=frozenset()).build()
     with pytest.raises(ValueError, match="kaboom"):
-        GraphExecutor(nodes, observability=obs).run({})
+        GraphExecutor(nodes, observability=obs).run({}, history=0)
     span = obs.drain_spans()[0]
     assert span.name == "detection"
     assert "ValueError: kaboom" in span.error
@@ -107,15 +112,17 @@ def test_node_failure_annotates_failing_stage() -> None:
     def boom(ctx):
         raise ValueError("kaboom")
 
-    nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)]).build()
+    nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)], provided=frozenset()).build()
     with pytest.raises(ValueError) as excinfo:
-        GraphExecutor(nodes).run({})
+        GraphExecutor(nodes).run({}, history=0)
 
     notes = getattr(excinfo.value, "__notes__", [])
     assert any("detection" in note for note in notes)
 
 
 def test_graph_runs_without_a_provider() -> None:
-    nodes = GraphBuilder([_Stub("ingest", [], ["g"])]).build()
-    result = GraphExecutor(nodes).run({})  # no observability -> no telemetry, still runs
+    nodes = GraphBuilder([_Stub("ingest", [], ["g"])], provided=frozenset()).build()
+    result = (
+        GraphExecutor(nodes).run({}, history=0).context
+    )  # no observability -> no telemetry, still runs
     assert result["g"] == 1

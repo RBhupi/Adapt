@@ -59,15 +59,14 @@ def _cells_per_scan(make_detection_config, make_projection_config, seed_carry: b
             "grid_ds_2d": _frame(b_col, t),
             "grid_ds": None,
             "scan_time": t,
-            "prior_scan": completed[-1] if completed else None,
+            "prior_scans": completed[-1:],
             "detection_config": detection_config,
             "projection_config": projection_config,
         }
         result = detect.run(ctx)
         entry = {**result, "scan_time": t}
         if completed:
-            history = [completed[-1], entry]
-            entry.update(project.run({**ctx, **result, "scan_history": history}))
+            entry.update(project.run({**ctx, **result}))
         completed.append(entry)
         counts.append(result["num_cells"])
     return counts

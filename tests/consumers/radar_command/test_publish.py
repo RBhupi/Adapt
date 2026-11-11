@@ -141,7 +141,7 @@ def test_a_failed_plan_can_be_published_on_retry(tmp_path, monkeypatch):
 
 
 def test_publish_waits_while_another_publisher_holds_the_output_lock(tmp_path):
-    # Two radar-command processes on one output directory: the guard (duplicate,
+    # Two radar_command publishers on one output directory: the guard (duplicate,
     # out-of-order) and the write must not interleave with another publish.
     paths = _paths(tmp_path)
     published = threading.Event()

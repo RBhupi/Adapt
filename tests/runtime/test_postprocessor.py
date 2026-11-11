@@ -181,7 +181,7 @@ def test_injects_minute_masks_and_radar_origin(pipeline_config, store_env):
         registration_uids=["uid-A"],
     )
     objects = ObjectStore(store_env.collection.objects_dir, store_env.collection.catalog)
-    handle = objects.begin(suffix=".nc")
+    handle = objects.begin("fixture/analysis.nc")
     ds.to_netcdf(handle.staging_path)
     objects.commit(
         handle,
@@ -222,9 +222,11 @@ def test_unknown_module_name_raises(pipeline_config, store_env):
 def test_missing_postprocess_defaults_yaml_raises(
     pipeline_config, store_env, monkeypatch, tmp_path
 ):
-    import adapt.runtime.postprocessor as pp_module
+    from adapt.execution import pipeline_builder
 
-    monkeypatch.setattr(pp_module, "_POSTPROCESS_DEFAULTS_YAML", tmp_path / "does_not_exist.yaml")
+    monkeypatch.setattr(
+        pipeline_builder, "_POSTPROCESS_DEFAULTS_YAML", tmp_path / "does_not_exist.yaml"
+    )
     pp = PostProcessor(store_env.collection, store_env.registry, store_env.run_id, pipeline_config)
     with pytest.raises(RuntimeError, match="post-process module list"):
         pp.run(modules=["fake_post"])

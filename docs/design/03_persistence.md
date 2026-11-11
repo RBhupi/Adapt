@@ -34,8 +34,9 @@ pre-store root fails loudly naming the fix; nothing is ever auto-created.
     └── {COLLECTION_ID}/           ← e.g. KILX; one instrument's data stream
         ├── catalog.db             ← artifacts, lineage, scans, table_schemas
         ├── products.db            ← all module tables + tracking + annotations
-        └── objects/               ← immutable content-addressed files
-            └── {artifact_id}{suffix}
+        └── objects/               ← the files, under readable names
+            ├── raw/{original filename}
+            └── {run_id}/{module}/{source stem}.{product}.nc
 ```
 
 Nothing else ever appears at any level; the integration gate asserts the
@@ -69,10 +70,14 @@ pipeline_version, environment_json, scan counts), `run_modules`
 `runs.config_json` — config is data in the store, not a file beside it.
 
 ### `objects.py` — ObjectStore
-Immutable content-addressed writes: `begin()` stages under
-`objects/.staging/`, `commit(handle, meta, parents)` computes sha256,
-`os.replace`s into place, registers the catalog row and lineage in one step.
-Objects are never mutated or overwritten.
+Named, atomic writes: `begin(object_name)` stages under `objects/.staging/`,
+`commit(handle, meta, parents)` computes sha256, `os.replace`s into place and
+registers the catalog row and lineage. `raw_object_name` and
+`product_object_name` are the only places that spell a name; identity stays in
+the catalog (`artifact_id`, checksum, lineage). A name is taken once (letter
+case ignored). Only its owner — the same run, producer, artifact type and scan —
+may rewrite it, with `commit(..., replace=True)`: the bytes are replaced and the
+row keeps its `artifact_id`. Raw objects are never rewritten.
 
 ### `collection_catalog.py` — Catalog
 `artifacts` (artifact_id, type, producer, run_id, scan_id, observation_time,

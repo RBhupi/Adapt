@@ -12,6 +12,7 @@ import contextlib
 import io
 import logging
 import queue
+import shutil
 import tempfile
 import threading
 import time
@@ -165,6 +166,10 @@ class AwsNexradDownloader(threading.Thread):
     # Thread control
     # ========================================================================
 
+    @classmethod
+    def check(cls, config) -> None:
+        """Nothing to refuse offline: the archive is reached only when the run starts."""
+
     def stop(self):
         """Signal the downloader thread to stop gracefully.
 
@@ -286,19 +291,25 @@ class AwsNexradDownloader(threading.Thread):
         """
         logger.info("Starting %s in %s mode", self.name, self.config.downloader.mode)
 
-        while not self.stopped():
+        try:
+            while not self.stopped():
+                try:
+                    self._download_task()
+                except Exception:
+                    logger.exception("Download task failed")
+
+                # Historical: exit after completion
+                if self.config.downloader.mode == "historical" and self.is_historical_complete():
+                    logger.info("Historical download complete")
+                    break
+
+                # Sleep between iterations (interruptible)
+                self._interruptible_sleep(self.poll_interval_sec)
+        finally:
             try:
-                self._download_task()
-            except Exception:
-                logger.exception("Download task failed")
-
-            # Historical: exit after completion
-            if self.config.downloader.mode == "historical" and self.is_historical_complete():
-                logger.info("Historical download complete")
-                break
-
-            # Sleep between iterations (interruptible)
-            self._interruptible_sleep(self.poll_interval_sec)
+                shutil.rmtree(self._staging_dir)
+            except OSError as exc:
+                logger.warning("Could not remove the staging folder %s: %s", self._staging_dir, exc)
 
         logger.info("Stopped %s", self.name)
 

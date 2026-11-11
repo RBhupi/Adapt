@@ -17,6 +17,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import xarray as xr
+from pydantic import BaseModel, ConfigDict, Field
 
 from adapt.contracts import CELL_LABELS_VAR  # noqa: E402  (layer-legal: contracts is a leaf)
 from adapt.utils.basemap import (  # noqa: E402  (layer-legal: utils is a leaf)
@@ -40,7 +41,7 @@ except ImportError:
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
 
-__all__ = ["RadarPlotter", "PlotConsumer"]
+__all__ = ["PlotConsumer", "PlotsConfig", "RadarPlotter"]
 
 logger = logging.getLogger(__name__)
 
@@ -670,18 +671,35 @@ class RadarPlotter:
         return plot_file
 
 
+class PlotsConfig(BaseModel):
+    """The plots consumer's section of a pipeline file (``consumers: plots:``).
+
+    How plots are drawn (dpi, colour scales, basemap, ...) is the ``visualization``
+    params section; these say when and where they are shown.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    interval_seconds: float = Field(
+        default=2.0, gt=0, description="How often (seconds) the store is checked for a new scan"
+    )
+    show_live: bool = Field(
+        default=False, description="Also show each plot in a live window, not only save it"
+    )
+
+
 class PlotConsumer(threading.Thread):
     """Store-driven plot consumer thread.
 
     Polls the collection catalog for new analysis artifacts and generates
     visualizations. This consumer is completely decoupled from the processing
-    pipeline — it only reads from the store, and plots are written to a
-    user-directed directory OUTSIDE the store root.
+    pipeline — it only reads from the store, and plots are written to the
+    ``output_dir`` its launcher gives it, never into the store's databases.
 
     **Graceful Shutdown:**
 
-    Call stop() to signal shutdown. The thread will complete any in-progress
-    plot and exit cleanly within one poll_interval.
+    Call stop() to signal shutdown. The thread completes any in-progress plot,
+    makes one last poll (so the newest artifact is plotted too), and exits.
     """
 
     def __init__(
@@ -706,8 +724,8 @@ class PlotConsumer(threading.Thread):
         stop_event : threading.Event
             Shared event to signal shutdown. Set this to stop the consumer.
         output_dir : Path
-            User-directed directory to save generated plots (never inside the
-            store root).
+            The directory its launcher gives it for the plots; never the
+            store's databases.
         config : InternalConfig, optional
             Configuration for plot styling and parameters.
         poll_interval : float
@@ -748,11 +766,16 @@ class PlotConsumer(threading.Thread):
                 logger.warning(f"Could not enable interactive plotting: {e}")
                 self.show_live = False
 
-        while not self.stop_event.is_set():
+        while True:
+            # Read before the poll, so an artifact written just before the stop
+            # is still plotted by it.
+            last = self.stop_event.is_set()
             try:
                 self._poll_and_process()
             except Exception as e:
                 logger.error(f"Error in {self.name}: {e}", exc_info=True)
+            if last:
+                break
 
             # Wait for next poll (interruptible)
             self.stop_event.wait(timeout=self.poll_interval)

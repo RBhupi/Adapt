@@ -53,4 +53,4 @@ If you are new to this codebase, read in this order:
 
 ## The One-Sentence Summary
 
-A processing module knows its inputs and outputs. The execution graph wires modules together by matching outputs to inputs. The runtime orchestrates files through the graph. The data store keeps every artifact immutable, checksummed, and catalogued with full provenance. StoreClient provides read-only access — typed filters or SQL — to everything the pipeline has produced.
+A processing module knows its inputs and outputs. The execution graph wires modules together by matching outputs to inputs. The runtime orchestrates files through the graph. The data store keeps every artifact checksummed and catalogued with full provenance; a downloaded scan is never rewritten, and a run may replace only its own module files. StoreClient provides read-only access — typed filters or SQL — to everything the pipeline has produced.

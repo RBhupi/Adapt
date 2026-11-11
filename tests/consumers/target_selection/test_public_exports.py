@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 
 def test_imports():
     from adapt.consumers.target_selection import (
+        SELECTION_FILE,
         CellSnapshot,
         SelectionReason,
         Snapshot,
@@ -20,11 +21,10 @@ def test_imports():
         append_decision,
         build_snapshot,
         is_candidate,
-        load_config,
         total_score,
     )
 
-    assert callable(load_config)
+    assert SELECTION_FILE == "current_selection.json"
     assert callable(build_snapshot)
     assert callable(append_decision)
     assert callable(is_candidate)

@@ -60,17 +60,17 @@ cd Adapt
 pip install -e .
 ```
 
-Then generate a config, run the pipeline, and open the dashboard:
+Then make a data store, run the pipeline, and open the dashboard:
 
 ```bash
-adapt config                              # writes config.yaml in the current directory
-adapt run-nexrad --radar KLOT             # Ctrl-C to stop
-adapt dashboard                           # in a second terminal
+mkdir my_case && cd my_case
+adapt init                                # the store plus its pipeline file nexrad.yaml
+adapt run nexrad                          # Ctrl-C to stop
+adapt dashboard                           # in a second terminal, in the same folder
 ```
 
-`adapt config` with no argument writes `config.yaml` into the current directory
-and sets `base_dir` to that same directory, so the three commands above work
-together with no paths to pass.
+The folder is the store and `nexrad.yaml` is its pipeline (radar `KLOT` until you
+edit `run.radar`), so the commands above work together with no paths to pass.
 
 > Use a fresh environment for the editable install too — the same pip/conda
 > binary-mixing issue described above applies.

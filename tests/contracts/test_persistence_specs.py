@@ -16,7 +16,7 @@ def test_specs_are_frozen_value_types():
     spec = ProductTableWrite(key="cell_stats", table="cell_stats", primary_key=("run_id",))
     with pytest.raises(dataclasses.FrozenInstanceError):
         spec.key = "other"
-    nc = NetcdfArtifact(key="ds", product_type="gridded3d", producer="ingest", description="d")
+    nc = NetcdfArtifact(key="ds", product_type="gridded3d", description="d")
     with pytest.raises(dataclasses.FrozenInstanceError):
         nc.key = "other"
     assert ProductTableWrite(key="r", table="t", primary_key=("run_id",)).index_columns == ()

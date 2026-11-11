@@ -15,6 +15,7 @@ import xarray as xr
 
 from adapt.contracts import ContractViolation
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.fake_graph import fake_core
 from tests.helpers.queue_msg import msg as _msg
 
 # Distinct per-file times: two different scans sharing one nominal second
@@ -49,7 +50,7 @@ def _fake_ds():
 
 
 def _fake_single_result(scan_time):
-    """Return what _executors[1].run() would produce."""
+    """What the modules that run on every scan would produce."""
     return {
         "grid_ds": _fake_ds(),
         "grid_ds_2d": _fake_ds(),
@@ -74,7 +75,7 @@ def test_process_file_pipeline_exception_returns_false(
     def _boom(context):
         raise OSError("disk failure")
 
-    monkeypatch.setattr(proc._executors[1], "run", _boom)
+    fake_core(proc, monkeypatch, _boom)
 
     ok = proc.process_file(_msg(store_env, tmp_path, "file"))
     assert ok is False
@@ -96,8 +97,7 @@ def test_process_file_contract_violation_stops_processor(
     def _boom_multi(context):
         raise ContractViolation("bad grid")
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", _boom_multi)
+    fake_core(proc, monkeypatch, _fake_single, _boom_multi)
 
     ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=t1))
     ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=t2))
@@ -130,8 +130,7 @@ def test_process_file_success_saves_netcdf_and_returns_true(
         "cell_adjacency": pd.DataFrame(),
     }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_result)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_result)
 
     persisted = []
     monkeypatch.setattr(
@@ -159,12 +158,12 @@ def test_process_file_skips_completed_scan(monkeypatch, pipeline_config, store_e
     )
 
     called = []
-    monkeypatch.setattr(
-        proc._executors[1],
-        "run",
+    fake_core(
+        proc,
+        monkeypatch,
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),
     )
 
     ok = proc.process_file(message)
     assert ok is True
-    assert called == []  # single executor was NOT called
+    assert called == []  # no module ran

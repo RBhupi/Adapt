@@ -81,6 +81,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "adapt.configuration" = ["*.yaml"]
 "adapt.configuration.schemas" = ["*.sql"]
+"adapt.consumers.radar_command.presets" = ["*.yaml"]
 "adapt.consumers.target_selection.presets" = ["*.yaml"]
 
 [tool.setuptools_scm]

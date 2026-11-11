@@ -12,14 +12,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class XlmaStatConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # Directory containing xLMA flash-sorted NetCDF files (*.nc). Raw LYLOUT
-    # ASCII must be converted to flash-sorted NetCDF in xLMA/pyxlma first;
-    # non-NetCDF files in the directory are ignored.
-    # Optional at config-build time so config resolution never fails for an
-    # unselected module; the node raises loudly at run() if it is missing — no
-    # silent default.
-    input_dir: str | None = None
-    # Nearest-cell attribution radius for a just-outside flash initiation point.
-    search_radius_m: float = Field(500.0, ge=0.0)
+    # No default folder: None leaves `adapt config --show xlma_stat` a slot to fill,
+    # and the node's build_config refuses to configure a run without it.
+    input_dir: str | None = Field(
+        None,
+        description="Directory of xLMA flash-sorted NetCDF files (*.nc); required. "
+        "Raw LYLOUT ASCII must be converted with xLMA/pyxlma first, and non-NetCDF "
+        "files in the directory are ignored",
+    )
+    search_radius_m: float = Field(
+        500.0,
+        ge=0.0,
+        description="A flash initiating outside every cell goes to the nearest cell "
+        "within this distance (m); beyond it the flash is unattributed",
+    )

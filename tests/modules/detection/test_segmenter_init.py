@@ -22,7 +22,7 @@ def test_expert_default_method_is_threshold():
     """The unconfigured default segmentation method is threshold.
 
     Threshold needs only the 2D CAPPI the pipeline always produces, so a plain
-    `adapt run-nexrad --radar KLOT` works with no further setup. The pyart
+    `adapt run nexrad` works with no further setup. The pyart
     convective/stratiform classifiers stay available via `segmenter.method`.
     """
     from adapt.configuration.schemas.param import ParamConfig
@@ -53,4 +53,4 @@ def test_unknown_method_raises():
         # Try to create config with invalid method
         param = ParamConfig()
         user = UserConfig(segmentation_method="watershed")  # Invalid
-        resolve_config(param, user, None)
+        resolve_config(param, user)

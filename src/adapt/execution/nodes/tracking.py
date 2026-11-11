@@ -50,7 +50,7 @@ class TrackingModule(BaseModule):
 
     name = "tracking"
     summary = "link cells across scans"
-    required_history = 2
+    param_sections = ("tracker",)
     pipeline_phase = 0
     inputs = ["projected_ds", "cell_stats", "tracking_config", "scan_time", "scan_id"]
     # tracking_decisions: every candidate considered this scan and why each
@@ -71,7 +71,6 @@ class TrackingModule(BaseModule):
         NetcdfArtifact(
             key="analysis_ds",
             product_type="segmentation2d",
-            producer="processor",
             description="Radar analysis with segmentation and projections",
         ),
         TrackTablesWrite(

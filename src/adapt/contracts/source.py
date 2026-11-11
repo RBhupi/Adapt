@@ -20,6 +20,10 @@ from typing import Protocol, runtime_checkable
 class ScanSource(Protocol):
     """Interface the orchestrator drives. Implementations are usually threads."""
 
+    @classmethod
+    def check(cls, config) -> None:
+        """Refuse a ``config`` this source cannot run, before the run is recorded."""
+
     def start(self) -> None:
         """Begin producing file paths into the result queue (non-blocking)."""
 

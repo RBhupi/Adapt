@@ -75,13 +75,13 @@ def test_build_config_range_makes_min_and_max_gates_and_skips_blanks():
     cfg = build_tse_config(
         rules, min_age_s=0.0, max_obs_s=1200.0, switch_margin=15.0, growth_window=4
     )
-    assert [(g.field, g.op, g.value) for g in cfg.candidate.gates] == [
+    assert [(g.field, g.op, g.value) for g in cfg.entry.gates] == [
         ("cell_area_sqkm", "ge", 20.0),
         ("cell_area_sqkm", "le", 200.0),
         ("radar_reflectivity_mean", "ge", 40.0),
     ]
-    assert cfg.selection.max_observation_seconds == 1200.0
-    assert cfg.selection.switch_margin == 15.0
+    assert cfg.duration.max_minutes == 20.0
+    assert cfg.switch.margin == 15.0
     assert cfg.snapshot.growth_window_scans == 4
 
 
@@ -93,14 +93,12 @@ def test_build_config_max_only_makes_ceiling_gate():
         switch_margin=5.0,
         growth_window=2,
     )
-    assert [(g.field, g.op, g.value) for g in cfg.candidate.gates] == [
-        ("n_adjacent_cells", "le", 3.0)
-    ]
+    assert [(g.field, g.op, g.value) for g in cfg.entry.gates] == [("n_adjacent_cells", "le", 3.0)]
 
 
 def test_build_config_no_rules_gives_empty_gates():
     cfg = build_tse_config([], min_age_s=0.0, max_obs_s=600.0, switch_margin=5.0, growth_window=2)
-    assert cfg.candidate.gates == ()
+    assert cfg.entry.gates == ()
 
 
 # ── drawing helpers (Agg; assert artists, not pixels) ───────────────────────
@@ -127,6 +125,8 @@ def _cell(uid, *, mass=(50, 50), proj=None, area=30.0, refl=50.0, growth=0.0):
         "cell_centroid_mass_y": float(mass[1]),
         "cell_area_sqkm": float(area),
         "radar_reflectivity_max": float(refl),
+        "field_max": float(refl),
+        "growth_rate_sqkm_per_min": float(growth),
     }
     if proj:
         for k, (px, py) in proj.items():

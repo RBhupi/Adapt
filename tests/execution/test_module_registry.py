@@ -220,8 +220,8 @@ class TestRegistryGraphIntegration:
         reg.register(StubB)
 
         modules = reg.create_modules()
-        nodes = GraphBuilder(modules).build()
-        ctx = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder(modules, provided=frozenset()).build()
+        ctx = GraphExecutor(nodes).run({}, history=0).context
 
         assert ctx["a_out"] == "a_result"
         assert ctx["b_out"] == "b_result"
@@ -237,7 +237,7 @@ class TestRegistryGraphIntegration:
         reg.register(StubC)
 
         modules = reg.create_modules()
-        nodes = GraphBuilder(modules).build()
-        ctx = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder(modules, provided=frozenset()).build()
+        ctx = GraphExecutor(nodes).run({}, history=0).context
 
         assert ctx["c_out"] == "c_result"

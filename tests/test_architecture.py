@@ -299,25 +299,9 @@ def test_heavy_dependency_stays_in_its_component(dep: str) -> None:
 # output key would shadow each other; an input nobody produces and nobody seeds
 # is a typo that only fails at runtime. These tests make both fail at CI time.
 
-# Keys injected by the runtime (processor/orchestrator) before the graph runs,
-# i.e. legitimate module inputs that no module produces.
-_CONTEXT_SEED_KEYS = frozenset(
-    {
-        "nexrad_file",  # queued file path from the source
-        "scan_history",  # rolling window of prior segmented scans
-        "prior_scan",  # previous completed scan context; processor seeds it (None when unusable)
-        "grid_ds_3d",  # full 3D grid sliced in by the processor
-        "run_id",  # repository run identifier
-        "scan_id",  # sha256[:16] of raw bytes; processor seeds it every scan (uid-v2 birth input)
-        "scan_time",  # owned by the source boundary; processor seeds it every scan
-        "ingest_config",
-        "detection_config",
-        "projection_config",
-        "analysis_config",
-        "tracking_config",
-        "cell_volume_stats_config",
-    }
-)
+# The keys the runtime provides before the graph runs (legitimate module inputs
+# that no module produces) are named once, in ``adapt.contracts.SCAN_SEEDS``,
+# plus one ``<name>_config`` per module.
 
 
 def _registered_default_modules():
@@ -355,20 +339,22 @@ def test_module_output_keys_are_unique() -> None:
 
 def test_module_inputs_are_produced_or_seeded() -> None:
     """Every declared input is another module's output or a runtime-seeded key."""
+    from adapt.contracts import SCAN_SEEDS, config_key
+
     modules = _registered_default_modules()
     produced = {key for m in modules for key in m.outputs}
+    provided = SCAN_SEEDS | {config_key(m.name) for m in modules}
     orphans: list[str] = []
 
     for module in modules:
         for key in module.inputs:
-            if key not in produced and key not in _CONTEXT_SEED_KEYS:
+            if key not in produced and key not in provided:
                 orphans.append(f"  {module.name} needs '{key}'")
 
     assert not orphans, (
         "\nInput key is neither produced by any module nor seeded by the runtime — "
-        "either a typo in the declaration or _CONTEXT_SEED_KEYS needs the new "
-        "runtime-injected key added here, with a comment saying who seeds it:\n"
-        + "\n".join(orphans)
+        "either a typo in the declaration or adapt.contracts.SCAN_SEEDS needs the "
+        "new runtime-provided key:\n" + "\n".join(orphans)
     )
 
 
@@ -546,9 +532,10 @@ def test_obs_context_fields_never_in_module_io() -> None:
     reverse, so a module declaring it consumes science identity, not
     telemetry.
     """
+    from adapt.contracts import SCAN_SEEDS
     from adapt.contracts.observability import ObsContext
 
-    obs_fields = set(ObsContext.__dataclass_fields__) - _CONTEXT_SEED_KEYS
+    obs_fields = set(ObsContext.__dataclass_fields__) - SCAN_SEEDS
     leaks: list[str] = []
     for module in _registered_default_modules():
         for key in list(module.inputs) + list(module.outputs):

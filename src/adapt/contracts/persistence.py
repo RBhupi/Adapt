@@ -10,11 +10,14 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class NetcdfArtifact:
-    """Write an xarray.Dataset (context key) as a NetCDF artifact."""
+    """Write an xarray.Dataset (context key) as a NetCDF artifact.
+
+    The file and its catalog row are attributed to the module that declares
+    this spec.
+    """
 
     key: str
     product_type: str  # e.g. "segmentation2d"
-    producer: str
     description: str  # stamped into ds.attrs["description"]
 
 

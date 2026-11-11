@@ -20,6 +20,7 @@ import xarray as xr
 
 from adapt.runtime.processor import RadarProcessor
 from adapt.utils.time import to_scan_iso
+from tests.helpers.fake_graph import fake_core
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -95,9 +96,7 @@ def test_queue_scan_time_reaches_module_context(monkeypatch, pipeline_config, st
             "num_cells": 1,
         }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: {})
-    monkeypatch.setattr(proc, "_post_executor", None)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: {})
 
     # The file name carries NO parseable stamp: the queued value is the only
     # possible source, so this fails if the processor drops it.
@@ -119,9 +118,7 @@ def test_minted_scan_id_reaches_tracking_rows(monkeypatch, pipeline_config, stor
             "num_cells": 1,
         }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: _fake_multi_result(_T2))
-    monkeypatch.setattr(proc, "_post_executor", None)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
 
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-a", _T1)) is True
     second = _msg(store_env, tmp_path, "nostamp-b", _T2)
@@ -165,9 +162,7 @@ def test_scan_registration_artifacts_and_attrs_share_identity(
             "num_cells": 1,
         }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: _fake_multi_result(_T2))
-    monkeypatch.setattr(proc, "_post_executor", None)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
 
     first = _msg(store_env, tmp_path, "nostamp-a", scan_times[0])
     second = _msg(store_env, tmp_path, "nostamp-b", scan_times[1])
@@ -220,9 +215,7 @@ def test_message_scan_time_wins_over_module_results(
             "num_cells": 1,
         }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: _fake_multi_result(wrong))
-    monkeypatch.setattr(proc, "_post_executor", None)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(wrong))
 
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-a", _T1)) is True
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-b", _T2)) is True

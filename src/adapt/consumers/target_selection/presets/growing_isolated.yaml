@@ -16,7 +16,11 @@
 # trend of one over the last growth_window_scans scans (trend_<column>_per_min).
 
 target_selection:
-  candidate:
+  # A rule in five parts: 1. entry gates define the candidates, 2. a weighted score ranks them,
+  # 3. hold gates keep the current target, 4. the switching policy says whether a newcomer may
+  # displace it, 5. the duration cap bounds how long it is followed.
+
+  entry:                                                                 # 1. candidates
     gates:
       - {field: n_scans,                            op: ge, value: 2}     # decided at the 2nd observation or later
       - {field: n_scans,                            op: le, value: 4}     # ... but not on mature cells: the growth phase is over by then
@@ -24,37 +28,39 @@ target_selection:
       - {field: trend_area_40dbz_km2_per_min,       op: gt, value: 0}     # 40 dBZ core growing
       - {field: trend_radar_reflectivity_max_per_min, op: gt, value: 0}   # and intensifying
       - {field: radar_reflectivity_max,             op: ge, value: 40}    # has a core at all
-    min_age_seconds: 0
-    hold_gates: []            # once selected, stay on the cell until the tracker ends it or the cap is reached
-                              # (leaving the key out would make the entry gates the hold gates, dropping the
-                              # target as soon as it stops growing).
+
+  score:                                                                 # 2. ranking
+    weights:                  # points per unit of a snapshot column; negative = penalty
+      trend_area_40dbz_km2_per_min: 10.0      # per (km2/min) of 40 dBZ area growth: the ranking variable
+      radar_differential_reflectivity_max: 5.0 # per dB: young cells carry more Z_DR at the same Z (size sorting)
+      n_adjacent_cells: -10.0                 # per touching neighbour: prefer isolated cells (cleaner sampling, longer life)
+      # not used: radar_reflectivity_max (the gate already requires a core), cell_area_sqkm (size
+      # favours mature cells), growth_rate_sqkm_per_min (weaker than the 40 dBZ trend)
+    site_preference:
+      projection_steps: 3     # use the +1..+3 scan projections (about 15 min)
+      sites: []               # add {name, lat, lon, radius_km, bonus} to favour cells heading over an instrumented site
+
+  hold:                                                                  # 3. keeping the target
+    gates: []                 # once selected, stay on the cell until the tracker ends it or the cap is reached
+                              # (the entry gates as hold gates would drop the target as soon as it stops growing).
     # NOT used as a hold gate: area_40dbz_km2 > 0. The 40 dBZ core flickers at single-scan resolution, and
     # dropping the target when it vanishes ended only 11 % of episodes at the cell's end (vs 71 % below).
 
-  priority:
-    weights:
-      field: 0.0            # dBZ: not used for ranking — the gate already requires a core
-      area: 0.0             # km2: not used — size favours mature cells
-      growth_rate: 0.0      # km2/min of total area: weaker than the 40 dBZ trend, not used
-      extra:
-        trend_area_40dbz_km2_per_min: 10.0     # points per (km2/min) of 40 dBZ area growth: the ranking variable
-        radar_differential_reflectivity_max: 5.0 # points per dB: young cells carry more Z_DR at the same Z (size sorting)
-        n_adjacent_cells: -10.0                # penalty per touching neighbour: prefer isolated cells (cleaner sampling, longer life)
+  switch:                                                                # 4. displacing it
+    allow: false              # never abandon a target for a better-scoring newcomer. In the 15-17 June 2025
+                              # replay, switching with a 5-point margin held targets for 1 scan (median) and
+                              # covered 16 % of their life cycles; never switching with the 60-min cap held them
+                              # for 10 scans, covered 77 %, captured the reflectivity peak in 91 % of episodes
+                              # and followed 71 % to the cell's end (58 cells in two days).
+    margin: 5.0               # points a newcomer must win by; unused while allow is false
 
-  site_preference:
-    projection_steps: 3     # use the +1..+3 scan projections (about 15 min)
-    sites: []               # add {name, lat, lon, radius_km, bonus} to favour cells heading over an instrumented site
-
-  selection:
-    allow_switch: false           # never abandon a target for a better-scoring newcomer. In the 15-17 June 2025
-                                  # replay, switching with a 5-point margin held targets for 1 scan (median) and
-                                  # covered 16 % of their life cycles; never switching with the 60-min cap held them
-                                  # for 10 scans, covered 77 %, captured the reflectivity peak in 91 % of episodes
-                                  # and followed 71 % to the cell's end (58 cells in two days).
-    switch_margin: 5.0            # unused while allow_switch is false
-    max_observation_seconds: 3600 # 60 min: long enough for the median cell's full life; a cap of 30 min halved
-                                  # the fraction followed to the end, no cap gained little and sampled fewer cells
+  duration:                                                              # 5. the cap
+    max_minutes: 60           # long enough for the median cell's full life; a cap of 30 min halved the fraction
+                              # followed to the end, no cap (null) gained little and sampled fewer cells
 
   snapshot:
     growth_window_scans: 2        # trends over the last two scans, as the problem is posed
     trend_fields: [area_40dbz_km2, radar_reflectivity_max]
+    track_summary: at_scan        # at_scan: the causal view a live run has (n_scans, duration, maxima so far)
+                                  # end_of_run: an oracle that sees each track's final values; replays only,
+                                  # to measure how far causal rules fall short of hindsight

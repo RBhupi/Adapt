@@ -37,9 +37,9 @@ def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_c
     fake_gateway.acquired.add("scan1")  # already committed by a previous run
 
     config = make_config(
-        radar_id="KDIX",
-        latest_n=2,
-        minutes=30,
+        radar="KDIX",
+        latest_files=2,
+        latest_minutes=30,
     )
 
     d = AwsNexradDownloader(

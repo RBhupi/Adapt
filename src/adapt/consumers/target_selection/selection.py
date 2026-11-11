@@ -35,7 +35,7 @@ class TargetSelection:
     score: float
     selection_time: datetime
     trajectory: tuple[TrajectoryPoint, ...]
-    observation_window: tuple[datetime, datetime]
+    observation_window: tuple[datetime, datetime | None]  # end None: no duration cap
     predicted_hulls: tuple | None = None
 
 

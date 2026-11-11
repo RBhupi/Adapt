@@ -28,10 +28,19 @@ __all__ = [
     "Store",
     "StoreError",
     "init_store",
+    "store_root",
 ]
 
 REGISTRY_FILENAME = "registry.db"
 _LEGACY_REGISTRY = "adapt_registry.db"
+
+
+def store_root(path: Path) -> Path | None:
+    """The root of the store that holds ``path`` (``path`` itself included), or None."""
+    for candidate in (path, *path.parents):
+        if (candidate / REGISTRY_FILENAME).exists():
+            return candidate
+    return None
 
 
 def _reject_legacy_root(root_path: Path) -> None:
@@ -74,6 +83,12 @@ class Store:
         root_path = Path(root).resolve()
         _reject_legacy_root(root_path)
         if not (root_path / REGISTRY_FILENAME).exists():
+            holder = store_root(root_path)
+            if holder is not None:
+                raise StoreError(
+                    f"No Adapt store at {root_path}: it is a folder inside the store at "
+                    f"{holder} — run from there."
+                )
             raise StoreError(
                 f"No Adapt store at {root_path}: {REGISTRY_FILENAME} not found. "
                 "Run 'adapt init' first."
@@ -147,7 +162,17 @@ def init_store(root: str | Path) -> Path:
     """
     root_path = Path(root).resolve()
     if (root_path / REGISTRY_FILENAME).exists():
-        raise AlreadyInitializedError(f"Store already initialized at {root_path}")
+        raise AlreadyInitializedError(
+            f"Store already initialized at {root_path}. Write a pipeline file there with "
+            "'adapt config NAME', or run one with 'adapt run NAME'."
+        )
+    if root_path.is_file():
+        raise StoreError(f"{root_path} is a file; a store is a folder")
+    holder = store_root(root_path.parent)
+    if holder is not None:
+        raise StoreError(
+            f"{root_path} is inside the store at {holder}; a store holds no nested store"
+        )
     _reject_legacy_root(root_path)
 
     root_path.mkdir(parents=True, exist_ok=True)

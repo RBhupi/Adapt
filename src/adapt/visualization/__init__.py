@@ -3,5 +3,6 @@
 
 """Optional visualization package — never imported by core.
 
-Only PlotConsumer is used (imported directly in cli.py).
+Only the plots consumer is used: PlotConsumer and its options PlotsConfig, launched
+by the cli consumer table (adapt.cli._consumers).
 """

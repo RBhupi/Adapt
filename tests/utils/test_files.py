@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Atomic text writes and fail-loud YAML section reads."""
+"""Atomic text writes."""
 
 import os
 import stat
@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from adapt.utils.files import atomic_write_text, read_yaml_section
+from adapt.utils.files import atomic_write_text
 
 pytestmark = pytest.mark.unit
 
@@ -110,44 +110,3 @@ def test_replace_refused_for_good_raises_after_a_bounded_wait(tmp_path, monkeypa
 def test_missing_parent_directory_raises_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         atomic_write_text(tmp_path / "absent" / "current.json", "new\n")
-
-
-def test_read_yaml_section_returns_the_named_section(tmp_path):
-    path = tmp_path / "targeting.yaml"
-    path.write_text("radar_command:\n  output:\n    directory: /data/cmd\n", encoding="utf-8")
-
-    assert read_yaml_section(path, "radar_command") == {"output": {"directory": "/data/cmd"}}
-
-
-def test_read_yaml_section_ignores_sibling_sections(tmp_path):
-    path = tmp_path / "targeting.yaml"
-    path.write_text(
-        "target_selection:\n  weights: [1, 2]\nradar_command:\n  site: {id: SGP}\nunrelated: 7\n",
-        encoding="utf-8",
-    )
-
-    assert read_yaml_section(path, "target_selection") == {"weights": [1, 2]}
-
-
-def test_read_yaml_section_rejects_empty_file(tmp_path):
-    path = tmp_path / "targeting.yaml"
-    path.write_text("", encoding="utf-8")
-
-    with pytest.raises(ValueError, match=r"targeting\.yaml.*not a mapping"):
-        read_yaml_section(path, "radar_command")
-
-
-def test_read_yaml_section_missing_key_lists_present_keys(tmp_path):
-    path = tmp_path / "targeting.yaml"
-    path.write_text("target_selection: {}\nsite: {}\n", encoding="utf-8")
-
-    with pytest.raises(ValueError, match=r"'radar_command'.*\['site', 'target_selection'\]"):
-        read_yaml_section(path, "radar_command")
-
-
-def test_read_yaml_section_rejects_non_mapping_section(tmp_path):
-    path = tmp_path / "targeting.yaml"
-    path.write_text("radar_command:\n  - SGP\n", encoding="utf-8")
-
-    with pytest.raises(ValueError, match=r"'radar_command'.*not a mapping"):
-        read_yaml_section(path, "radar_command")

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from adapt.configuration.schemas.errors import ConfigError
 from adapt.runtime.sources import LocalDirectorySource
 from adapt.utils.identity import scan_id_from_bytes
 
@@ -32,7 +33,12 @@ def _write_volume(directory: Path, name: str, payload: bytes) -> Path:
 def _local_source(source_dir: Path, acquire) -> LocalDirectorySource:
     config = SimpleNamespace(
         source_dir=str(source_dir),
-        downloader=SimpleNamespace(min_file_size=1),
+        downloader=SimpleNamespace(
+            min_file_size=1,
+            radar="KLOT",
+            start_time="2024-05-18T12:00:00Z",
+            end_time="2024-05-18T13:00:00Z",
+        ),
     )
     return LocalDirectorySource(config, result_queue=Queue(), acquire=acquire)
 
@@ -60,15 +66,13 @@ def test_local_source_acquires_and_queues_identity(tmp_path, store_env):
 
 def test_local_source_without_filename_stamp_fails_loudly(tmp_path, store_env):
     # The store cannot register a scan without its observation time; a
-    # stampless file fails at the boundary instead of poisoning the run.
+    # stampless file is refused before the run starts instead of poisoning it.
     src_dir = tmp_path / "incoming"
     src_dir.mkdir()
     _write_volume(src_dir, "opaque_volume.raw", b"stampless-volume-bytes")
 
-    source = _local_source(src_dir, store_env.acquirer)
-
-    with pytest.raises(ValueError):
-        source.run()
+    with pytest.raises(ConfigError, match="opaque_volume.raw"):
+        _local_source(src_dir, store_env.acquirer)
 
 
 def test_local_source_requires_gateway(tmp_path):

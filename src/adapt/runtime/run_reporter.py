@@ -123,6 +123,14 @@ def format_methods(config: InternalConfig, enabled_modules: tuple[str, ...]) -> 
     return "\n".join(["methods:", *lines]) if lines else ""
 
 
+def _headline(summary: RunSummary) -> str:
+    """SUCCESS / CANCELLED / FAILED, or the failed scans of a run that went through."""
+    if summary.status == "success" and summary.failures:
+        scans = "SCAN" if summary.failures == 1 else "SCANS"
+        return f"COMPLETED, {summary.failures} {scans} FAILED"
+    return summary.status.upper()
+
+
 def format_summary(summary: RunSummary) -> str:
     """One compact block of end-of-run stats with a per-module timing table."""
     module_lines = [
@@ -134,7 +142,7 @@ def format_summary(summary: RunSummary) -> str:
         module_lines = ["  —"]
     return "\n".join(
         [
-            f"── run {summary.run_id}  {summary.status.upper()}  "
+            f"── run {summary.run_id}  {_headline(summary)}  "
             f"{format_duration(summary.duration_seconds)} {_RULE[:20]}",
             f"files {summary.files_processed:,} · scans {summary.scans_processed:,} "
             f"· objects {summary.objects_detected:,} · warnings {summary.warnings} "

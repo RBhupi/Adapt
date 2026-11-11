@@ -18,7 +18,7 @@ from adapt.configuration.schemas.user import UserConfig  # noqa: E402
 
 class TestSourceSelector:
     def test_source_defaults_to_aws_nexrad(self, tmp_path):
-        cfg = resolve_config(ParamConfig(), UserConfig(base_dir=str(tmp_path), radar="KLOT"), None)
+        cfg = resolve_config(ParamConfig(), UserConfig(base_dir=str(tmp_path), radar="KLOT"))
         assert cfg.source == "aws_nexrad"
         assert cfg.source_dir is None
 
@@ -26,6 +26,6 @@ class TestSourceSelector:
         user = UserConfig(
             base_dir=str(tmp_path), radar="KLOT", source="local_directory", source_dir="/data/in"
         )
-        cfg = resolve_config(ParamConfig(), user, None)
+        cfg = resolve_config(ParamConfig(), user)
         assert cfg.source == "local_directory"
         assert cfg.source_dir == "/data/in"

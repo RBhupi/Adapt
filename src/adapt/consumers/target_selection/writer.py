@@ -3,8 +3,9 @@
 
 """Decision outputs: a JSONL log with one line per scan, and the current-selection file.
 
-Both live at user-configured paths outside the Adapt store — consumers never
-write into the store's databases. The parent directory must exist.
+Both live in the output directory the launcher gives target selection,
+``<root>/consumers/<run_id>/target_selection/``, under the fixed names below —
+consumers never write into the store's databases. The directory must exist.
 
 The current-selection file is the contract with radar command: ``SCHEMA``
 changes whenever its keys do.
@@ -19,13 +20,15 @@ from adapt.utils.files import atomic_write_text
 from adapt.utils.time import to_scan_iso
 
 SCHEMA = 1
+SELECTION_FILE = "current_selection.json"
+DECISION_LOG_FILE = "decisions.jsonl"
 
 
 def start_decision_log(path: str | Path) -> None:
     """Create the JSONL log empty, replacing any earlier one.
 
-    Every ``tse run`` replays its run from the first scan, so the log is that
-    invocation's record of the run: rewritten, never appended to twice.
+    Every target selection run replays its run from the first scan, so the log
+    is that invocation's record of the run: rewritten, never appended to twice.
     """
     atomic_write_text(path, "")
 
@@ -44,7 +47,7 @@ def append_decision(path: str | Path, scan_decision: ScanDecision) -> None:
         ],
         "observation_window": None
         if selection is None
-        else [to_scan_iso(t) for t in selection.observation_window],
+        else [None if t is None else to_scan_iso(t) for t in selection.observation_window],
     }
     # newline="\n": the log is a data product, so its bytes must not depend on the
     # platform's line-ending translation.

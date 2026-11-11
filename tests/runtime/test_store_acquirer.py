@@ -33,8 +33,14 @@ def volume(tmp_path):
     return path
 
 
-def _objects(collection):
-    return [p for p in collection.objects_dir.iterdir() if p.name != ".staging"]
+def _objects(collection) -> list[str]:
+    """Every published object, as its name relative to ``objects/``."""
+    root = collection.objects_dir
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and ".staging" not in p.relative_to(root).parts
+    )
 
 
 class TestAcquireFile:
@@ -82,6 +88,66 @@ class TestAcquireFile:
         assert len(_objects(collection)) == 1
         assert collection.catalog.get_scan("run-2", first["scan_id"]) is not None
 
+    def test_the_raw_file_keeps_its_original_name(self, collection, volume):
+        StoreAcquirer(collection, "run-1").acquire_file(
+            volume, source_uri=str(volume), scan_time=SCAN_TIME
+        )
+
+        assert _objects(collection) == ["raw/KILX20260813_173158_V06"]
+
+    def test_the_same_file_from_a_second_source_reuses_the_stored_object(self, collection, volume):
+        """A later run reading the same scan from elsewhere gets the stored object
+        and its own scan row."""
+        first = StoreAcquirer(collection, "run-1").acquire_file(
+            volume, source_uri="s3://nexrad/KILX20260813_173158_V06", scan_time=SCAN_TIME
+        )
+
+        second = StoreAcquirer(collection, "run-2").acquire_file(
+            volume, source_uri=str(volume), scan_time=SCAN_TIME
+        )
+
+        assert second["artifact_id"] == first["artifact_id"]
+        assert second["scan_id"] == first["scan_id"]
+        assert _objects(collection) == ["raw/KILX20260813_173158_V06"]
+        scan = collection.catalog.get_scan("run-2", first["scan_id"])
+        assert scan is not None
+        assert scan["source_file_name"] == "KILX20260813_173158_V06"
+
+    def test_a_different_file_with_a_stored_name_is_refused_naming_both_sources(
+        self, collection, volume, tmp_path
+    ):
+        acquirer = StoreAcquirer(collection, "run-1")
+        acquirer.acquire_file(volume, source_uri="s3://nexrad/first", scan_time=SCAN_TIME)
+        other = tmp_path / "elsewhere" / volume.name
+        other.parent.mkdir()
+        other.write_bytes(b"different bytes")
+
+        with pytest.raises(StoreError) as excinfo:
+            acquirer.acquire_file(other, source_uri="s3://nexrad/second", scan_time=SCAN_TIME)
+
+        message = str(excinfo.value)
+        assert "KILX20260813_173158_V06" in message
+        assert "s3://nexrad/first" in message
+        assert "s3://nexrad/second" in message
+        assert hashlib.sha256(PAYLOAD).hexdigest()[:16] in message  # the stored scan
+        assert hashlib.sha256(b"different bytes").hexdigest()[:16] in message  # the refused one
+        assert (collection.objects_dir / "raw" / volume.name).read_bytes() == PAYLOAD
+
+    def test_a_different_file_whose_name_differs_only_in_case_is_refused(
+        self, collection, volume, tmp_path
+    ):
+        acquirer = StoreAcquirer(collection, "run-1")
+        acquirer.acquire_file(volume, source_uri="s3://nexrad/first", scan_time=SCAN_TIME)
+        other = tmp_path / "elsewhere" / volume.name.lower()
+        other.parent.mkdir()
+        other.write_bytes(b"different bytes")
+
+        with pytest.raises(StoreError, match="s3://nexrad/first"):
+            acquirer.acquire_file(other, source_uri="s3://nexrad/second", scan_time=SCAN_TIME)
+
+        assert (collection.objects_dir / "raw" / volume.name).read_bytes() == PAYLOAD
+        assert len(collection.catalog.list_artifacts()) == 1
+
     def test_missing_scan_time_raises_naming_file(self, collection, volume):
         acquirer = StoreAcquirer(collection, "run-1")
 
@@ -110,6 +176,31 @@ class TestSkipLookups:
 
         assert message["scan_id"] == hashlib.sha256(PAYLOAD).hexdigest()[:16]
         assert collection.catalog.get_scan("run-2", message["scan_id"]) is not None
+
+    def test_a_stored_file_is_never_fetched_again_from_another_source(self, collection, volume):
+        """Stored from a local folder; a later source listing the same file name must
+        not download it."""
+        StoreAcquirer(collection, "run-1").acquire_file(
+            volume, source_uri=str(volume), scan_time=SCAN_TIME
+        )
+        aws_key = "2026/08/13/KILX/KILX20260813_173158_V06"
+        later = StoreAcquirer(collection, "run-2")
+
+        assert later.is_acquired(aws_key)
+        message = later.acquire_existing(aws_key, scan_time=SCAN_TIME)
+
+        assert message["scan_id"] == hashlib.sha256(PAYLOAD).hexdigest()[:16]
+        assert collection.catalog.get_scan("run-2", message["scan_id"]) is not None
+        assert _objects(collection) == ["raw/KILX20260813_173158_V06"]
+
+    def test_a_file_not_in_the_store_is_not_acquired(self, collection, volume):
+        StoreAcquirer(collection, "run-1").acquire_file(
+            volume, source_uri=str(volume), scan_time=SCAN_TIME
+        )
+
+        assert not StoreAcquirer(collection, "run-2").is_acquired(
+            "2026/08/13/KILX/KILX20260813_174000_V06"
+        )
 
     def test_acquire_existing_unknown_uri_raises(self, collection):
         with pytest.raises(StoreError, match="nowhere"):

@@ -40,11 +40,11 @@ class TestRoundTrip:
     def test_roundtrip_preserves_backslashes(self):
         r"""A Windows path must survive the round trip verbatim.
 
-        Every generated config carries base_dir, which on Windows looks like
-        C:\Users\...\run. Emitting that as a double-quoted YAML scalar makes the
-        backslash an escape character: the value is silently corrupted, and a
-        sequence like \U is a hard parse error — so `adapt config` would write a
-        config.yaml that `adapt run-nexrad` cannot read.
+        A written path such as a store root or source_dir looks like
+        C:\Users\...\run on Windows. Emitting that as a double-quoted YAML scalar
+        makes the backslash an escape character: the value is silently corrupted,
+        and a sequence like \U is a hard parse error — so the written file could
+        not be read back.
         """
         data = {
             "base_dir": r"C:\Users\runneradmin\AppData\Local\Temp\nested",
@@ -75,33 +75,40 @@ class TestComments:
         assert "#" not in out.split("mode: realtime")[1].split("\n")[0]
 
 
-class TestCommentedSequence:
-    """A flat list with a dict description renders block-style and commentable."""
+class TestNonScalarComments:
+    """Options whose value is a list or a mapping carry their description too."""
 
-    _DESC = {
-        "modules": {
-            "_header": "Pipeline modules — all run by default.\nComment out to skip.",
-            "ingest": "download + regrid",
-            "detection": "",  # no per-item comment
+    def test_flat_list_description_is_an_inline_comment(self):
+        out = dump({"fields": ["a", "b"]}, {"fields": "variables kept"})
+        assert "fields: [a, b]  # variables kept" in out.splitlines()
+
+    def test_nested_list_description_comments_its_key(self):
+        data = {"grid_limits": ((0.0, 1.0), (2.0, 3.0))}
+        out = dump(data, {"grid_limits": "grid extent (m)"})
+        assert "grid_limits:  # grid extent (m)" in out.splitlines()
+        assert yaml.safe_load(out) == {"grid_limits": [[0.0, 1.0], [2.0, 3.0]]}
+
+    def test_empty_mapping_description_is_an_inline_comment(self):
+        out = dump({"field_map": {}}, {"field_map": "variable renames"})
+        assert "field_map: {}  # variable renames" in out.splitlines()
+
+    def test_mapping_leaf_description_comments_its_key(self):
+        data = {"extra": {"n_adjacent_cells": -10.0}}
+        out = dump(data, {"extra": "extra column weights"})
+        assert "extra:  # extra column weights" in out.splitlines()
+        assert yaml.safe_load(out) == data
+
+    def test_nested_section_header_is_a_comment_above_it(self):
+        data = {"segmenter": {"threshold_params": {"threshold": 30}}}
+        desc = {
+            "segmenter": {
+                "threshold_params": {"_header": "threshold method", "threshold": "dBZ"},
+            }
         }
-    }
-
-    def test_block_style_with_header_and_item_comments(self):
-        out = dump({"modules": ["ingest", "detection"]}, self._DESC)
-        lines = out.splitlines()
-        assert "# Pipeline modules — all run by default." in lines
-        assert "# Comment out to skip." in lines
-        assert "modules:" in lines
-        assert "  - ingest  # download + regrid" in lines
-        assert "  - detection" in lines  # empty desc → no inline comment
-
-    def test_block_list_roundtrips_to_string_list(self):
-        out = dump({"modules": ["ingest", "detection"]}, self._DESC)
-        assert yaml.safe_load(out)["modules"] == ["ingest", "detection"]
-
-    def test_plain_list_without_dict_desc_stays_inline(self):
-        out = dump({"xs": [1, 2, 3]}, {"xs": "numbers"})
-        assert "xs: [1, 2, 3]" in out
+        lines = dump(data, desc).splitlines()
+        heading = lines.index("  # threshold method")
+        assert lines[heading + 1] == "  threshold_params:"
+        assert lines[heading + 2] == "    threshold: 30  # dBZ"
 
 
 def test_dict_keys_with_yaml_significant_chars_round_trip():

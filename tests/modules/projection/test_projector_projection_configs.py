@@ -5,11 +5,14 @@ from adapt.modules.projection.module import RadarCellProjector
 pytestmark = pytest.mark.unit
 
 
-def test_max_projection_steps_is_capped(simple_labeled_ds_pair, make_projection_config):
-    """Projection steps are capped at default maximum."""
+def test_projection_frames_follow_the_configured_steps(
+    simple_labeled_ds_pair, make_projection_config
+):
+    """The projector writes one registration frame plus one frame per configured step,
+    up to the schema's maximum of 10 (a larger value is refused by the configuration)."""
     from adapt.configuration.schemas.user import UserProjectorConfig
 
-    config = make_projection_config(projector=UserProjectorConfig(max_projection_steps=100))
+    config = make_projection_config(projector=UserProjectorConfig(max_projection_steps=10))
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)

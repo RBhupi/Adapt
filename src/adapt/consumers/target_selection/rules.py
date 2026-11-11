@@ -5,7 +5,7 @@
 
 Scores are raw weighted sums — a cell's score depends only on the cell
 itself plus fixed site geometry, so it stays stable as other cells
-appear and disappear (the stability switch_margin relies on).
+appear and disappear (the stability the switch margin relies on).
 """
 
 import math
@@ -14,8 +14,9 @@ from collections.abc import Callable, Mapping, Sequence
 
 from adapt.consumers.target_selection._geo import haversine_km
 from adapt.consumers.target_selection.config import (
-    CandidateConfig,
-    PriorityWeights,
+    DurationConfig,
+    EntryConfig,
+    HoldConfig,
     QualityGate,
     SitePreferenceConfig,
     TSEConfig,
@@ -48,54 +49,45 @@ def passes_gates(cell: CellSnapshot, gates: Sequence[QualityGate]) -> bool:
     return True
 
 
-def is_candidate(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
-    """Candidate rule: every entry gate plus the age gate must pass.
+def is_candidate(cell: CellSnapshot, cfg: EntryConfig) -> bool:
+    """Entry rule (part 1): every entry gate must pass.
 
     Being in the snapshot at all is the "active" clause — snapshots hold
     only latest-scan cells.
     """
-    return passes_gates(cell, cfg.gates) and cell.age_seconds >= cfg.min_age_seconds
+    return passes_gates(cell, cfg.gates)
 
 
-def holds(cell: CellSnapshot, cfg: CandidateConfig) -> bool:
-    """Hold rule for the current target: the hold gates if configured, else the
-    entry gates (age cannot regress, so it is not re-checked)."""
-    gates = cfg.hold_gates if cfg.hold_gates is not None else cfg.gates
-    return passes_gates(cell, gates)
+def holds(cell: CellSnapshot, cfg: HoldConfig) -> bool:
+    """Hold rule (part 3): the current target stays while every hold gate passes."""
+    return passes_gates(cell, cfg.gates)
 
 
-def priority_score(cell: CellSnapshot, weights: PriorityWeights) -> float:
-    """Priority rule: weighted sum of tracked-field max, area, growth rate,
-    plus any ``extra`` weights on named snapshot values.
+def priority_score(cell: CellSnapshot, weights: Mapping[str, float]) -> float:
+    """Score rule (part 2): the weighted sum of the named snapshot values.
 
     NaN components must never rank: 0 * NaN is still NaN, and a NaN score
     makes ``select_best`` pick an arbitrary cell silently.
     """
-    components = {
-        "field_max": cell.field_max,
-        "area_sqkm": cell.area_sqkm,
-        "growth_rate_sqkm_per_min": cell.growth_rate_sqkm_per_min,
-    }
-    for name in weights.extra:
-        if name not in cell.values:
-            raise ValueError(
-                f"priority_score: weight on {name!r} but cell {cell.uid!r} has no such "
-                f"value; available columns: {sorted(cell.values)}"
-            )
-        components[name] = cell.values[name]
-    bad = [name for name, value in components.items() if math.isnan(value)]
+    missing = [name for name in weights if name not in cell.values]
+    if missing:
+        raise ValueError(
+            f"priority_score: weights on {', '.join(missing)} but cell {cell.uid!r} has no "
+            f"such value; available columns: {sorted(cell.values)}"
+        )
+    bad = [name for name in weights if math.isnan(cell.values[name])]
     if bad:
         raise ValueError(
             f"priority_score: cell {cell.uid!r} has NaN {', '.join(bad)} — "
             "refusing to rank on undefined values (check that the run "
             "produced these statistics)"
         )
-    return (
-        weights.field * cell.field_max
-        + weights.area * cell.area_sqkm
-        + weights.growth_rate * cell.growth_rate_sqkm_per_min
-        + sum(w * cell.values[name] for name, w in weights.extra.items())
-    )
+    return sum(w * cell.values[name] for name, w in weights.items())
+
+
+def cap_seconds(cfg: DurationConfig) -> float | None:
+    """Duration rule (part 5) in seconds, or None for no cap."""
+    return None if cfg.max_minutes is None else cfg.max_minutes * 60.0
 
 
 def site_bonus(trajectory: Sequence[TrajectoryPoint], cfg: SitePreferenceConfig) -> float:
@@ -111,8 +103,8 @@ def site_bonus(trajectory: Sequence[TrajectoryPoint], cfg: SitePreferenceConfig)
 
 def total_score(cell: CellSnapshot, cfg: TSEConfig) -> float:
     """Full score used for selection: priority plus site bonus."""
-    return priority_score(cell, cfg.priority.weights) + site_bonus(
-        cell.trajectory, cfg.site_preference
+    return priority_score(cell, cfg.score.weights) + site_bonus(
+        cell.trajectory, cfg.score.site_preference
     )
 
 
@@ -126,8 +118,8 @@ def select_best(scored: Mapping[str, float]) -> str | None:
 def continue_or_switch(
     current_uid: str, scored: Mapping[str, float], margin: float
 ) -> tuple[str, SelectionReason]:
-    """Continuation rule: keep the current target unless a challenger
-    exceeds its score by strictly more than switch_margin."""
+    """Switch rule (part 4): keep the current target unless a challenger
+    exceeds its score by strictly more than the margin."""
     challengers = {uid: s for uid, s in scored.items() if uid != current_uid}
     best = select_best(challengers)
     if best is not None and challengers[best] > scored[current_uid] + margin:
@@ -138,13 +130,13 @@ def continue_or_switch(
 def should_stop(
     cell: CellSnapshot | None, cfg: TSEConfig, observed_seconds: float
 ) -> StopReason | None:
-    """Stop rule, checked in order: target gone from the snapshot, hold gates
-    no longer passed (the entry gates when no hold gates are configured), max
-    observation duration reached."""
+    """Stop rule, checked in order: target gone from the snapshot, a hold gate
+    no longer passed, the duration cap reached (when there is one)."""
     if cell is None:
         return StopReason.TARGET_LOST
-    if not holds(cell, cfg.candidate):
+    if not holds(cell, cfg.hold):
         return StopReason.QUALITY_DROPPED
-    if observed_seconds >= cfg.selection.max_observation_seconds:
+    cap = cap_seconds(cfg.duration)
+    if cap is not None and observed_seconds >= cap:
         return StopReason.MAX_DURATION
     return None

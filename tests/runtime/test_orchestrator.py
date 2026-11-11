@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -179,26 +180,14 @@ def test_orchestrator_processor_config_accessible(pipeline_config):
     assert orch.config.processor.min_file_size > 0
 
 
-def test_enabled_module_names_includes_post_persistence_modules(pipeline_config):
-    """The run header must list phase-3 (post-persistence) modules like cell_volume_stats,
-    not only the in-pipeline modules — otherwise the user can't see they're configured.
+def test_enabled_module_names_are_the_processors(pipeline_config):
+    """The run header lists every module the processor runs, extended ones
+    (cell_volume_stats) included — otherwise the user can't see they're configured.
     """
     orch = PipelineOrchestrator(pipeline_config)
+    orch.processor = SimpleNamespace(module_names=("ingest", "detection", "cell_volume_stats"))
 
-    class _M:
-        def __init__(self, name):
-            self.name = name
-
-    class _Proc:
-        _pipeline_modules = [_M("ingest"), _M("detection")]
-        _post_modules = [_M("cell_volume_stats")]
-
-    orch.processor = _Proc()
-
-    names = orch._enabled_module_names()
-
-    assert names[:2] == ("ingest", "detection")
-    assert "cell_volume_stats" in names  # phase-3 module surfaced
+    assert orch._enabled_module_names() == ("ingest", "detection", "cell_volume_stats")
 
 
 def test_request_stop_breaks_main_loop(pipeline_config):
@@ -208,7 +197,7 @@ def test_request_stop_breaks_main_loop(pipeline_config):
     """
     orch = PipelineOrchestrator(pipeline_config)
     orch.downloader = object()
-    orch.processor = object()
+    orch.processor = SimpleNamespace(stop=lambda: None)  # a stop request stops it too
     orch._start_time = time.time()
 
     orch.request_stop()

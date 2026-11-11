@@ -12,7 +12,8 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 -- One row per stored object. artifact_id is uuid4 hex allocated BEFORE the
--- bytes are written; the sha256 checksum is recorded at commit.
+-- bytes are written; the sha256 checksum is recorded at commit. The file's name
+-- is readable (object_name); artifact_id is the identity every link uses.
 CREATE TABLE IF NOT EXISTS artifacts (
     artifact_id       TEXT PRIMARY KEY,
     artifact_type     TEXT NOT NULL,        -- e.g. raw_volume | gridded3d | segmentation2d
@@ -22,7 +23,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     observation_time  TEXT,                 -- ISO8601 UTC (ordering/display metadata)
     original_filename TEXT,
     source_uri        TEXT,
-    object_name       TEXT NOT NULL UNIQUE, -- '{artifact_id}{suffix}' relative to objects/
+    object_name       TEXT NOT NULL UNIQUE, -- path under objects/: 'raw/<original name>' or
+                                            -- '<run_id>/<module>/<source stem>.<product>.nc'
     checksum_sha256   TEXT NOT NULL,
     size_bytes        INTEGER NOT NULL,
     created_at        TEXT NOT NULL

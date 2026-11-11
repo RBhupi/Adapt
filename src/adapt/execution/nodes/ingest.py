@@ -39,7 +39,8 @@ class LoadModule(BaseModule):
     """
 
     name = "ingest"
-    summary = "download + read + regrid radar volumes"
+    summary = "read + regrid radar volumes"
+    param_sections = ("reader", "regridder")
     required_history = 1
     pipeline_phase = 0
     inputs = ["nexrad_file", "ingest_config", "scan_time"]
@@ -50,7 +51,6 @@ class LoadModule(BaseModule):
         NetcdfArtifact(
             key="grid_ds",
             product_type="gridded3d",
-            producer="ingest",
             description="Regridded 3D Cartesian radar volume",
         ),
     )

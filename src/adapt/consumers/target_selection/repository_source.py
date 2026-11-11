@@ -123,14 +123,17 @@ def _to_cell(
         values.update(_track_summary(cell_history, stat_column(tracking_field, "max")))
     for col in trend_fields:
         values[f"trend_{col}_per_min"] = _trend(cell_history, col, growth_window_scans)
+    # Derived values the gates and weights may name like any column.
+    values["field_max"] = float(row[stat_column(tracking_field, "max")])
+    values["growth_rate_sqkm_per_min"] = _growth_rate(cell_history, growth_window_scans)
     return CellSnapshot(
         uid=uid,
         lat=float(row["cell_centroid_mass_lat"]),
         lon=float(row["cell_centroid_mass_lon"]),
         area_sqkm=float(row["cell_area_sqkm"]),
-        field_max=float(row[stat_column(tracking_field, "max")]),
+        field_max=values["field_max"],
         age_seconds=float(row["age_seconds"]),
-        growth_rate_sqkm_per_min=_growth_rate(cell_history, growth_window_scans),
+        growth_rate_sqkm_per_min=values["growth_rate_sqkm_per_min"],
         trajectory=_trajectory(row, scan_interval),
         values=values,
     )

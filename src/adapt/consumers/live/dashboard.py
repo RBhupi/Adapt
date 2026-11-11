@@ -15,7 +15,7 @@ Layout
 
 Single-instance note
 --------------------
-Only one `adapt run-nexrad` is allowed at a time (enforced by PID file).
+Only one `adapt run` pipeline is allowed at a time (enforced by the PID file).
 The dashboard is a pure consumer — it reads from the repository and does
 not need a running pipeline.  The Start/Stop buttons are provided for
 convenience.

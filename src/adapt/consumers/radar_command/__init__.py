@@ -5,17 +5,18 @@
 
 A Ring 2 consumer of target selection: reads the selection file, reads the
 store only through adapt.api.StoreClient, and writes command files plus an
-audit ledger to its own output directory. It never controls the radar:
-sending commands (the transport) is future work.
+audit ledger under the output directory the launcher gives it
+(``<root>/consumers/<run_id>/radar_command/``) — never into the store's
+databases. With ``api`` configured it also sends each published command to
+the radar API.
 """
 
-from adapt.consumers.radar_command.config import RadarCommandConfig, load_config
+from adapt.consumers.radar_command.config import RadarCommandConfig
 from adapt.consumers.radar_command.runner import RadarCommandJob, process_selection, run
 
 __all__ = [
     "RadarCommandConfig",
     "RadarCommandJob",
-    "load_config",
     "process_selection",
     "run",
 ]

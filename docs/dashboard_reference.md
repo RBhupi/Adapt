@@ -29,26 +29,21 @@ Click **Start New Pipeline…** (or Pipeline → Start New… from the menu).
 
 The launch wizard opens:
 
-#### If you already have a `config.yaml`
+1. Click **Browse…** and choose the store folder: an existing store, or an
+   empty directory to become one.
+2. Set **Radar ID** (e.g. `KLOT`) and **Mode** (Realtime or Historical; a
+   historical run needs a start and an end time in ISO 8601 UTC, e.g.
+   `2025-06-17T18:00:00Z`).
+3. Click **Launch Pipeline**. The wizard
+   - runs `adapt init` in the folder if it is not a store yet (which also writes
+     `nexrad.yaml` there);
+   - writes `dashboard.yaml` in the folder: the `nexrad` template with the
+     wizard's radar, mode and times;
+   - runs `adapt run dashboard` in that folder.
 
-1. Select **I have config file**.
-2. Click **Browse…** and choose your `some_config.yaml`.
-3. Set **Radar ID** (e.g. `KLOT`) and **Mode** (Realtime or Historical).
-4. Click **Launch Pipeline**.
-
-#### If you need to create a config
-
-1. Select **Create config in directory**.
-2. Click **Browse…** and choose the output directory (this becomes the
-   repository root and the `base_dir` in the config).
-3. Click **Create Config** — Adapt runs `adapt config` and writes a
-   `config.yaml` template into that directory if config.yaml already exist, it shows message that config.yaml exists. IF you want new config.yaml rename the old yaml or delet it.
-4. when config.yaml is create, a message appears: *"config.yaml created … Check config before running
-   or click Launch Pipeline."*
-5. Open the file in any text editor and check all defaults.
-6. When ready, click **Launch Pipeline** in the wizard (it stays open).
-   You can also skip editing and click **Launch Pipeline** immediately to
-   run with the generated defaults.
+`dashboard.yaml` belongs to the dashboard and is rewritten on every launch, so
+edit `nexrad.yaml` (or a copy) instead and run it from a terminal with
+`adapt run nexrad` when you need other modules, consumers or options.
 
 ---
 
@@ -92,13 +87,17 @@ dashboard and it will offer to reconnect to the running process.
 
 ```
 {repo}/
+├── nexrad.yaml                # pipeline file written by adapt init
+├── dashboard.yaml             # pipeline file the wizard writes on each launch
 ├── registry.db                # SQLite: runs (with config), collections, events
 ├── logs/                      # run log files
+├── consumers/                 # consumer outputs: consumers/<run_id>/<consumer>/ (replays: replay-<n>/)
 └── collections/
     └── {RADAR_ID}/
         ├── catalog.db         # SQLite: scans, artifacts, checksums, lineage
         ├── products.db        # SQLite: cell stats, tracks, module tables
-        └── objects/           # immutable NetCDF artifacts (content-addressed)
+        ├── decisions.db       # SQLite: segmenter and tracker decision log
+        └── objects/           # files: raw/<original name>, <run_id>/<module>/<scan>.<product>.nc
 ```
 
 The dashboard treats this entire tree as read-only and touches none of it
@@ -109,8 +108,10 @@ file handle stays open between redraws). An architecture test enforces that no
 dashboard code opens files or databases itself.
 
 **The dashboard will not touch this directory unless a pipeline is launched from
-the wizard.** Even then, the pipeline process is responsible for all writes — the
-dashboard only redirects the pipeline's stdout/stderr to `~/.adapt/pipeline.log`.
+the wizard.** Even then it writes only `dashboard.yaml` (and runs `adapt init`
+for a new store); the pipeline process is responsible for every other write, and
+the dashboard only redirects the pipeline's stdout/stderr to
+`~/.adapt/pipeline.log`.
 
 ---
 
@@ -127,8 +128,9 @@ All dashboard-owned state lives under `~/.adapt/`:
 
 ### `pipeline.pid`
 
-Written by `adapt run-nexrad` at startup via `_write_pid()` in `cli.py`.
-Deleted by the pipeline on clean exit (`atexit` / SIGTERM handler).
+Written by `adapt run` when a live pipeline starts (`write_pid()` in
+`adapt/cli/_pid.py`). Deleted by `adapt run` when it exits, including after
+Ctrl-C or SIGTERM.
 
 The dashboard uses this file to detect whether a pipeline is alive without owning
 its `subprocess.Popen` handle — for example, after a GUI restart. The check is:
@@ -184,29 +186,27 @@ Config > Save Config As…. Loaded via Config > Load Config.
 These are completely different files with completely different purposes. Keep them
 mentally separate.
 
-### 1. Pipeline config — `config.yaml` (in the workspace)
+### 1. Pipeline files — `NAME.yaml` (in the store)
 
-Owned and interpreted by `adapt run-nexrad`. The dashboard **never creates or
-modifies it directly**. Its location is inside the workspace (repository
-directory), alongside the pipeline output.
+Owned and interpreted by `adapt run NAME`, which reads `./NAME.yaml` from the
+store folder. `adapt init` writes `nexrad.yaml`; `adapt config nexrad` rewrites
+it. The dashboard never touches these, except its own `dashboard.yaml`, which the
+wizard writes from the `nexrad` template on every launch.
 
 ```yaml
-# Typical config.yaml keys
-radar: KLOT
-mode: realtime
-base_dir: /data/radar_output
-grid_shape: [41, 301, 301]
-threshold: 40
-...
+run:
+  source: aws_nexrad
+  radar: KLOT
+  mode: realtime
+  ...
+core: [ingest, detection, projection, analysis, tracking]
+extended: [cell_volume_stats]
+consumers: {}
+postprocessing: []
+params:       # paste `adapt config --show NAME` here; an option not given is a default
 ```
 
-To create a template: `adapt config /path/to/workspace/config.yaml`
-
-The wizard checks whether `config.yaml` is present before launching. If it is
-absent it runs `adapt config` to generate a template there, shows the path, and
-**stops**. The user must open the file, set `radar` and `base_dir` at minimum,
-then click Launch again. The dashboard never auto-launches with an unreviewed
-config.
+See the [CLI Reference](cli_reference.md) for every section.
 
 ### 2. Dashboard visualization config (in `~/.adapt/user_dashboard.json`)
 
@@ -300,7 +300,7 @@ slipped through mechanisms 1 or 2.
 
 ### What happens on crash / SIGKILL
 
-1. Process dies; `pipeline.pid` is not deleted (atexit handler did not run)
+1. Process dies; `pipeline.pid` is not deleted (`adapt run` did not get to remove it)
 2. `ProcWatcher` unblocks from `proc.wait()` (same as clean exit)
 3. `_on_proc_ended()` fires; badge → `○ Idle`
 4. Stale `pipeline.pid` remains; next `_pipeline_running()` call detects
@@ -334,7 +334,7 @@ src/adapt/consumers/live/
 ├── _context.py                   # AppContext: one cached StoreClient per store
 ├── _scan_view.py                 # Latest Scan tab (ScanRef timeline)
 ├── _tse_view.py                  # Target Selection replay tab
-├── _pipeline.py                  # Pipeline tab: launch wizard (runs adapt init)
+├── _pipeline.py                  # Pipeline tab: launch wizard (adapt init, adapt run dashboard)
 ├── _renderer.py                  # Pure matplotlib scan rendering; add_basemap()
 ├── _movie.py / _movie_dialog.py  # Save Movie: frame writer + dialog
 ├── _targeting.py                 # TSE map drawing (pure, in-memory dataset)
@@ -342,7 +342,7 @@ src/adapt/consumers/live/
 ├── _lightning.py                 # Lightning table reads via StoreClient
 ├── _timeseries.py                # matplotlib time-series helpers; no Tk
 ├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
-├── _utils.py                     # Pure helpers; store-root detection; PID file logic
+├── _utils.py                     # Pure helpers; store-root detection; PID file; wizard launch commands
 ├── _config.py                    # ~/.adapt/user_dashboard.json I/O only
 └── dashboard_default_config.json # Bundled default plot configuration
 ```

@@ -94,8 +94,11 @@ class StoreExecutionHistory:
                 ),
             )
 
-    def finalize_run(self, summary: RunSummary) -> None:
-        """Map the end-of-run summary onto the single registry run lifecycle."""
+    def finalize_run(self, summary: RunSummary) -> str:
+        """Map the end-of-run summary onto the single registry run lifecycle.
+
+        Returns the terminal run status recorded (completed | cancelled | failed).
+        """
         status = _SUMMARY_STATUS_TO_RUN.get(summary.status, "failed")
         self._registry.finalize_run(
             summary.run_id,
@@ -103,3 +106,4 @@ class StoreExecutionHistory:
             scans_processed=summary.scans_processed,
             scans_failed=summary.failures,
         )
+        return status

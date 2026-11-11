@@ -9,7 +9,7 @@ from adapt.contracts import (
     CELL_LABELS_VAR,
     DecisionTableWrite,
     check_grid_ds_2d,
-    check_prior_scan,
+    check_prior_scans,
     check_seed_carry,
     check_segmentation_decisions,
     check_segmented_ds,
@@ -21,19 +21,6 @@ from adapt.modules.detection.config import DetectionConfig
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
 
 logger = logging.getLogger(__name__)
-
-
-def _projection_enabled(cfg) -> bool:
-    """Whether the run enables ``projection``, by ``resolve_enabled_modules``' precedence.
-
-    Mirrored here rather than imported: the resolver needs the module
-    registry, which this file is being registered into.
-    """
-    if cfg.only_modules:
-        return "projection" in cfg.only_modules
-    if cfg.exclude_modules and "projection" in cfg.exclude_modules:
-        return False
-    return cfg.modules is None or "projection" in cfg.modules
 
 
 class DetectModule(BaseModule):
@@ -49,12 +36,12 @@ class DetectModule(BaseModule):
     grid_ds : xr.Dataset
         Full 3D Cartesian dataset (also an ingest output). The pyart
         convective/stratiform methods classify it; ``threshold`` ignores it.
-    prior_scan : dict | None
-        The previous completed scan's context, seeded by the processor (None
-        on the first scan or after a too-large time gap). With
-        ``segmenter.seed_carry`` on, its ``projected_ds`` (the previous
-        frame's labels advected one flow step forward) and ``seed_carry``
-        are handed to the segmenter as carried labels.
+    prior_scans : list[dict]
+        The previous completed scans' contexts, oldest first, provided by the
+        processor (empty on the first scan or after a too-large time gap).
+        With ``segmenter.seed_carry`` on, the last one's ``projected_ds`` (the
+        previous frame's labels advected one flow step forward) and
+        ``seed_carry`` are handed to the segmenter as carried labels.
     config : InternalConfig
         Runtime configuration.
 
@@ -72,13 +59,14 @@ class DetectModule(BaseModule):
 
     name = "detection"
     summary = "segment cells from the grid"
+    param_sections = ("segmenter",)
     required_history = 1
     pipeline_phase = 0
-    inputs = ["grid_ds_2d", "grid_ds", "prior_scan", "detection_config"]
+    inputs = ["grid_ds_2d", "grid_ds", "prior_scans", "detection_config"]
     # detection_decisions: every seed and carried claim this scan and what
     # became of it — analysis-only, written to decisions.db.
     outputs = ["segmented_ds", "num_cells", "seed_carry", "detection_decisions"]
-    input_contracts = {"grid_ds_2d": check_grid_ds_2d, "prior_scan": check_prior_scan}
+    input_contracts = {"grid_ds_2d": check_grid_ds_2d, "prior_scans": check_prior_scans}
     output_contracts = {
         "segmented_ds": check_segmented_ds,
         "seed_carry": check_seed_carry,
@@ -93,10 +81,12 @@ class DetectModule(BaseModule):
         # Checked at startup: at run time "prior scan has no projected_ds" is
         # also the legitimate state of the second scan, so it cannot be told
         # apart from a disabled projection module there.
-        if seg.seed_carry_frames > 0 and not _projection_enabled(cfg):
+        projection_enabled = cfg.modules is None or "projection" in cfg.modules
+        if seg.seed_carry_frames > 0 and not projection_enabled:
             raise ValueError(
                 "segmenter.seed_carry_frames > 0 needs the projection module (its advected "
-                "labels are the seeds carried forward) — enable projection or set it to 0"
+                "labels are the seeds carried forward) — list projection under core: "
+                "or set params: segmenter: {seed_carry_frames: 0}"
             )
         method_params = getattr(seg, f"{seg.method}_params").model_dump()
         return DetectionConfig(
@@ -125,7 +115,7 @@ class DetectModule(BaseModule):
         if self._segmenter is None:
             self._segmenter = RadarCellSegmenter(config)
 
-        carried = self._carried(context["prior_scan"], config)
+        carried = self._carried(context["prior_scans"], config)
         segmented = self._segmenter.segment(ds_2d, context["grid_ds"], carried)
         labels = segmented[config.labels_var]
         num_cells = int(labels.max().item())
@@ -143,15 +133,16 @@ class DetectModule(BaseModule):
         }
 
     @staticmethod
-    def _carried(prior: dict | None, config: DetectionConfig) -> CarriedLabels | None:
+    def _carried(prior_scans: list[dict], config: DetectionConfig) -> CarriedLabels | None:
         """The previous scan's one-step-ahead projected labels with their carry ages.
 
         None with the flag off, without a prior scan, or when the prior has
         no motion field yet (projection first runs at the second scan and is
         skipped after a too-large gap): the carry is undefined without one.
         """
-        if config.seed_carry_frames == 0 or prior is None:
+        if config.seed_carry_frames == 0 or not prior_scans:
             return None
+        prior = prior_scans[-1]
         if "projected_ds" not in prior:
             logger.debug("seed_carry: prior scan has no projected_ds; nothing carried")
             return None

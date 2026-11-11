@@ -202,8 +202,8 @@ class StoreRegistry(SqliteStore):
                 raise StoreError(f"Run '{run_id}' is already finalized (status '{row['status']}')")
             conn.execute(
                 "UPDATE runs SET status = ?, ended_at = ?, "
-                " scans_processed = COALESCE(?, scans_processed), "
-                " scans_failed = COALESCE(?, scans_failed) "
+                " scans_processed = scans_processed + COALESCE(?, 0), "
+                " scans_failed = scans_failed + COALESCE(?, 0) "
                 "WHERE run_id = ?",
                 (status, now, scans_processed, scans_failed, run_id),
             )

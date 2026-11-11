@@ -23,38 +23,67 @@ class ConfigError(Exception):
     """A configuration value is invalid. Carries a ready-to-print message."""
 
 
+# Trailing location parts pydantic adds for the branches of a union (``int | float``).
+_BRANCHES = frozenset({"int", "float", "str", "bool", "none", "list", "tuple", "dict"})
+
+
+def _shown(value: Any) -> str:
+    """The offending value, when it is short enough to help."""
+    return f" (value: {value!r})" if isinstance(value, str | int | float | bool | None) else ""
+
+
 def _reason(error: Mapping[str, Any]) -> str:
     """One-line 'why' for a single pydantic error, keyed off its type."""
     kind = error["type"]
     value = error.get("input")
-    loc = error["loc"]
+    loc = _path(error)
     section = str(loc[-2]) if len(loc) >= 2 else "configuration"
     if kind == "extra_forbidden":
         return (
-            f"unrecognized option (value: {value!r}) — not a valid '{section}' setting; "
+            f"unrecognized option{_shown(value)} — not a valid '{section}' setting; "
             "remove it or check for a typo or a renamed field"
         )
     if kind == "missing":
         return "required option is missing"
     if kind in ("greater_than", "greater_than_equal", "less_than", "less_than_equal"):
         return f"value {value!r} is out of range — {error['msg']}"
-    return f"{error['msg']} (value: {value!r})"
+    if kind in ("model_type", "dict_type", "model_attributes_type"):
+        return "must be a mapping of options (key: value lines indented under it)"
+    if kind in ("list_type", "tuple_type"):
+        return "must be a list (one '- item' line per entry)"
+    return f"{error['msg']}{_shown(value)}"
+
+
+def _path(error: Mapping[str, Any]) -> tuple[str, ...]:
+    """The option's location, without the branch names of a union type."""
+    parts = [str(part) for part in error["loc"]]
+    while parts and parts[-1] in _BRANCHES:
+        parts.pop()
+    return tuple(parts)
 
 
 def format_validation_error(exc: ValidationError, source: str) -> str:
-    """Render a pydantic ValidationError as a clear, multi-line config message."""
+    """Render a pydantic ValidationError as a clear, multi-line config message.
+
+    One line per option: an option that fails every branch of a union type is
+    reported once, with the first branch's reason.
+    """
     lines = [f"Invalid configuration ({source}):"]
+    seen: set[tuple[str, ...]] = set()
     for error in exc.errors():
-        path = ".".join(str(part) for part in error["loc"]) or "(root)"
-        lines.append(f"  • {path} — {_reason(error)}")
+        path = _path(error)
+        if path in seen:
+            continue
+        seen.add(path)
+        lines.append(f"  • {'.'.join(path) or '(root)'} — {_reason(error)}")
     return "\n".join(lines)
 
 
 def validated(model_cls: type[M], data: Any, *, source: str) -> M:
     """Validate ``data`` against ``model_cls``, raising ConfigError on failure.
 
-    ``source`` names where the config came from (a file path, "command-line
-    flags", ...) so the message points the user at the right place to fix.
+    ``source`` names where the config came from (e.g. "pipeline file
+    nexrad.yaml") so the message points the user at the right place to fix.
     """
     try:
         return model_cls.model_validate(data)

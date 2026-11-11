@@ -3,8 +3,9 @@
 
 """Tests that execution nodes declare correct required_history values.
 
-Single-scan nodes (ingest, detection) declare required_history=1.
-Multi-scan nodes (projection, analysis, tracking) declare required_history=2.
+Only projection needs a prior scan (required_history=2). Analysis and tracking
+need none of their own: they are skipped exactly when projection, upstream of
+them, is skipped.
 No in-pipeline node should use pipeline_phase=1 or pipeline_phase=2.
 """
 
@@ -29,15 +30,15 @@ class TestNodeRequiredHistory:
 
         assert ProjectionModule.required_history == 2
 
-    def test_analysis_node_requires_two_scans(self):
+    def test_analysis_node_needs_no_history_of_its_own(self):
         from adapt.execution.nodes.analysis import AnalysisModule
 
-        assert AnalysisModule.required_history == 2
+        assert AnalysisModule.required_history == 1
 
-    def test_tracking_node_requires_two_scans(self):
+    def test_tracking_node_needs_no_history_of_its_own(self):
         from adapt.execution.nodes.tracking import TrackingModule
 
-        assert TrackingModule.required_history == 2
+        assert TrackingModule.required_history == 1
 
     def test_no_in_pipeline_node_uses_pipeline_phase_one(self):
         """pipeline_phase=1 is retired — all in-pipeline nodes use pipeline_phase=0."""

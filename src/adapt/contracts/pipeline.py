@@ -8,6 +8,14 @@ function depends on. This module has zero adapt imports so contracts
 can be imported from anywhere without creating import cycles.
 """
 
+# Keys the processor provides to every per-scan module; not produced by any module.
+SCAN_SEEDS = frozenset({"nexrad_file", "scan_id", "scan_time", "prior_scans"})
+
+
+def config_key(module: str) -> str:
+    """The context key under which the runtime provides ``module``'s config."""
+    return f"{module}_config"
+
 
 class ContractViolation(RuntimeError):
     """Raised when a pipeline contract is violated.

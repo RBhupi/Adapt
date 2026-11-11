@@ -25,7 +25,7 @@ from adapt.contracts import (
 )
 from adapt.persistence.decision_store import DecisionStore
 from adapt.persistence.errors import StoreError
-from adapt.persistence.objects import ArtifactMeta, ObjectStore
+from adapt.persistence.objects import ArtifactMeta, ObjectStore, product_object_name
 from adapt.persistence.products import SchemaLedger, TableWriter
 from adapt.persistence.store import Collection
 from adapt.persistence.track_store import TrackStore
@@ -56,8 +56,9 @@ def _require_scan_id(module_name: str, spec, meta: PersistenceMeta) -> str:
 class StoreOutputRouter:
     """Persist module-declared outputs into the store. No science names.
 
-    Dispatch: NetcdfArtifact → immutable object + catalog row + lineage to the
-    scan's raw volume + scan-product link; ProductTableWrite → products.db rows
+    Dispatch: NetcdfArtifact → object named for its run, module and source file
+    (rewritten in place when the run writes the scan again) + catalog row +
+    lineage to the scan's raw volume + scan-product link; ProductTableWrite → products.db rows
     (frozen first-frame schema) + table link; TrackTablesWrite → TrackStore on
     products.db + auxiliary tracking link.
     """
@@ -113,6 +114,12 @@ class StoreOutputRouter:
                 f"of run '{meta.run_id}' — the source must commit the raw object "
                 "before products persist"
             )
+        scan = self._collection.catalog.get_scan(meta.run_id, scan_id)
+        if scan is None:
+            raise StoreError(
+                f"{module_name}: scan '{scan_id}' is not registered for run "
+                f"'{meta.run_id}' — the source must register the scan before products persist"
+            )
         ds = result[spec.key]
         # attrs key stays "radar" — stored-artifact format unchanged. scan_id/
         # scan_time make the artifact self-describing: consumers key on attrs,
@@ -126,7 +133,15 @@ class StoreOutputRouter:
                 "scan_time": to_scan_iso(scan_time),
             }
         )
-        handle = self._objects.begin(suffix=".nc")
+        # One readable file per (run, module, scan, product), named for the source
+        # file THIS run read (the same bytes may be stored under another name too).
+        # A run that writes a scan again (resume, retry) replaces its own file; the
+        # artifact keeps its id.
+        handle = self._objects.begin(
+            product_object_name(
+                meta.run_id, module_name, scan["source_file_name"], spec.product_type
+            )
+        )
         try:
             ds.to_netcdf(handle.staging_path)
         except Exception:
@@ -136,12 +151,13 @@ class StoreOutputRouter:
             handle,
             ArtifactMeta(
                 artifact_type=spec.product_type,
-                producer=spec.producer,
+                producer=module_name,
                 run_id=meta.run_id,
                 scan_id=scan_id,
                 observation_time=scan_time,
             ),
             parents=(raw["artifact_id"],),
+            replace=True,
         )
         self._collection.catalog.link_scan_product(
             meta.run_id, scan_id, spec.product_type, artifact_id=record.artifact_id

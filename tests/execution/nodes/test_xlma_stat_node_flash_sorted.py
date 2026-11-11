@@ -72,13 +72,6 @@ def test_non_netcdf_files_are_ignored(tmp_path):
     assert int(result["xlma_stat_minutes_rows"]["flash_count"].sum()) == 2
 
 
-def test_directory_without_netcdf_raises(tmp_path):
-    (tmp_path / "LYLOUT_240518_120000.dat").write_text("ascii sources", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="No flash-sorted NetCDF"):
-        XlmaStatModule().run(_run_context(tmp_path))
-
-
 def test_missing_minute_masks_fails_loudly(tmp_path):
     write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:00:00", 1)
     context = _run_context(tmp_path)

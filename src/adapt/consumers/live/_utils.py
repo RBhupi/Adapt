@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from adapt.utils.process import process_alive
 
@@ -97,6 +97,32 @@ def adapt_cmd() -> list[str]:
     and guarantees the pipeline runs in the same environment as the dashboard.
     """
     return [sys.executable, "-m", "adapt.cli"]
+
+
+def init_store_cmd(root: Path) -> list[str]:
+    """The command that makes ``root`` an Adapt store (``adapt init ROOT``)."""
+    return [*adapt_cmd(), "init", str(root)]
+
+
+_DASHBOARD_PIPELINE = "dashboard"
+
+
+def write_dashboard_pipeline(root: Path, **run: Any) -> list[str]:
+    """Write the GUI-owned pipeline file ``root/dashboard.yaml``; return its run command.
+
+    The file is the ``nexrad`` template with the wizard's ``run:`` values
+    (``radar``, ``mode``, ``start_time``, ``end_time``), rewritten on every
+    launch. The returned ``adapt run dashboard`` must run with cwd = ``root``.
+
+    Raises
+    ------
+    ConfigError
+        The run values are invalid; nothing is written.
+    """
+    from adapt.configuration.pipeline_template import write_pipeline_template
+
+    write_pipeline_template("nexrad", root / f"{_DASHBOARD_PIPELINE}.yaml", **run)
+    return [*adapt_cmd(), "run", _DASHBOARD_PIPELINE]
 
 
 def _pipeline_pid_from_file() -> int | None:

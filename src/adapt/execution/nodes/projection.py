@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-from adapt.contracts import check_projected_ds, check_scan_history, check_segmented_ds
+from adapt.contracts import check_prior_scans, check_projected_ds, check_segmented_ds
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.projection.config import ProjectionConfig
@@ -12,17 +12,17 @@ class ProjectionModule(BaseModule):
     """BaseModule wrapper for RadarCellProjector.
 
     Computes optical flow between consecutive radar frames and projects
-    cell positions forward in time. Receives the scan pair via
-    ``scan_history`` (list of prior scan context dicts).
+    cell positions forward in time. The frames are the prior scans' labels
+    (``prior_scans``) followed by the current scan's (``segmented_ds``).
 
     Context inputs
     --------------
     segmented_ds : xr.Dataset
         2D segmented dataset for the current frame (output of DetectModule).
-    scan_history : list[dict]
-        Rolling history of scan context dicts supplied by the processor.
-        Each dict must contain ``segmented_ds`` and ``scan_time``.
-        Requires at least 2 entries (required_history=2).
+    prior_scans : list[dict]
+        Previous completed scans' context dicts, oldest first, provided by the
+        processor. Each dict must contain ``segmented_ds`` and ``scan_time``.
+        At least one is needed (required_history=2).
     projection_config : ProjectionModuleConfig
         Runtime configuration.
 
@@ -34,11 +34,12 @@ class ProjectionModule(BaseModule):
 
     name = "projection"
     summary = "optical-flow projection between scans"
+    param_sections = ("projector",)
     required_history = 2
     pipeline_phase = 0
-    inputs = ["segmented_ds", "scan_history", "projection_config"]
+    inputs = ["segmented_ds", "prior_scans", "projection_config"]
     outputs = ["projected_ds"]
-    input_contracts = {"segmented_ds": check_segmented_ds, "scan_history": check_scan_history}
+    input_contracts = {"segmented_ds": check_segmented_ds, "prior_scans": check_prior_scans}
     output_contracts = {"projected_ds": check_projected_ds}
     config_class = ProjectionConfig
 
@@ -68,12 +69,12 @@ class ProjectionModule(BaseModule):
 
     def run(self, context: dict) -> dict:
         config = context["projection_config"]
-        scan_history = context["scan_history"]  # list of scan context dicts
 
         if self._projector is None:
             self._projector = RadarCellProjector(config)
 
-        ds_list = [ctx["segmented_ds"] for ctx in scan_history]
+        ds_list = [prior["segmented_ds"] for prior in context["prior_scans"]]
+        ds_list.append(context["segmented_ds"])
         projected = self._projector.project(ds_list)
         return {"projected_ds": projected}
 

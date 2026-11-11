@@ -545,7 +545,10 @@ class RadarCellSegmenter:
         seed_rows : list of dict
             One decision row per marker or carried claim.
         """
-        fp = np.where(binary, field, 0.0)
+        # Closing can pull a no-echo (NaN) pixel into the mask. It counts as the
+        # lowest value, like everything outside the mask: h_maxima and watershed
+        # are undefined on NaN (they hang, crash or mark every pixel a peak).
+        fp = np.where(binary & np.isfinite(field), field, 0.0)
         peaks = h_maxima(fp, h=self.h_maxima)
         seeds, n_seeds = label(peaks)  # label from scipy.ndimage
         seed_rows = [

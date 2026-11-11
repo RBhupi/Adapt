@@ -3,7 +3,8 @@
 
 """Only the selected segmentation method's params are validated.
 
-The generated config.yaml carries a param block for every method, but a run uses
+`adapt config --show segmenter` prints a param block for every method, and a
+pipeline file may carry them all under `params.segmenter`, but a run uses
 exactly one. A stale or renamed field in a method that is NOT selected must not
 block the pipeline — while a bad param in the SELECTED method still fails loudly.
 """

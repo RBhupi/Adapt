@@ -279,7 +279,7 @@ def radar_config(temp_dir) -> InternalConfig:
     """InternalConfig for radar module tests."""
     param = ParamConfig()
     user = UserConfig(base_dir=str(temp_dir), radar="TEST_RADAR")
-    return resolve_config(param, user, None)
+    return resolve_config(param, user)
 
 
 @pytest.fixture

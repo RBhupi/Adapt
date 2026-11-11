@@ -20,6 +20,7 @@ import xarray as xr
 
 from adapt.runtime.observability import ObsSettings, build_observability
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.fake_graph import fake_core
 from tests.helpers.queue_msg import msg as _msg
 
 # Distinct per-file times: two different scans sharing one nominal second
@@ -85,8 +86,7 @@ def test_processor_emits_scan_metrics_and_binds_scan_id(
         "cell_stats": pd.DataFrame(),
         "cell_adjacency": pd.DataFrame(),
     }
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
     first = _msg(store_env, tmp_path, "file_1", scan_time=_MT1)
@@ -123,7 +123,7 @@ def test_processor_logs_single_enriched_traceback_on_scan_failure(
     def _boom(context):
         raise ValueError("kaboom")
 
-    monkeypatch.setattr(proc._executors[1], "run", _boom)
+    fake_core(proc, monkeypatch, _boom)
 
     with caplog.at_level(logging.ERROR):
         result = proc.process_file(_msg(store_env, tmp_path, "file_9"))
@@ -177,13 +177,12 @@ def test_processor_emits_per_scan_progress_from_spans(
             "num_cells": 0,
         }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
     fake_multi = {
         "projected_ds": _fake_ds(),
         "cell_stats": pd.DataFrame(),
         "cell_adjacency": pd.DataFrame(),
     }
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
     assert proc.process_file(_msg(store_env, tmp_path, "file_7")) is True
@@ -228,8 +227,7 @@ def test_processor_publishes_current_activity(monkeypatch, pipeline_config, stor
         "cell_stats": pd.DataFrame(),
         "cell_adjacency": pd.DataFrame(),
     }
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
     message = _msg(store_env, tmp_path, "file_3")

@@ -5,13 +5,14 @@
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from adapt.api import StoreClient
+from adapt.api import StoreClient, StoreError
 from adapt.consumers.target_selection.config import config_hash
 from adapt.consumers.target_selection.runner import TSEJob, run
 from adapt.contracts.persistence import PersistenceMeta
@@ -50,18 +51,42 @@ def client(built):
     c.close()
 
 
-def _job(tmp_path, run_id=RUN_1, follow=False):
+def _job(tmp_path, run_id=RUN_1, stop=None, collection=COLLECTION, poll_seconds=0.01):
+    out = tmp_path / "out"
+    out.mkdir(exist_ok=True)
     return TSEJob(
-        collection=COLLECTION,
+        collection=collection,
         run_id=run_id,
-        selection_path=tmp_path / "current_selection.json",
-        follow=follow,
-        poll_seconds=0.01,
+        output_dir=out,
+        stop=stop,
+        poll_seconds=poll_seconds,
     )
+
+
+class _Polls(threading.Event):
+    """A follow's stop event: each wait between polls runs ``on_wait`` instead of
+    sleeping (the pipeline progressing meanwhile)."""
+
+    def __init__(self, on_wait):
+        super().__init__()
+        self._on_wait = on_wait
+
+    def wait(self, timeout=None):
+        self._on_wait(timeout)
+        return self.is_set()
 
 
 def _read(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _selection(job):
+    return job.output_dir / "current_selection.json"
+
+
+def _log_lines(job):
+    text = (job.output_dir / "decisions.jsonl").read_text(encoding="utf-8")
+    return [json.loads(line) for line in text.splitlines()]
 
 
 # The tracking node links segmentation2d (the last product a scan needs to be
@@ -92,7 +117,7 @@ def test_selection_file_names_last_complete_scan_and_target(tmp_path, built, cli
     job = _job(tmp_path)
     run(client, config, job)
     # Score at 12:05 = 1.0 * 46 dBZ + 0.05 * 20 km2 + 2.0 * (20 - 10) km2 / 5 min = 51.0
-    assert _read(job.selection_path) == {
+    assert _read(_selection(job)) == {
         "schema": 1,
         "collection": "KTST",
         "run_id": "run-1",
@@ -116,8 +141,8 @@ def test_catch_up_shows_readers_only_the_newest_decision(tmp_path, client, monke
 
     def replace_and_observe(src, dst):
         replace(src, dst)
-        if Path(dst) == job.selection_path:
-            shown.append(_read(job.selection_path)["scan_time"])
+        if Path(dst) == _selection(job):
+            shown.append(_read(_selection(job))["scan_time"])
 
     monkeypatch.setattr(os, "replace", replace_and_observe)
     config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
@@ -131,14 +156,11 @@ def test_returns_the_number_of_scans_processed(tmp_path, client):
     assert run(client, config, _job(tmp_path)) == 2
 
 
-def test_decision_log_gets_one_line_per_scan(tmp_path, client):
-    log = tmp_path / "decisions.jsonl"
-    config = make_config(
-        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, decision_log=str(log)
-    )
-    run(client, config, _job(tmp_path))
-    lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert [(rec["cell_uid"], rec["reason"], rec["scan_time"]) for rec in lines] == [
+def test_decision_log_in_the_output_dir_gets_one_line_per_scan(tmp_path, client):
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    job = _job(tmp_path)
+    run(client, config, job)
+    assert [(rec["cell_uid"], rec["reason"], rec["scan_time"]) for rec in _log_lines(job)] == [
         ("uid-1", "NEW_TARGET", "2026-06-01T12:00:00Z"),
         ("uid-1", "CONTINUATION", "2026-06-01T12:05:00Z"),
     ]
@@ -146,15 +168,12 @@ def test_decision_log_gets_one_line_per_scan(tmp_path, client):
 
 def test_running_again_leaves_one_log_line_per_scan(tmp_path, built, client):
     # A second invocation (or a restart of a follow) replays the run from its first scan.
-    log = tmp_path / "decisions.jsonl"
-    config = make_config(
-        gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2, decision_log=str(log)
-    )
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
     run(client, config, _job(tmp_path))
-    run(client, config, _job(tmp_path))
+    job = _job(tmp_path)
+    run(client, config, job)
 
-    lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert [(rec["run_id"], rec["scan_id"]) for rec in lines] == [
+    assert [(rec["run_id"], rec["scan_id"]) for rec in _log_lines(job)] == [
         ("run-1", built.scan_ids[0]),
         ("run-1", built.scan_ids[1]),
     ]
@@ -168,7 +187,7 @@ def test_no_candidate_writes_a_null_target(tmp_path, built, client):
     )
     job = _job(tmp_path)
     run(client, config, job)
-    written = _read(job.selection_path)
+    written = _read(_selection(job))
     assert (written["scan_id"], written["cell_uid"], written["reason"], written["score"]) == (
         built.scan_ids[1],
         None,
@@ -178,16 +197,63 @@ def test_no_candidate_writes_a_null_target(tmp_path, built, client):
 
 
 def test_scans_without_a_target_are_logged_too(tmp_path, client):
-    log = tmp_path / "decisions.jsonl"
     config = make_config(
         gates=({"field": "radar_reflectivity_max", "op": "ge", "value": 50.0},),
         min_age_seconds=0.0,
         growth_window_scans=2,
-        decision_log=str(log),
     )
-    run(client, config, _job(tmp_path))
-    lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert [rec["cell_uid"] for rec in lines] == [None, None]
+    job = _job(tmp_path)
+    run(client, config, job)
+    assert [rec["cell_uid"] for rec in _log_lines(job)] == [None, None]
+
+
+def test_on_decision_sees_each_decision_already_written(tmp_path, built, client):
+    # A synchronous reader (radar command on a replay) acts on every decision
+    # before the next is made, so each one is in both files when it is handed over.
+    job = _job(tmp_path)
+    seen = []
+
+    def on_decision(scan_decision):
+        seen.append(
+            (
+                scan_decision.scan_id,
+                _read(_selection(job))["scan_id"],
+                _log_lines(job)[-1]["scan_id"],
+                len(_log_lines(job)),
+            )
+        )
+
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    assert run(client, config, job, on_decision=on_decision) == 2
+    first, second = built.scan_ids[:2]
+    assert seen == [(first, first, first, 1), (second, second, second, 2)]
+
+
+def test_an_unknown_run_raises_naming_it_and_writes_nothing(tmp_path, client):
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    job = _job(tmp_path, run_id="run-1-TYPO")
+
+    with pytest.raises(StoreError, match="run-1-TYPO"):
+        run(client, config, job)
+    assert list(job.output_dir.iterdir()) == []
+
+
+def test_a_run_of_another_collection_raises_naming_both(tmp_path, client):
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    job = _job(tmp_path, collection="KOTH")
+
+    with pytest.raises(ValueError, match=r"run-1.*KTST.*KOTH"):
+        run(client, config, job)
+    assert list(job.output_dir.iterdir()) == []
+
+
+def test_a_missing_output_dir_raises_naming_it(tmp_path, client):
+    # The launcher owns the output layout: the runner never creates directories.
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    job = TSEJob(COLLECTION, RUN_1, tmp_path / "absent", stop=None, poll_seconds=0.01)
+
+    with pytest.raises(FileNotFoundError, match="absent"):
+        run(client, config, job)
 
 
 def test_complete_scan_without_tracking_rows_in_an_ended_run_raises(tmp_path, built, client):
@@ -199,7 +265,7 @@ def test_complete_scan_without_tracking_rows_in_an_ended_run_raises(tmp_path, bu
         run(client, config, _job(tmp_path))
 
 
-def test_follow_picks_up_scans_until_the_run_ends(tmp_path, built, client, monkeypatch):
+def test_follow_picks_up_scans_until_the_run_ends(tmp_path, built, client):
     """run-2 is running with one complete scan (12:00); while the runner waits, the
     12:05 volume completes and the run finishes."""
     finished = []
@@ -217,11 +283,10 @@ def test_follow_picks_up_scans_until_the_run_ends(tmp_path, built, client, monke
         StoreRegistry.get_instance(built.root).finalize_run(RUN_2, "completed", scans_processed=2)
         finished.append(seconds)
 
-    monkeypatch.setattr(time, "sleep", _pipeline_progresses)
     config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
-    job = _job(tmp_path, run_id=RUN_2, follow=True)
+    job = _job(tmp_path, run_id=RUN_2, stop=_Polls(_pipeline_progresses))
     assert run(client, config, job) == 2
-    written = _read(job.selection_path)
+    written = _read(_selection(job))
     assert (written["run_id"], written["scan_time"], written["cell_uid"]) == (
         "run-2",
         "2026-06-01T12:05:00Z",
@@ -229,7 +294,7 @@ def test_follow_picks_up_scans_until_the_run_ends(tmp_path, built, client, monke
     )
 
 
-def test_follow_waits_for_tracking_rows_of_a_complete_scan(tmp_path, built, client, monkeypatch):
+def test_follow_waits_for_tracking_rows_of_a_complete_scan(tmp_path, built, client):
     """run-2 holds uid-r2 from 12:00. The 12:05 volume turns complete when its
     segmentation2d is linked; its tracking rows commit just after, then the run ends."""
     steps = iter(
@@ -248,11 +313,10 @@ def test_follow_waits_for_tracking_rows_of_a_complete_scan(tmp_path, built, clie
             raise AssertionError("still polling after the run finished")
         step()
 
-    monkeypatch.setattr(time, "sleep", _pipeline_progresses)
     config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
-    job = _job(tmp_path, run_id=RUN_2, follow=True)
+    job = _job(tmp_path, run_id=RUN_2, stop=_Polls(_pipeline_progresses))
     assert run(client, config, job) == 2
-    written = _read(job.selection_path)
+    written = _read(_selection(job))
     assert (written["scan_time"], written["cell_uid"], written["reason"]) == (
         "2026-06-01T12:05:00Z",
         "uid-r2",
@@ -271,14 +335,45 @@ def _acquire_and_persist(built, tmp_path, modules):
     _persist(built, 1, RUN_2, modules)
 
 
-def test_follow_on_a_finished_run_returns_while_another_run_is_running(
-    tmp_path, client, monkeypatch
-):
+def test_follow_on_a_finished_run_returns_while_another_run_is_running(tmp_path, client):
     """run-1 is completed; run-2 of the same collection is still running."""
 
     def _no_wait(seconds):
         raise AssertionError("polled a run that has already finished")
 
-    monkeypatch.setattr(time, "sleep", _no_wait)
     config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
-    assert run(client, config, _job(tmp_path, follow=True)) == 2
+    assert run(client, config, _job(tmp_path, stop=_Polls(_no_wait))) == 2
+
+
+def test_a_stopped_follow_makes_one_last_pass(tmp_path, built, client):
+    """run-2 is running with one complete scan; the 12:05 volume completes while
+    the runner waits, and the follow is stopped then: it still takes 12:05, then
+    returns although run-2 is still running."""
+    waits = []
+
+    def _complete_and_stop(seconds):
+        if waits:
+            raise AssertionError("polled again after the stop")
+        waits.append(seconds)
+        _acquire_and_persist(built, tmp_path, _MODULES)
+        stop.set()
+
+    stop = _Polls(_complete_and_stop)
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    job = _job(tmp_path, run_id=RUN_2, stop=stop)
+
+    assert run(client, config, job) == 2
+    assert _read(_selection(job))["scan_time"] == "2026-06-01T12:05:00Z"
+    assert client.run(RUN_2).status == "running"
+
+
+def test_a_stop_cuts_the_wait_between_polls_short(tmp_path, client):
+    """run-2 keeps running; a follow polling once an hour ends as soon as it is stopped."""
+    stop = threading.Event()
+    threading.Timer(0.2, stop.set).start()
+    config = make_config(gates=_REFL_GE_45, min_age_seconds=0.0, growth_window_scans=2)
+    started = time.monotonic()
+
+    run(client, config, _job(tmp_path, run_id=RUN_2, stop=stop, poll_seconds=3600.0))
+
+    assert time.monotonic() - started < 60.0

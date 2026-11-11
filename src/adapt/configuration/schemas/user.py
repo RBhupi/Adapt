@@ -1,14 +1,14 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""UserConfig: Forgiving, minimal user-facing configuration.
+"""UserConfig: the overrides layer of configuration resolution.
 
-This schema accepts user inputs in a variety of formats, with aliases
-for common naming patterns (e.g., RADAR_ID → radar, MODE → mode).
+This schema accepts inputs in a variety of formats, with aliases for common
+naming patterns (e.g., RADAR_ID → radar, MODE → mode).
 
-UserConfig is intentionally minimal - users only specify what they want
-to override from the expert defaults. Validation is lenient to accept
-both uppercase and lowercase keys, integers where floats are expected, etc.
+UserConfig is intentionally minimal - it holds only what overrides the expert
+defaults. Validation is lenient about uppercase aliases and integers where
+floats are expected, but unknown keys are rejected.
 """
 
 from typing import Any, Literal, cast
@@ -17,20 +17,18 @@ from pydantic import Field, field_validator, model_validator
 
 from adapt.configuration.schemas.base import AdaptBaseModel
 
-# InternalConfig sections that have no explicit UserConfig field and are routed
-# straight through from undeclared (extra) input. Other sections (downloader,
-# regridder, segmenter, global, analyzer, projector) are handled via typed fields.
-_PASSTHROUGH_SECTIONS = frozenset(
-    {"reader", "tracker", "visualization", "output", "logging", "processor"}
-)
+# InternalConfig sections with no typed UserConfig model: routed through whole and
+# validated by InternalConfig. Other sections (downloader, regridder, segmenter,
+# global, analyzer, projector) are handled via typed fields.
+_PASSTHROUGH_SECTIONS = ("reader", "tracker", "visualization", "output", "logging", "processor")
 
 
 class _UserSection(AdaptBaseModel):
     """Base for typed nested user sections.
 
-    Tolerates every field a fully-generated config.yaml emits (extra="allow") and
-    passes the extras through model_dump so they reach InternalConfig, which makes
-    the final validation decision.
+    Tolerates every field of the section (extra="allow") and passes the extras
+    through model_dump so they reach InternalConfig, which makes the final
+    validation decision.
     """
 
     model_config = AdaptBaseModel.model_config.copy()
@@ -156,7 +154,7 @@ class UserDownloaderConfig(_UserSection):
     """User-facing downloader config."""
 
     radar: str | None = None
-    output_dir: str | None = None
+    output_dir: str | None = None  # OBSOLETE — never read (see DownloaderConfig.output_dir)
     latest_files: int | None = None
     latest_minutes: int | None = None
     poll_interval_sec: int | None = None
@@ -177,10 +175,10 @@ class UserAnalyzerConfig(_UserSection):
 class UserConfig(AdaptBaseModel):
     """User-facing configuration schema.
 
-    Minimal, forgiving, and uses common aliases. Users only specify
-    what they want to override from ParamConfig defaults.
-
-    This config is converted to internal overrides during resolution.
+    The internal merge layer's input: the pipeline-file loader translates a
+    pipeline file into it, and test fixtures build it directly. Uses common
+    aliases; holds only overrides of ParamConfig defaults. Unknown top-level
+    keys are rejected.
 
     Usage
     -----
@@ -189,10 +187,10 @@ class UserConfig(AdaptBaseModel):
             radar="KHTX",
             base_dir="/data/adapt",
             z_level=2000,
-            threshold=35,
+            min_cellsize_gridpoint=40,
         )
 
-        internal = resolve_config(param_cfg, user_cfg, cli_cfg)
+        internal = resolve_config(param_cfg, user_cfg)
     """
 
     # Top-level operational settings
@@ -233,14 +231,11 @@ class UserConfig(AdaptBaseModel):
     radar_variables: list[str] | None = None
     exclude_fields: list[str] | None = None
 
-    # Extension modules (optional, user-selected)
-    extensions: list[str] = Field(default_factory=list)
-
     # Pipeline module allowlist (node names). None/absent = run all registered
-    # modules; a present list runs only the named ones (comment a line out to skip).
+    # modules; a present list runs only the named ones.
     modules: list[str] | None = None
 
-    # Per-module config params, keyed by module name (for extension modules)
+    # Per-module config params, keyed by module name (extended and post-processing modules)
     module_params: dict[str, dict[str, Any]] | None = None
 
     # Nested overrides (advanced users)
@@ -251,12 +246,18 @@ class UserConfig(AdaptBaseModel):
     projector: UserProjectorConfig | None = None
     analyzer: UserAnalyzerConfig | None = None
 
+    # Whole sections passed through (_PASSTHROUGH_SECTIONS); unknown keys inside
+    # them raise via InternalConfig (extra="forbid").
+    reader: dict[str, Any] | None = None
+    tracker: dict[str, Any] | None = None
+    visualization: dict[str, Any] | None = None
+    output: dict[str, Any] | None = None
+    logging: dict[str, Any] | None = None
+    processor: dict[str, Any] | None = None
+
     model_config = AdaptBaseModel.model_config.copy()
-    # Capture undeclared sections (extra="allow") so the full set of InternalConfig
-    # sections can be overridden; unrouted legacy keys are filtered in
-    # to_internal_overrides. Unknown keys *within* a routed section still raise
-    # via InternalConfig (extra="forbid").
-    model_config.update({"populate_by_name": True, "extra": "allow"})
+    # Unknown top-level keys are rejected (extra="forbid", from AdaptBaseModel).
+    model_config.update({"populate_by_name": True})
 
     @model_validator(mode="after")
     def infer_historical_mode_from_times(self):
@@ -308,9 +309,6 @@ class UserConfig(AdaptBaseModel):
         if self.source_dir is not None:
             overrides["source_dir"] = self.source_dir
 
-        if self.extensions:
-            overrides["extensions"] = self.extensions
-
         if self.modules is not None:
             overrides["modules"] = self.modules
 
@@ -337,7 +335,7 @@ class UserConfig(AdaptBaseModel):
         if self.max_fetch_retries is not None:
             downloader["max_fetch_retries"] = self.max_fetch_retries
 
-        # Map base_dir to downloader.output_dir for convenience
+        # OBSOLETE — fills the never-read downloader.output_dir; remove with that field.
         if self.base_dir is not None:
             # Accept either a Path or string; keep as string for overrides
             downloader["output_dir"] = str(self.base_dir)
@@ -419,11 +417,12 @@ class UserConfig(AdaptBaseModel):
         if analyzer:
             overrides["analyzer"] = analyzer
 
-        # Pass through whole sections that have no typed UserConfig field (tracker,
-        # visualization, output, logging, processor, reader). They are deep-merged
-        # onto ParamConfig by resolve_config; unknown sub-keys raise at InternalConfig.
-        for key, value in (self.model_extra or {}).items():
-            if key in _PASSTHROUGH_SECTIONS and isinstance(value, dict):
+        # Pass through whole sections that have no typed UserConfig model. They are
+        # deep-merged onto ParamConfig by resolve_config; unknown sub-keys raise at
+        # InternalConfig.
+        for key in _PASSTHROUGH_SECTIONS:
+            value = getattr(self, key)
+            if value is not None:
                 overrides[key] = value
 
         # REFLECTIVITY_VAR means "my file calls reflectivity <name>" — a NAME

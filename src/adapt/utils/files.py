@@ -1,14 +1,12 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Atomic text writes and fail-loud YAML section reads for file-driven consumers."""
+"""Atomic text writes for file-driven consumers."""
 
 import os
 import tempfile
 import time
 from pathlib import Path
-
-import yaml
 
 # Windows refuses to replace a file another handle holds open (PermissionError)
 # until that handle closes; readers and antivirus scans hold one for moments.
@@ -57,22 +55,3 @@ def _replace(src: Path, dst: Path) -> None:
         except PermissionError:
             time.sleep(_REPLACE_RETRY_SECONDS)
     os.replace(src, dst)
-
-
-def read_yaml_section(path: str | Path, key: str) -> dict:
-    """Return the top-level ``key`` mapping of the YAML file at ``path``.
-
-    Sibling sections are ignored: each component validates only its own.
-    Raises ValueError when the document or the section is not a mapping, or
-    when ``key`` is missing.
-    """
-    with open(path, encoding="utf-8") as fh:
-        document = yaml.safe_load(fh)
-    if not isinstance(document, dict):
-        raise ValueError(f"{path}: document is not a mapping (got {type(document).__name__})")
-    if key not in document:
-        raise ValueError(f"{path}: missing section '{key}' (present: {sorted(document)})")
-    section = document[key]
-    if not isinstance(section, dict):
-        raise ValueError(f"{path}: section '{key}' is not a mapping (got {type(section).__name__})")
-    return section

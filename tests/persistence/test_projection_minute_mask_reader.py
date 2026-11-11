@@ -34,7 +34,7 @@ def _write(coll, ds, scan_time: str):
     from adapt.persistence.objects import ArtifactMeta, ObjectStore
 
     objects = ObjectStore(coll.objects_dir, coll.catalog)
-    handle = objects.begin(suffix=".nc")
+    handle = objects.begin(f"fixture/{scan_time.replace(':', '')}.nc")
     ds.to_netcdf(handle.staging_path)
     objects.commit(
         handle,

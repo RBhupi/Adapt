@@ -3,6 +3,7 @@
 
 """Artifact lineage: multi-parent edges, traversable both directions."""
 
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -30,7 +31,7 @@ def objects(collection):
 
 
 def _commit_artifact(objects, artifact_type: str, parents=()) -> str:
-    handle = objects.begin(suffix=".bin")
+    handle = objects.begin(f"fixture/{artifact_type}-{uuid.uuid4().hex}.bin")
     handle.staging_path.write_bytes(artifact_type.encode())
     meta = ArtifactMeta(
         artifact_type=artifact_type,
@@ -65,7 +66,7 @@ class TestLineage:
             collection.catalog.add_lineage("ghost", parent)
 
     def test_commit_with_unknown_parent_raises(self, objects):
-        handle = objects.begin(suffix=".bin")
+        handle = objects.begin("fixture/orphan.bin")
         handle.staging_path.write_bytes(b"data")
         meta = ArtifactMeta(
             artifact_type="gridded3d",

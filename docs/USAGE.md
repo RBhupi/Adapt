@@ -9,15 +9,17 @@ outputs, and configuring the system. For installation see [Installation](install
 
 Make a directory, initialize it as a data store, and work inside it. `adapt init`
 creates the store layout (nothing else ever does — the pipeline refuses to run in
-an uninitialized directory). `adapt config` writes `config.yaml` there with
-`base_dir` pointing at itself, and every other command reads it from the working
-directory, so there are no paths to pass:
+an uninitialized directory) and writes the pipeline file `nexrad.yaml` there.
+The folder is the store, and every command reads it from the working directory,
+so there are no paths to pass:
 
 ```bash
 mkdir my_case && cd my_case
-adapt init            # creates registry.db, logs/, collections/
-adapt config          # skip if you already have a config.yaml here
+adapt init            # creates registry.db, logs/, collections/ and nexrad.yaml
 ```
+
+Open `nexrad.yaml` and set `run.radar` to the 4-letter NEXRAD site code you want
+(e.g. `KDIX`, `KFTG`, `KAMX`; the template uses `KLOT`).
 
 Then, in **two terminals** with the conda environment active and both in that
 directory:
@@ -25,9 +27,8 @@ directory:
 **Terminal 1 — start the real-time pipeline:**
 
 ```bash
-adapt run-nexrad --radar KLOT
+adapt run nexrad
 ```
-Replace `KLOT` with any 4-letter NEXRAD site code (e.g. `KDIX`, `KFTG`, `KAMX`).
 The pipeline runs until you press `Ctrl-C`.
 
 **Terminal 2 — open the dashboard:**
@@ -43,33 +44,126 @@ Press `Ctrl-C` in Terminal 1 to stop the pipeline.
 
 ### Historical mode
 
-Process a fixed time window from the archive:
+Process a fixed time window from the archive: set the `run:` section of the
+pipeline file, then `adapt run nexrad` as before.
 
-```bash
-adapt run-nexrad --radar KLOT \
-    --start-time 2025-03-05T18:00:00 \
-    --end-time   2025-03-05T20:00:00
+```yaml
+run:
+  source: aws_nexrad
+  radar: KLOT
+  mode: historical
+  start_time: 2025-03-05T18:00:00Z
+  end_time: 2025-03-05T20:00:00Z
 ```
 
-If `--start-time` or `--end-time` is provided, historical mode is selected
-automatically — you do not need `--mode historical`.
+Times need a time zone; `Z` means UTC. The run stops by itself once every scan
+in the window is processed.
 
-### Using a configuration from elsewhere
+### From scans to radar commands
 
-A `config.yaml` in the working directory is picked up automatically. A config
-kept anywhere else, or under another name, is passed as the first argument:
+The whole chain — read scans, find and track cells, choose a target, plan the
+radar command — runs from one pipeline file. In `nexrad.yaml`, uncomment the two
+consumer lines (`radar_command` acts on what `target_selection` writes, so it
+needs it):
+
+```yaml
+consumers:
+  target_selection:           # adapt config --show target_selection
+  radar_command:              # adapt config --show radar_command
+```
+
+Check the wiring, then run:
 
 ```bash
-adapt config my_config.yaml        # generate a template with all options
-adapt run-nexrad my_config.yaml --radar KLOT
+adapt graph nexrad    # prints the chain: ingest -> ... -> tracking -> store -> target_selection -> radar_command
+adapt run nexrad
 ```
+
+`adapt graph` only reads the file; paste its output into any Mermaid viewer to
+see it as a diagram. `adapt run` checks the whole file before anything starts,
+then prints one line per scan with the time each module took:
+
+```
+scan KHGX20261110_153521_V06  │  ingest 18.7s  detection 19ms  │  0 cells  18.7s
+scan KHGX20261110_154224_V06  │  ingest 18.5s  detection 19ms  projection 1.1s  analysis 29ms  tracking 11ms  cell_volume_stats 881ms  │  15 cells  20.5s
+```
+
+The first scan of a run is only read and segmented: projection, tracking and
+everything after them need a previous scan, so they start with the second one
+(and again after a gap between scans longer than `max_scan_gap_minutes`, 10 by
+default, a `global` option under `params:`).
+
+What to look at, all under `consumers/<run_id>/` in the folder:
+
+| File | What it holds |
+|------|---------------|
+| `target_selection/decisions.jsonl` | one line per decided scan: the chosen cell, or why none |
+| `target_selection/current_selection.json` | the newest decision |
+| `radar_command/current_targets.json` | the newest radar command (centre, extents, scan pattern) |
+| `radar_command/history/<plan_id>.json` | every command planned |
+| `radar_command/history/activity.jsonl` | one event per step: `SELECTION_RECEIVED`, `PLAN_GENERATED`, `PUBLISHED`, `NO_TARGET`, ... |
+
+**Nothing is sent to a radar unless you ask for it.** As packaged, `radar_command`
+is a dry run: commands are written to those files only. To send them, add an
+`api:` block under `radar_command:` (`adapt config --show radar_command` prints
+it) and export the key in the environment variable it names before `adapt run`;
+`SENT` or `SEND_FAILED` events then appear in `activity.jsonl`.
+
+To try the chain on scans you already have on disk instead of downloading, point
+the file at the folder; the run ends when every file in the window is processed:
+
+```yaml
+run:
+  source: local_directory
+  radar: KHGX
+  mode: historical
+  start_time: 2026-11-10T15:30:00Z
+  end_time: 2026-11-10T16:10:00Z
+  source_dir: /data/level2/KHGX     # folder of Level-II files, original names
+```
+
+To try other target-selection rules on a run you have already made, without
+processing the scans again, replay it: see *Stored-run replay* in the
+[CLI Reference](cli_reference.md).
+
+### Changing options
+
+The pipeline file lists only names, and a name alone runs with its defaults: a
+listed module with its default options, an uncommented consumer line
+(`target_selection:`, `radar_command:`) with its packaged preset. Set only what
+you change: module options under `params:`, a consumer's under its own line
+(e.g. `target_selection:` then `  duration: {max_minutes: 15}`). Print a module's or section's options with their
+defaults and meanings, then paste what it prints under the file's `params:`
+line, as its first line says (`params:` is the template's last line, so
+`adapt config --show detection >> nexrad.yaml` does it too; an entry given twice
+is refused):
+
+```bash
+adapt config --show detection   # the segmenter options detection uses
+adapt config --show global      # settings shared by several modules
+```
+
+`adapt config nexrad` rewrites `nexrad.yaml` from the template (it asks before
+overwriting). A store can hold several pipelines: copy `nexrad.yaml` to, say,
+`kdix.yaml`, edit it, and run `adapt run kdix`.
+
+### Consumers and post-processing
+
+The `consumers:` section adds things that act on the results while the pipeline
+runs — target selection, radar commands, plots — each writing under
+`consumers/<run_id>/<consumer>/` in the store. The `postprocessing:` section
+lists modules (e.g. `xlma_stat`) that run over the run once it completes. A file
+with no `core:` modules replays a stored run instead: `adapt run NAME --run-id ID`,
+writing into a new `consumers/<run_id>/replay-<n>/` each time. See the
+[CLI Reference](cli_reference.md) for both.
 
 ### Verbose logging
 
-Add `-v` to see debug-level output, including per-scan timing and any errors:
+Add `-v` to see debug-level output on the console as well as in the run's log,
+including per-scan timing and any errors:
 
 ```bash
-adapt run-nexrad --radar KLOT -v
+adapt run nexrad -v
 ```
 
 ### All options
@@ -78,7 +172,8 @@ Each command lists its own flags:
 
 ```bash
 adapt --help
-adapt run-nexrad --help
+adapt run --help
+adapt graph --help
 adapt config --help
 adapt dashboard --help
 ```
@@ -135,22 +230,33 @@ internet and may take a few seconds.
 ## Outputs — the data store
 
 All pipeline artifacts live in the data store created by `adapt init` — the
-repository root, which is the working directory unless the config or
-`--base-dir` says otherwise:
+folder you initialized and run `adapt run` from:
 
 ```
 my_case/
-├── registry.db                # runs (with their full config), collections, events
+├── nexrad.yaml                # the pipeline file (adapt init / adapt config nexrad)
+├── registry.db                # runs (with their full config and pipeline file), collections, events
 ├── logs/                      # run log files
+├── consumers/                 # consumer outputs: consumers/<run_id>/<consumer>/ (replays: replay-<n>/),
+│                              # each run's or replay's folder holding a copy of its pipeline file
 └── collections/
     └── KLOT/                  # one collection per radar
         ├── catalog.db         # scans, artifacts, checksums, lineage
         ├── products.db        # cell stats, tracks, module tables, annotations
-        └── objects/           # immutable NetCDF files, content-addressed
+        ├── decisions.db       # the segmenter's and tracker's decision log (analysis only)
+        └── objects/           # the files themselves, under readable names
+            ├── raw/           # downloaded scans, under their original names
+            └── <run_id>/<module>/   # what each module wrote in that run
 ```
 
-Files in `objects/` are named by artifact ID, not by scan time — everything is
-discovered through the catalog, never by walking directories. Each scan is
+Files in `objects/` have readable names: a downloaded scan keeps its original
+name (`raw/KLOT20250617_180012_V06`), and a file a module writes is named for the
+scan it came from and what it holds, in a folder for the run and the module
+(`<run_id>/ingest/KLOT20250617_180012_V06.gridded3d.nc`). The names are for
+people: Adapt finds every file through the catalog, never by walking directories
+or parsing names, and the catalog row carries the file's identity (`artifact_id`),
+checksum and lineage. A run that processes a scan again replaces its own file;
+a downloaded scan is never rewritten. Each scan is
 identified by `scan_id`, the first 16 hex digits of the SHA-256 of the raw
 Level-II file (verify externally with `sha256sum <raw file> | cut -c1-16`).
 Every derived file records its checksum and its lineage back to that raw
@@ -219,7 +325,7 @@ pip install "arm-adapt[maps]"
 Re-run with `-v` to see the full traceback:
 
 ```bash
-adapt run-nexrad --radar KLOT -v
+adapt run nexrad -v
 ```
 
 ### `adapt: command not found`

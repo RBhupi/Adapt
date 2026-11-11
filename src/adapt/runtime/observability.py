@@ -20,9 +20,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from random import Random
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from adapt.contracts.observability import Metrics, ObsContext, SpanRecord
+
+if TYPE_CHECKING:
+    from adapt.configuration.schemas.internal import InternalLoggingConfig
 
 __all__ = [
     "ObsSettings",
@@ -30,6 +33,7 @@ __all__ = [
     "build_observability",
     "current_context",
     "disabled_observability",
+    "obs_settings",
 ]
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -77,7 +81,7 @@ class ObsSettings:
     console_logs: bool = True
     level: str = "INFO"
     console_level: str = "WARNING"
-    progress_every: float = 30.0
+    progress_every: float = 30.0  # OBSOLETE — never read; remove with the logging field
 
 
 class Observability:
@@ -295,6 +299,20 @@ class _Meter:
                     continue
                 out[key] = out.get(key, 0) + len(values)
             return out
+
+
+def obs_settings(logging_config: InternalLoggingConfig) -> ObsSettings:
+    """Translate the resolved ``logging`` config section into ObsSettings."""
+    return ObsSettings(
+        enabled=logging_config.enabled,
+        traces=logging_config.traces,
+        metrics=logging_config.metrics,
+        json_logs=logging_config.json_logs,
+        console_logs=logging_config.console_logs,
+        level=logging_config.level,
+        console_level=logging_config.console_level,
+        progress_every=logging_config.progress_every,
+    )
 
 
 def build_observability(

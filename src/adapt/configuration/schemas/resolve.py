@@ -4,13 +4,14 @@
 """Configuration resolution and merging logic.
 
 This module provides the SINGLE AUTHORITATIVE ENTRYPOINT for configuration
-resolution: resolve_config(). It merges ParamConfig, UserConfig, and CLIConfig
-in the correct precedence order and returns a validated InternalConfig.
+resolution: resolve_config(). It merges UserConfig overrides over ParamConfig
+defaults and returns a validated InternalConfig. The pipeline-file loader
+(``adapt.configuration.pipeline_file``) translates a pipeline file into a
+UserConfig and resolves it here.
 
 Precedence (highest to lowest):
-1. CLIConfig (command-line overrides)
-2. UserConfig (user file overrides)
-3. ParamConfig (expert defaults)
+1. UserConfig (overrides)
+2. ParamConfig (expert defaults)
 
 Merge Semantics:
 - Nested dictionaries: recursively merged (child keys from higher-priority
@@ -21,7 +22,6 @@ Merge Semantics:
 
 Special Cases:
 - analyzer.exclude_fields: UNIONED (default excludes + user excludes)
-- projector.max_projection_steps: capped at 10 for safety
 - mode inference: auto-set to 'historical' if start_time/end_time provided
   but no explicit mode
 
@@ -31,7 +31,6 @@ Example precedence:
 - Result: {"radar_variables": ["C"], "threshold": 40}  # List replaced
 """
 
-from adapt.configuration.schemas.cli import CLIConfig
 from adapt.configuration.schemas.errors import ConfigError, validated
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.param import ParamConfig
@@ -80,18 +79,16 @@ def deep_merge(base: dict, *overrides: dict) -> dict:
 def resolve_config(
     param_cfg: dict | ParamConfig,
     user_cfg: dict | UserConfig | None = None,
-    cli_cfg: dict | CLIConfig | None = None,
 ) -> InternalConfig:
-    """Resolve final runtime configuration from param, user, and CLI configs.
+    """Resolve final runtime configuration from param and user configs.
 
     This is the SINGLE ENTRYPOINT for configuration resolution. It validates
     and merges configs in the correct precedence order, then returns an
     immutable InternalConfig for runtime use.
 
     Precedence (highest to lowest):
-    1. CLIConfig (command-line overrides)
-    2. UserConfig (user file overrides)
-    3. ParamConfig (expert defaults)
+    1. UserConfig (overrides)
+    2. ParamConfig (expert defaults)
 
     Parameters
     ----------
@@ -99,8 +96,6 @@ def resolve_config(
         Expert configuration with complete defaults. Required.
     user_cfg : dict or UserConfig, optional
         User configuration with overrides. If None or empty, uses only param defaults.
-    cli_cfg : dict or CLIConfig, optional
-        Command-line overrides. If None or empty, no CLI overrides applied.
 
     Returns
     -------
@@ -143,54 +138,32 @@ def resolve_config(
     else:
         user = user_cfg
 
-    if cli_cfg is None or (isinstance(cli_cfg, dict) and not cli_cfg):
-        cli = CLIConfig()
-    elif not isinstance(cli_cfg, CLIConfig):
-        cli = validated(CLIConfig, cli_cfg, source="command-line flags")
-    else:
-        cli = cli_cfg
-
     # Convert to dicts for merging
     param_dict = param.model_dump(by_alias=True)  # Use 'global' not 'global_'
     user_overrides = user.to_internal_overrides()
-    cli_overrides = cli.to_internal_overrides()
 
-    # Deep merge: param < user < cli
-    merged = deep_merge(param_dict, user_overrides, cli_overrides)
+    # Deep merge: param < user
+    merged = deep_merge(param_dict, user_overrides)
 
     # Special handling for analyzer.exclude_fields: AMEND instead of REPLACE
-    # We want to keep the internal defaults and add user-specified ones.
-    default_excludes = set(param.analyzer.exclude_fields)
-    user_excludes = set()
-
-    # Check top-level UserConfig alias
-    if user.exclude_fields:
-        user_excludes.update(user.exclude_fields)
-
-    # Check nested UserConfig section
-    if user.analyzer and user.analyzer.exclude_fields:
-        user_excludes.update(user.analyzer.exclude_fields)
-
-    # Check CLI overrides (if we ever add analyzer to CLIConfig)
-    if hasattr(cli, "analyzer") and cli.analyzer and cli.analyzer.exclude_fields:
-        user_excludes.update(cli.analyzer.exclude_fields)
-
+    # We want to keep the internal defaults and add user-specified ones: defaults
+    # first, then each addition once, in the order given (a set's order would
+    # change from run to run).
+    user_excludes = list(user.exclude_fields or [])  # top-level UserConfig alias
+    if user.analyzer and user.analyzer.exclude_fields:  # nested UserConfig section
+        user_excludes += user.analyzer.exclude_fields
     if user_excludes:
-        merged.setdefault("analyzer", {})["exclude_fields"] = list(default_excludes | user_excludes)
+        merged.setdefault("analyzer", {})["exclude_fields"] = list(
+            dict.fromkeys([*param.analyzer.exclude_fields, *user_excludes])
+        )
 
     # Schema responsibility: Infer historical mode from times if mode not explicitly set
     # This handles cases where times are provided but mode is not.
-    # We check user.mode and cli.mode directly to see if they were explicitly set.
-    if user.mode is None and cli.mode is None:
+    # We check user.mode directly to see if it was explicitly set.
+    if user.mode is None:
         downloader_dict = merged.get("downloader", {})
         if downloader_dict.get("start_time") or downloader_dict.get("end_time"):
             merged["mode"] = "historical"
-
-    # Cap max_projection_steps at 10
-    if "projector" in merged and "max_projection_steps" in merged["projector"]:
-        merged["projector"]["max_projection_steps"] = min(
-            merged["projector"]["max_projection_steps"], 10
-        )
 
     # Add mode to downloader config for validation
     if "downloader" in merged and "mode" not in merged["downloader"]:
@@ -204,12 +177,12 @@ def resolve_config(
         if not internal.downloader.start_time:
             raise ConfigError(
                 "start_time is required when mode='historical'. "
-                "Please provide start_time in user config or CLI arguments."
+                "Set run.start_time in the pipeline file."
             )
         if not internal.downloader.end_time:
             raise ConfigError(
                 "end_time is required when mode='historical'. "
-                "Please provide end_time in user config or CLI arguments."
+                "Set run.end_time in the pipeline file."
             )
 
     # The tracking field must actually exist for the core to run on it:

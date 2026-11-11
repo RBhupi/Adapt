@@ -3,8 +3,8 @@
 
 """Base interface for all Adapt execution nodes.
 
-Every node in the system — built-in (execution/nodes/) or loaded via the
-config's ``extensions:`` list of dotted import paths — must
+Every node in the system — registered from the module catalog
+(``configuration/defaults.yaml`` and ``postprocess_defaults.yaml``) — must
 declare its name, inputs, outputs, and optionally input/output contracts.
 The graph engine uses these declarations to build the execution DAG automatically.
 
@@ -16,6 +16,11 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from adapt.contracts import PersistenceSpec
+
+# Pipeline phase of per-scan enrichment that runs after each scan is stored, on
+# the scan's in-memory data (the pipeline file's ``extended:`` section). Lower
+# phases are the per-scan core (``core:``).
+EXTENDED_PHASE = 3
 
 # Pipeline phase reserved for out-of-band repository enrichment run by the
 # PostProcessor (never by the live RadarProcessor, which only knows phases 0–3).
@@ -56,7 +61,7 @@ class BaseModule(ABC):
     """
 
     name: ClassVar[str] = ""
-    summary: ClassVar[str] = ""  # one-line role, shown as a config.yaml module comment
+    summary: ClassVar[str] = ""  # one-line role, shown as a pipeline-file module comment
     inputs: ClassVar[list[str]] = []
     outputs: ClassVar[list[str]] = []
     input_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
@@ -69,10 +74,14 @@ class BaseModule(ABC):
     # storage. Empty tuple = this module persists nothing directly.
     persistence: ClassVar[tuple[PersistenceSpec, ...]] = ()
     injected_global_fields: ClassVar[frozenset[str]] = frozenset()
+    # Core modules only: the ParamConfig sections (pipeline-file ``params:`` keys)
+    # that hold this module's options. Modules of phase >= EXTENDED_PHASE own their
+    # options instead, under ``params: {<name>: ...}``.
+    param_sections: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     def module_summary(cls) -> str:
-        """One-line role for the config.yaml ``modules:`` list comment.
+        """One-line role for the pipeline file's module-list comments.
 
         Prefers the explicit ``summary`` ClassVar, then the first non-empty line of
         the class docstring, falling back to the module ``name``.
@@ -91,24 +100,12 @@ class BaseModule(ABC):
         Sourced from ``config_class`` field defaults — the single place defaults
         live — excluding any field listed in ``injected_global_fields`` (those are
         filled from the shared global section by ``build_config``). Returns ``{}``
-        when the module declares no ``config_class``. Feeds dynamic config.yaml
-        generation so a new module's params appear without editing any central file.
+        when the module declares no ``config_class``.
         """
         if cls.config_class is None:
             return {}
         return {
             name: field.default
-            for name, field in cls.config_class.model_fields.items()  # type: ignore[attr-defined]
-            if name not in cls.injected_global_fields
-        }
-
-    @classmethod
-    def param_descriptions(cls) -> dict[str, str]:
-        """Map owned param name -> ``Field`` description (for config.yaml comments)."""
-        if cls.config_class is None:
-            return {}
-        return {
-            name: (field.description or "")
             for name, field in cls.config_class.model_fields.items()  # type: ignore[attr-defined]
             if name not in cls.injected_global_fields
         }

@@ -9,6 +9,7 @@ reporter emits console-tagged records so the ConsoleFilter lets them through.
 """
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from adapt.contracts.execution_history import RunProvenance, RunStart, RunSummary
@@ -81,9 +82,19 @@ def test_header_shows_identity_mode_version_commit_modules():
     assert "ingest" in out and "detection" in out and "tracking" in out
 
 
+def test_summary_of_a_run_without_failed_scans_says_success():
+    out = format_summary(replace(_summary(), failures=0))
+    assert "SUCCESS" in out.splitlines()[0]
+
+
+def test_summary_of_a_run_with_failed_scans_names_them_instead_of_success():
+    out = format_summary(_summary())  # failures=2
+    assert "COMPLETED, 2 SCANS FAILED" in out.splitlines()[0]
+    assert "SUCCESS" not in out
+
+
 def test_summary_shows_status_counts_and_slowest_stage():
     out = format_summary(_summary())
-    assert "SUCCESS" in out
     assert "14m22s" in out
     assert "842" in out
     assert "18,431" in out  # thousands separator

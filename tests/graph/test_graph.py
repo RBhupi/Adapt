@@ -102,7 +102,7 @@ class TestGraphBuilder:
         b = StubModule("b", ["x"], ["y"])
         c = StubModule("c", ["y"], ["z"])
 
-        nodes = {n.name: n for n in GraphBuilder([a, b, c]).build()}
+        nodes = {n.name: n for n in GraphBuilder([a, b, c], provided=frozenset()).build()}
 
         assert nodes["b"].dependencies == [nodes["a"]]
         assert nodes["c"].dependencies == [nodes["b"]]
@@ -114,7 +114,7 @@ class TestGraphBuilder:
         a = StubModule("a", [], ["x"])
         b = StubModule("b", ["x"], ["y"])
 
-        nodes = {n.name: n for n in GraphBuilder([a, b]).build()}
+        nodes = {n.name: n for n in GraphBuilder([a, b], provided=frozenset()).build()}
 
         assert nodes["b"] in nodes["a"].dependents
 
@@ -125,7 +125,10 @@ class TestGraphBuilder:
         consumer1 = StubModule("consumer1", ["data"], ["out1"])
         consumer2 = StubModule("consumer2", ["data"], ["out2"])
 
-        nodes = {n.name: n for n in GraphBuilder([source, consumer1, consumer2]).build()}
+        nodes = {
+            n.name: n
+            for n in GraphBuilder([source, consumer1, consumer2], provided=frozenset()).build()
+        }
 
         assert nodes["source"] in nodes["consumer1"].dependencies
         assert nodes["source"] in nodes["consumer2"].dependencies
@@ -135,14 +138,14 @@ class TestGraphBuilder:
     def test_build_root_node_no_deps(self):
         """A module with no declared inputs has no dependencies."""
         root = StubModule("root", [], ["data"])
-        nodes = GraphBuilder([root]).build()
+        nodes = GraphBuilder([root], provided=frozenset()).build()
         assert nodes[0].dependencies == []
 
     @pytest.mark.unit
-    def test_build_unconnected_inputs_ignored(self):
-        """Inputs that no module produces are simply ignored (external data)."""
+    def test_build_provided_input_adds_no_dependency(self):
+        """An input the runtime provides (external data) wires to no node."""
         mod = StubModule("mod", ["external_input"], ["result"])
-        nodes = GraphBuilder([mod]).build()
+        nodes = GraphBuilder([mod], provided=frozenset({"external_input"})).build()
         assert nodes[0].dependencies == []
 
     @pytest.mark.unit
@@ -151,7 +154,7 @@ class TestGraphBuilder:
         a = StubModule("a", [], ["shared_key"])
         b = StubModule("b", [], ["shared_key"])
         with pytest.raises(ValueError, match="shared_key"):
-            GraphBuilder([a, b]).build()
+            GraphBuilder([a, b], provided=frozenset()).build()
 
     @pytest.mark.unit
     def test_build_returns_all_nodes(self):
@@ -160,7 +163,7 @@ class TestGraphBuilder:
             StubModule("b", ["x"], ["y"]),
             StubModule("c", ["y"], ["z"]),
         ]
-        nodes = GraphBuilder(mods).build()
+        nodes = GraphBuilder(mods, provided=frozenset()).build()
         assert len(nodes) == 3
 
 
@@ -181,8 +184,8 @@ class TestGraphExecutor:
         b = _make_tracking_module("b", ["x"], ["y"])
         c = _make_tracking_module("c", ["y"], ["z"])
 
-        nodes = GraphBuilder([a, b, c]).build()
-        GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([a, b, c], provided=frozenset()).build()
+        GraphExecutor(nodes).run({}, history=0)
 
         assert _execution_order == ["a", "b", "c"]
 
@@ -192,8 +195,8 @@ class TestGraphExecutor:
         root = _make_tracking_module("root", [], ["data"])
         child = _make_tracking_module("child", ["data"], ["out"])
 
-        nodes = GraphBuilder([root, child]).build()
-        GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([root, child], provided=frozenset()).build()
+        GraphExecutor(nodes).run({}, history=0)
 
         assert _execution_order.index("root") < _execution_order.index("child")
 
@@ -204,8 +207,8 @@ class TestGraphExecutor:
         c1 = StubModule("c1", ["data"], ["out1"])
         c2 = StubModule("c2", ["data"], ["out2"])
 
-        nodes = GraphBuilder([source, c1, c2]).build()
-        result = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([source, c1, c2], provided=frozenset()).build()
+        result = GraphExecutor(nodes).run({}, history=0).context
 
         assert "out1" in result
         assert "out2" in result
@@ -214,8 +217,8 @@ class TestGraphExecutor:
     def test_executor_outputs_merged_into_context(self):
         """Module outputs should appear in the returned context."""
         mod = StubModule("mod", [], ["result"], side_effect=lambda ctx: {"result": 42})
-        nodes = GraphBuilder([mod]).build()
-        ctx = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        ctx = GraphExecutor(nodes).run({}, history=0).context
         assert ctx["result"] == 42
 
     @pytest.mark.unit
@@ -228,8 +231,8 @@ class TestGraphExecutor:
             return {"out": True}
 
         mod = StubModule("mod", [], ["out"], side_effect=capture)
-        nodes = GraphBuilder([mod]).build()
-        GraphExecutor(nodes).run({"initial_key": "hello"})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        GraphExecutor(nodes).run({"initial_key": "hello"}, history=0)
 
         assert received.get("initial_key") == "hello"
 
@@ -247,14 +250,14 @@ class TestGraphExecutor:
         node_b.dependencies.append(node_a)
 
         with pytest.raises(RuntimeError, match="cycle"):
-            GraphExecutor([node_a, node_b]).run({})
+            GraphExecutor([node_a, node_b]).run({}, history=0)
 
     @pytest.mark.unit
     def test_executor_single_node(self):
         """Single node with no deps runs and returns output."""
         mod = StubModule("solo", [], ["result"], side_effect=lambda ctx: {"result": "done"})
-        nodes = GraphBuilder([mod]).build()
-        ctx = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        ctx = GraphExecutor(nodes).run({}, history=0).context
         assert ctx["result"] == "done"
 
 
@@ -312,8 +315,8 @@ class TestGraphExecutorContracts:
             return {"out": 1}
 
         mod = _ContractStub("m", ["inp"], ["out"], run_fn=_run, input_contracts={"inp": _validate})
-        nodes = GraphBuilder([mod]).build()
-        GraphExecutor(nodes).run({"inp": "value"})
+        nodes = GraphBuilder([mod], provided=frozenset({"inp"})).build()
+        GraphExecutor(nodes).run({"inp": "value"}, history=0)
 
         assert call_order == ["validate", "run"]
 
@@ -330,8 +333,8 @@ class TestGraphExecutorContracts:
             call_order.append("validate")
 
         mod = _ContractStub("m", [], ["out"], run_fn=_run, output_contracts={"out": _validate})
-        nodes = GraphBuilder([mod]).build()
-        GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        GraphExecutor(nodes).run({}, history=0)
 
         assert call_order == ["run", "validate"]
 
@@ -343,10 +346,10 @@ class TestGraphExecutorContracts:
             raise ContractViolation("input contract broken")
 
         mod = _ContractStub("m", ["inp"], ["out"], input_contracts={"inp": _bad_validator})
-        nodes = GraphBuilder([mod]).build()
+        nodes = GraphBuilder([mod], provided=frozenset({"inp"})).build()
 
         with pytest.raises(ContractViolation, match="input contract broken"):
-            GraphExecutor(nodes).run({"inp": "anything"})
+            GraphExecutor(nodes).run({"inp": "anything"}, history=0)
 
     @pytest.mark.unit
     def test_output_contract_violation_propagates(self):
@@ -356,10 +359,10 @@ class TestGraphExecutorContracts:
             raise ContractViolation("output contract broken")
 
         mod = _ContractStub("m", [], ["out"], output_contracts={"out": _bad_validator})
-        nodes = GraphBuilder([mod]).build()
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
 
         with pytest.raises(ContractViolation, match="output contract broken"):
-            GraphExecutor(nodes).run({})
+            GraphExecutor(nodes).run({}, history=0)
 
     @pytest.mark.unit
     def test_missing_input_key_raises_contract_violation(self):
@@ -376,10 +379,10 @@ class TestGraphExecutorContracts:
         mod = _ContractStub(
             "m", ["required_key"], ["out"], input_contracts={"required_key": _validate}
         )
-        nodes = GraphBuilder([mod]).build()
+        nodes = GraphBuilder([mod], provided=frozenset({"required_key"})).build()
 
         with pytest.raises(ContractViolation, match="required_key"):
-            GraphExecutor(nodes).run({})  # required_key intentionally absent
+            GraphExecutor(nodes).run({}, history=0)  # required_key intentionally absent
 
     @pytest.mark.unit
     def test_input_contract_receives_correct_value(self):
@@ -390,8 +393,8 @@ class TestGraphExecutorContracts:
             received.append(val)
 
         mod = _ContractStub("m", ["x"], ["out"], input_contracts={"x": _capture})
-        nodes = GraphBuilder([mod]).build()
-        GraphExecutor(nodes).run({"x": 99})
+        nodes = GraphBuilder([mod], provided=frozenset({"x"})).build()
+        GraphExecutor(nodes).run({"x": 99}, history=0)
 
         assert received == [99]
 
@@ -410,8 +413,8 @@ class TestGraphExecutorContracts:
             run_fn=lambda ctx: {"result": "hello"},
             output_contracts={"result": _capture},
         )
-        nodes = GraphBuilder([mod]).build()
-        GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        GraphExecutor(nodes).run({}, history=0)
 
         assert received == ["hello"]
 
@@ -437,8 +440,8 @@ class TestExecutorBranchGaps:
         A = StubModule("a", [], ["x"], side_effect=lambda ctx: order.append("a") or {"x": 1})
         B = StubModule("b", ["x"], ["y"], side_effect=lambda ctx: order.append("b") or {"y": 2})
         # Reverse order: B first, then A
-        nodes = GraphBuilder([B, A]).build()
-        result = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([B, A], provided=frozenset()).build()
+        result = GraphExecutor(nodes).run({}, history=0).context
         assert result["x"] == 1
         assert result["y"] == 2
         assert order == ["a", "b"]
@@ -447,8 +450,8 @@ class TestExecutorBranchGaps:
     def test_module_returning_none_is_treated_as_no_output(self):
         """If run() returns None the executor does not update context (branch 100→106)."""
         mod = StubModule("sink", ["x"], [], side_effect=lambda ctx: None)
-        nodes = GraphBuilder([mod]).build()
-        result = GraphExecutor(nodes).run({"x": 42})
+        nodes = GraphBuilder([mod], provided=frozenset({"x"})).build()
+        result = GraphExecutor(nodes).run({"x": 42}, history=0).context
         # x stays in context (unchanged), no crash
         assert result["x"] == 42
 
@@ -470,8 +473,8 @@ class TestExecutorBranchGaps:
             run_fn=lambda ctx: {"real_key": "ok"},
             output_contracts={"missing_key": _validator},
         )
-        nodes = GraphBuilder([mod]).build()
-        result = GraphExecutor(nodes).run({})
+        nodes = GraphBuilder([mod], provided=frozenset()).build()
+        result = GraphExecutor(nodes).run({}, history=0).context
         # Validator never called because key absent
         assert validated == []
         assert result["real_key"] == "ok"
@@ -488,7 +491,7 @@ class TestBuilderBranchGaps:
         """
         A = StubModule("a", [], ["x", "y"])  # produces two keys
         B = StubModule("b", ["x", "y"], ["z"])  # consumes both
-        nodes = GraphBuilder([A, B]).build()
+        nodes = GraphBuilder([A, B], provided=frozenset()).build()
         node_map = {n.name: n for n in nodes}
 
         # A is a dependency of B exactly once, not twice

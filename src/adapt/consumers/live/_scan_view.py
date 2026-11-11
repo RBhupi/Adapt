@@ -104,7 +104,8 @@ _HV_KEYS = (
 _VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
 
 # Plot-group variables with these prefixes come from the xlma_stat_minutes extension
-# table — empty unless `adapt postprocess --module xlma_stat` ran (see _lightning).
+# table — empty unless the run's pipeline file listed xlma_stat under
+# `postprocessing:` (see _lightning).
 _LIGHTNING_PREFIXES = ("flash_", "source_", "lightning_")
 
 
@@ -998,7 +999,7 @@ class ScanViewTab:
             if not ax.get_lines():
                 group_vars = group.get("variables", [])
                 if any(v.startswith(_LIGHTNING_PREFIXES) for v in group_vars):
-                    msg = "no data — run xlma_stat postprocess"
+                    msg = "no data — list xlma_stat under postprocessing"
                 elif any(v.startswith(_VOLUME_STATS_PREFIXES) for v in group_vars):
                     msg = "no data — enable cell_volume_stats"
                 else:

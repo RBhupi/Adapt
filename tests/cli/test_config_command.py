@@ -1,90 +1,81 @@
-import os
-import shutil
-import sys
-from argparse import Namespace
-from pathlib import Path
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
+"""``adapt config NAME``: write ``./NAME.yaml`` from the template, asking before overwriting."""
 
 import pytest
-import yaml
 
-from adapt.cli import _config_cmd
+from adapt.configuration.pipeline_file import load_pipeline_file
+
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("isolated_catalog")]
 
 
 @pytest.fixture
-def restore_cwd():
-    """Return to the original directory even if the test leaves it deleted."""
-    original = Path.cwd()
-    yield
-    os.chdir(original)
-
-
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows holds the cwd open; it cannot be deleted, so this state is unreachable",
-)
-def test_adapt_config_raises_when_cwd_is_missing(tmp_path, restore_cwd):
-    """A deleted cwd must fail loudly, not resolve ./config.yaml against nothing."""
-    cwd = tmp_path / "gone"
-    cwd.mkdir()
-    os.chdir(cwd)
-    shutil.rmtree(cwd)
-
-    with pytest.raises(FileNotFoundError, match="Current working directory no longer exists"):
-        _config_cmd(Namespace(output=None))
-
-
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows holds the cwd open; it cannot be deleted, so this state is unreachable",
-)
-def test_adapt_config_writes_absolute_path_when_cwd_is_missing(tmp_path, restore_cwd):
-    """An absolute output path does not need a cwd, so it must still succeed."""
-    cwd = tmp_path / "gone"
-    cwd.mkdir()
-    os.chdir(cwd)
-    shutil.rmtree(cwd)
-
-    out = tmp_path / "config.yaml"
-    _config_cmd(Namespace(output=str(out)))
-
-    cfg = yaml.safe_load(out.read_text(encoding="utf-8"))
-    assert cfg["base_dir"] == str(tmp_path)
-    # Full generated config carries every core section.
-    assert {"tracker", "segmenter"} <= cfg.keys()
-
-
-def _suggested_command(stdout: str) -> str:
-    """The `adapt ...` command `adapt config` tells the user to run next."""
-    line = next(ln for ln in stdout.splitlines() if "run-nexrad" in ln)
-    return line.split(":", 1)[1].strip()
-
-
-def test_hint_omits_the_config_path_when_it_is_the_default(tmp_path, monkeypatch, capsys):
-    """A config.yaml in the working directory is auto-loaded, so the suggested
-    command must not tell the user to pass a path they do not need."""
+def cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    _config_cmd(Namespace(output=None))
-
-    command = _suggested_command(capsys.readouterr().out)
-    assert command == "adapt run-nexrad --radar KLOT"
+    return tmp_path
 
 
-def test_hint_includes_the_config_path_when_it_is_not_the_default(tmp_path, monkeypatch, capsys):
-    """A config written anywhere else is not picked up automatically, so the
-    suggested command has to name it."""
-    monkeypatch.chdir(tmp_path)
-    out = tmp_path / "custom.yaml"
-    _config_cmd(Namespace(output=str(out)))
+def test_writes_the_short_pipeline_file_in_the_current_directory(cwd, adapt, capsys):
+    assert adapt("config", "nexrad") == 0
 
-    assert str(out) in _suggested_command(capsys.readouterr().out)
+    path = cwd / "nexrad.yaml"
+    assert path.read_text().startswith("# Adapt pipeline file. Run it with:  adapt run ")
+    assert load_pipeline_file(path).core
+    assert "adapt run nexrad" in capsys.readouterr().out
 
 
-def test_adapt_config_sets_base_dir_to_output_parent(tmp_path):
-    out_dir = tmp_path / "nested"
-    out_path = out_dir / "my_config.yaml"
-    args = Namespace(output=str(out_path))
-    _config_cmd(args)
+@pytest.mark.parametrize(("answer", "kept"), [("y", False), ("n", True), ("", True)])
+def test_asks_before_overwriting(cwd, adapt, monkeypatch, capsys, answer, kept):
+    path = cwd / "nexrad.yaml"
+    path.write_text("# mine\n")
+    monkeypatch.setattr("builtins.input", lambda prompt: answer)
 
-    assert out_path.exists()
-    cfg = yaml.safe_load(out_path.read_text(encoding="utf-8"))
-    assert cfg["base_dir"] == str(out_dir)
+    assert adapt("config", "nexrad") == 0
+
+    assert (path.read_text() == "# mine\n") is kept
+    if kept:
+        assert "Aborted" in capsys.readouterr().out
+
+
+def test_unknown_template_lists_the_available_ones_and_writes_nothing(cwd, adapt, capsys):
+    assert adapt("config", "bogus") == 2
+
+    assert "nexrad" in capsys.readouterr().err
+    assert not (cwd / "bogus.yaml").exists()
+
+
+def test_needs_a_name_or_show(cwd, adapt):
+    assert adapt("config") == 2
+
+
+def test_name_and_show_are_exclusive(cwd, adapt):
+    assert adapt("config", "nexrad", "--show", "tracking") == 2
+
+
+@pytest.mark.parametrize(
+    ("interrupt", "code"), [(EOFError, 0), (KeyboardInterrupt, 1)], ids=["eof", "ctrl-c"]
+)
+def test_an_interrupted_overwrite_prompt_aborts_cleanly(
+    cwd, adapt, monkeypatch, capsys, interrupt, code
+):
+    path = cwd / "nexrad.yaml"
+    path.write_text("# mine\n")
+
+    def _interrupt(prompt):
+        raise interrupt
+
+    monkeypatch.setattr("builtins.input", _interrupt)
+
+    assert adapt("config", "nexrad") == code
+
+    assert path.read_text() == "# mine\n"
+    assert "Aborted" in capsys.readouterr().out
+
+
+def test_outside_a_store_the_next_step_is_adapt_init(cwd, adapt, capsys):
+    assert adapt("config", "nexrad") == 0
+
+    out = capsys.readouterr().out
+    assert "adapt init" in out
+    assert "this folder (an Adapt store)" not in out

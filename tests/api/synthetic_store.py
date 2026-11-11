@@ -43,11 +43,9 @@ class _Module(SimpleNamespace):
     """Minimal module stand-in: name + declared persistence specs."""
 
 
-_GRID_SPEC = NetcdfArtifact(
-    key="grid_ds", product_type="gridded3d", producer="ingest", description="grid"
-)
+_GRID_SPEC = NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid")
 _ANALYSIS_SPEC = NetcdfArtifact(
-    key="analysis_ds", product_type="segmentation2d", producer="processor", description="analysis"
+    key="analysis_ds", product_type="segmentation2d", description="analysis"
 )
 _STATS_SPEC = ProductTableWrite(
     key="cell_stats",

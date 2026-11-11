@@ -20,6 +20,7 @@ import xarray as xr
 from adapt.persistence.products import SchemaLedger
 from adapt.persistence.track_store import TrackStore
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.fake_graph import fake_core
 from tests.helpers.queue_msg import msg as _msg
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -86,11 +87,9 @@ def test_process_file_persists_all_declared_outputs(
         "scan_time": _T2,
     }
 
-    monkeypatch.setattr(proc._executors[1], "run", _fake_single)
-    monkeypatch.setattr(proc._executors[2], "run", lambda ctx: fake_multi_result)
+    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi_result)
     # Enrichment (phase 3) is covered by test_processor_enrich.py; the fake
     # executors don't carry the module configs it needs.
-    monkeypatch.setattr(proc, "_post_executor", None)
 
     first = _msg(store_env, tmp_path, "TEST_20240518_120000", scan_time=_T1)
     second = _msg(store_env, tmp_path, "TEST_20240518_120500", scan_time=_T2)

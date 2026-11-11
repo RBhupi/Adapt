@@ -20,16 +20,16 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import IO
 
-import yaml
-
+from adapt.configuration.schemas.errors import ConfigError
 from adapt.consumers.live._context import AppContext
 from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._utils import (
     _pipeline_pid_from_file,
     _pipeline_running,
-    adapt_cmd,
+    init_store_cmd,
     is_repository,
     safe_close,
+    write_dashboard_pipeline,
 )
 from adapt.utils.process import detached_process_kwargs, terminate_process_tree
 
@@ -125,60 +125,30 @@ class PipelineController:
         mode_var = tk.StringVar(value="realtime")
         start_var = tk.StringVar(value="")
         end_var = tk.StringVar(value="")
-        config_mode_var = tk.StringVar(value="use")  # "use" | "create"
-        info_var = tk.StringVar(value="")
 
-        # ── Config mode radio ─────────────────────────────────────────────────
-        radio_f = ttk.Frame(win)
-        radio_f.grid(row=0, column=0, columnspan=3, padx=8, pady=(12, 4), sticky="w")
-        ttk.Radiobutton(
-            radio_f,
-            text="I have config file",
-            variable=config_mode_var,
-            value="use",
-            command=lambda: _on_mode_change(),
-        ).pack(side="left")
-        ttk.Radiobutton(
-            radio_f,
-            text="Create config in directory",
-            variable=config_mode_var,
-            value="create",
-            command=lambda: _on_mode_change(),
-        ).pack(side="left", padx=16)
-
-        # ── Path entry + Browse ───────────────────────────────────────────────
-        ttk.Label(win, text="Path:").grid(row=1, column=0, padx=8, pady=(4, 4), sticky="w")
-        ttk.Entry(win, textvariable=path_var, width=42).grid(row=1, column=1, padx=4, pady=(4, 4))
+        # ── Store folder + Browse ─────────────────────────────────────────────
+        ttk.Label(win, text="Store folder:").grid(row=0, column=0, padx=8, pady=(12, 4), sticky="w")
+        ttk.Entry(win, textvariable=path_var, width=42).grid(row=0, column=1, padx=4, pady=(12, 4))
 
         def _browse():
-            if config_mode_var.get() == "create":
-                chosen = filedialog.askdirectory(title="Select repository directory", parent=win)
-            else:
-                chosen = filedialog.askopenfilename(
-                    title="Select config.yaml",
-                    filetypes=[("YAML", "*.yaml *.yml"), ("All", "*.*")],
-                    parent=win,
-                )
+            chosen = filedialog.askdirectory(title="Select the store folder", parent=win)
             if chosen:
                 path_var.set(chosen)
 
         ttk.Button(win, text="Browse…", command=_browse).grid(
-            row=1, column=2, padx=(2, 8), pady=(4, 4)
+            row=0, column=2, padx=(2, 8), pady=(12, 4)
         )
 
         # ── Radar ID ──────────────────────────────────────────────────────────
-        ttk.Label(win, text="Radar ID:").grid(row=2, column=0, padx=8, pady=(8, 4), sticky="w")
+        ttk.Label(win, text="Radar ID:").grid(row=1, column=0, padx=8, pady=(8, 4), sticky="w")
         ttk.Entry(win, textvariable=radar_var, width=10).grid(
-            row=2, column=1, padx=4, pady=(8, 4), sticky="w"
-        )
-        ttk.Label(win, text="(optional if set in config)", font=("", 8), foreground="gray").grid(
-            row=2, column=2, padx=(0, 8), sticky="w"
+            row=1, column=1, padx=4, pady=(8, 4), sticky="w"
         )
 
         # ── Mode ──────────────────────────────────────────────────────────────
-        ttk.Label(win, text="Mode:").grid(row=3, column=0, padx=8, pady=4, sticky="w")
+        ttk.Label(win, text="Mode:").grid(row=2, column=0, padx=8, pady=4, sticky="w")
         mode_f = ttk.Frame(win)
-        mode_f.grid(row=3, column=1, pady=4, sticky="w")
+        mode_f.grid(row=2, column=1, pady=4, sticky="w")
         ttk.Radiobutton(
             mode_f,
             text="Realtime",
@@ -196,51 +166,40 @@ class PipelineController:
 
         # ── Historical time range (hidden unless historical) ──────────────────
         time_frame = ttk.Frame(win)
-        time_frame.grid(row=4, column=0, columnspan=3, padx=8, pady=(0, 4), sticky="ew")
+        time_frame.grid(row=3, column=0, columnspan=3, padx=8, pady=(0, 4), sticky="ew")
         ttk.Label(time_frame, text="Start (UTC):").grid(row=0, column=0, padx=(0, 4), sticky="w")
         ttk.Entry(time_frame, textvariable=start_var, width=20).grid(row=0, column=1, padx=(0, 12))
         ttk.Label(time_frame, text="End (UTC):").grid(row=0, column=2, padx=(0, 4), sticky="w")
         ttk.Entry(time_frame, textvariable=end_var, width=20).grid(row=0, column=3)
+        ttk.Label(
+            time_frame, text="ISO 8601, e.g. 2025-06-17T18:00:00Z", font=("", 8), foreground="gray"
+        ).grid(row=1, column=0, columnspan=4, sticky="w")
 
-        # ── Docs link ─────────────────────────────────────────────────────────
+        # ── What launching does + docs link ──────────────────────────────────
+        ttk.Label(
+            win,
+            text="Launch writes dashboard.yaml in the store folder (the nexrad template "
+            "with these values) and runs 'adapt run dashboard' there. For other "
+            "settings, edit nexrad.yaml and run 'adapt run nexrad' in that folder.",
+            wraplength=400,
+            justify="left",
+        ).grid(row=4, column=0, columnspan=3, padx=12, pady=(4, 2), sticky="w")
         docs = ttk.Label(
             win,
-            text="More settings in config.yaml — see Adapt config docs",
+            text="See the Adapt CLI reference",
             foreground="#4a9fd4",
             cursor="hand2",
         )
         docs.grid(row=5, column=0, columnspan=3, padx=8, pady=4)
         docs.bind(
             "<Button-1>",
-            lambda _: webbrowser.open("https://arm-doe.github.io/Adapt/api/config.html"),
+            lambda _: webbrowser.open("https://arm-doe.github.io/Adapt/cli_reference.html"),
         )
-
-        # ── Inline info label (shown after config creation) ───────────────────
-        info_label = ttk.Label(
-            win,
-            textvariable=info_var,
-            foreground="#e09a10",
-            wraplength=400,
-            justify="left",
-        )
-        info_label.grid(row=6, column=0, columnspan=3, padx=12, pady=(2, 4), sticky="w")
 
         # ── Buttons ───────────────────────────────────────────────────────────
         btn_frame = ttk.Frame(win)
-        btn_frame.grid(row=7, column=0, columnspan=3, pady=(4, 12))
+        btn_frame.grid(row=6, column=0, columnspan=3, pady=(4, 12))
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="left", padx=8)
-
-        create_btn = ttk.Button(
-            btn_frame,
-            text="Create Config",
-            command=lambda: self._create_config_from_wizard(
-                path_var.get().strip(),
-                win,
-                info_var,
-            ),
-        )
-        create_btn.pack(side="left", padx=8)
-
         ttk.Button(
             btn_frame,
             text="Launch Pipeline",
@@ -248,11 +207,9 @@ class PipelineController:
                 path_var.get().strip(),
                 radar_var.get().strip(),
                 mode_var.get(),
-                start_var.get() or None,
-                end_var.get() or None,
+                start_var.get().strip(),
+                end_var.get().strip(),
                 win,
-                config_mode_var.get(),
-                info_var,
             ),
         ).pack(side="left", padx=8)
 
@@ -262,69 +219,29 @@ class PipelineController:
             else:
                 time_frame.grid_remove()
 
-        def _on_mode_change():
-            info_var.set("")
-            if config_mode_var.get() == "create":
-                create_btn.state(["!disabled"])
-            else:
-                create_btn.state(["disabled"])
-
-        _on_mode_change()  # set initial button state
         _toggle_time()
-
-    def _create_config_from_wizard(self, path: str, wizard_win, info_var) -> None:
-        """Run 'adapt config' in the given directory and show an inline advisory."""
-        if not path:
-            messagebox.showerror("Missing input", "Enter a directory first.", parent=wizard_win)
-            return
-        p = Path(path)
-        if not p.is_dir():
-            messagebox.showerror(
-                "Not a directory", f"Expected a directory:\n{path}", parent=wizard_win
-            )
-            return
-        config_file = p / "config.yaml"
-        if config_file.exists():
-            info_var.set(f"ℹ config.yaml already exists at {config_file}.")
-            return
-        try:
-            result = subprocess.run(
-                [*adapt_cmd(), "config", str(config_file)],
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=15,
-                check=False,
-            )
-            if result.returncode != 0:
-                messagebox.showerror(
-                    "Config creation failed",
-                    f"adapt config failed:\n{result.stderr}",
-                    parent=wizard_win,
-                )
-                return
-        except Exception as exc:
-            messagebox.showerror("Config creation failed", str(exc), parent=wizard_win)
-            return
-        info_var.set(
-            f"ℹ config.yaml created at {config_file}. "
-            "Check config before running or click Launch Pipeline."
-        )
 
     def _launch_pipeline_from_wizard(
         self,
         path: str,
         radar: str,
         mode: str,
-        start: str | None,
-        end: str | None,
+        start: str,
+        end: str,
         wizard_win,
-        config_mode: str = "use",
-        info_var=None,
     ) -> None:
-        """Resolve config path and launch the pipeline."""
-        if not path:
-            messagebox.showerror("Missing input", "Enter a path first.", parent=wizard_win)
+        """Make the folder a store, write its dashboard.yaml, and run it there."""
+        if not path or not radar:
+            messagebox.showerror(
+                "Missing input", "Enter a store folder and a radar ID.", parent=wizard_win
+            )
+            return
+        if mode == "historical" and not (start and end):
+            messagebox.showerror(
+                "Missing input",
+                "Historical mode needs a start and an end time.",
+                parent=wizard_win,
+            )
             return
 
         # ── Check for any already-running pipeline ────────────────────────────
@@ -346,93 +263,32 @@ class PipelineController:
                     os.kill(running_pid, 15)
             return  # user clicks Launch Pipeline again once old process is gone
 
-        p = Path(path)
+        root = Path(path)
+        if not root.is_dir():
+            messagebox.showerror(
+                "Not a directory", f"Expected a directory:\n{path}", parent=wizard_win
+            )
+            return
 
-        if config_mode == "use":
-            # ── User has an existing config.yaml ──────────────────────────────
-            if p.is_dir():
-                # Directory given — auto-resolve to config.yaml inside it.
-                config_file = p / "config.yaml"
-                if not config_file.exists():
-                    messagebox.showerror(
-                        "No config.yaml",
-                        f"No config.yaml found in:\n{p}\n\n"
-                        "Select the config.yaml file directly, or click "
-                        "'Create Config' to generate one.",
-                        parent=wizard_win,
-                    )
-                    return
-            elif p.is_file():
-                config_file = p
-            else:
-                messagebox.showerror(
-                    "Not found", f"Path does not exist:\n{path}", parent=wizard_win
-                )
-                return
-            cmd = [*adapt_cmd(), "run-nexrad", str(config_file)]
-            if radar:
-                cmd += ["--radar", radar]
-            if mode == "historical":
-                if start:
-                    cmd += ["--start-time", start]
-                if end:
-                    cmd += ["--end-time", end]
-            # The pipeline writes to the base_dir INSIDE the config — adopt
-            # that directory, not wherever the yaml file happens to live.
-            cfg_base_dir = (yaml.safe_load(config_file.read_text()) or {}).get("base_dir")
-            if not cfg_base_dir:
-                messagebox.showerror(
-                    "No base_dir",
-                    f"{config_file} sets no base_dir — the dashboard cannot know "
-                    "where the pipeline will write. Add base_dir to the config.",
-                    parent=wizard_win,
-                )
-                return
-            repo_dir = str(cfg_base_dir)
-
-        else:
-            # ── User created (or will use) config in a directory ──────────────
-            if not p.is_dir():
-                messagebox.showerror(
-                    "Not a directory", f"Expected a directory:\n{path}", parent=wizard_win
-                )
-                return
-            config_file = p / "config.yaml"
-            if not config_file.exists():
-                messagebox.showerror(
-                    "No config.yaml",
-                    f"No config.yaml found in:\n{p}\n\nClick 'Create Config' first.",
-                    parent=wizard_win,
-                )
-                return
-            cmd = [
-                *adapt_cmd(),
-                "run-nexrad",
-                str(config_file),
-                "--base-dir",
-                str(p),
-                "--mode",
-                mode,
-            ]
-            if radar:
-                cmd += ["--radar", radar]
-            if mode == "historical":
-                if start:
-                    cmd += ["--start-time", start]
-                if end:
-                    cmd += ["--end-time", end]
-            repo_dir = str(p)  # --base-dir above: pipeline writes exactly here
-
-        # The pipeline refuses uninitialized roots: initialize the store first
+        # `adapt run` refuses a folder that is not a store: initialize it first
         # (a legacy pre-store root surfaces the explicit obsolete-layout error).
-        if not self._ensure_store(repo_dir, wizard_win):
+        if not self._ensure_store(root, wizard_win):
+            return
+
+        run = {"radar": radar, "mode": mode}
+        if mode == "historical":
+            run.update(start_time=start, end_time=end)
+        try:
+            cmd = write_dashboard_pipeline(root, **run)
+        except ConfigError as exc:
+            messagebox.showerror("Invalid pipeline settings", str(exc), parent=wizard_win)
             return
 
         # Auto-select the repo in the dashboard so panels load from this run
-        self._adopt_repo(repo_dir)
+        self._adopt_repo(str(root))
 
         wizard_win.destroy()
-        self._launch_pipeline(cmd)
+        self._launch_pipeline(cmd, root)
         if self._proc is not None:
             messagebox.showinfo(
                 "Pipeline started",
@@ -444,11 +300,11 @@ class PipelineController:
     # ── Launch / observe / stop ───────────────────────────────────────────────
 
     @staticmethod
-    def _ensure_store(repo_dir: str, parent) -> bool:
+    def _ensure_store(root: Path, parent) -> bool:
         """Run ``adapt init`` for a fresh directory; surface failures loudly."""
-        if is_repository(Path(repo_dir)):
+        if is_repository(root):
             return True
-        result = subprocess.run([*adapt_cmd(), "init", repo_dir], capture_output=True, text=True)
+        result = subprocess.run(init_store_cmd(root), capture_output=True, text=True)
         if result.returncode != 0:
             messagebox.showerror(
                 "Store initialization failed",
@@ -458,8 +314,8 @@ class PipelineController:
             return False
         return True
 
-    def _launch_pipeline(self, cmd: list) -> None:
-        """Launch adapt pipeline, redirect all output to LOG_FILE, start watcher threads."""
+    def _launch_pipeline(self, cmd: list, cwd: Path) -> None:
+        """Launch ``cmd`` in ``cwd``, redirect all output to LOG_FILE, start watcher threads."""
         self._log_lines = []
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         # errors="replace": this handle receives a subprocess's raw output, which
@@ -469,6 +325,7 @@ class PipelineController:
         try:
             self._proc = subprocess.Popen(
                 cmd,
+                cwd=cwd,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 **detached_process_kwargs(),
@@ -484,7 +341,7 @@ class PipelineController:
             messagebox.showerror(
                 "Launch failed",
                 f"{type(exc).__name__}: {exc}\n\n"
-                f"Command: {' '.join(str(part) for part in cmd)}\n"
+                f"Command: {' '.join(str(part) for part in cmd)} (in {cwd})\n"
                 f"Platform: {platform.platform()} · Python {platform.python_version()}\n\n"
                 f"Full traceback in {LOG_FILE}",
                 parent=self.app,

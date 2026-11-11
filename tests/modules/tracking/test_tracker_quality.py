@@ -39,7 +39,7 @@ def _make_config(**overrides):
             else:
                 setattr(param.tracker, key, val)
         user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user, None)
+        internal = resolve_config(param, user)
         return TrackingModule.build_config(internal)
     finally:
         shutil.rmtree(d, ignore_errors=True)

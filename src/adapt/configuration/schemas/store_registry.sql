@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 
 -- One row per module execution within a run. Re-execution upserts: a module
--- re-run (including after-the-fact postprocess runs, which attach to the
+-- re-run (including post-processing after the run, which attaches to the
 -- original run_id) replaces its own outputs and this row.
 CREATE TABLE IF NOT EXISTS run_modules (
     run_id           TEXT NOT NULL REFERENCES runs(run_id),

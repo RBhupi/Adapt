@@ -41,7 +41,7 @@ class InternalDownloaderConfig(AdaptBaseModel):
 
     mode: Literal["realtime", "historical"]
     radar: str
-    output_dir: str
+    output_dir: str  # OBSOLETE — never read (see DownloaderConfig.output_dir)
     latest_files: int
     latest_minutes: int
     poll_interval_sec: int
@@ -187,7 +187,7 @@ class InternalTrackerConfig(AdaptBaseModel):
                 hints = ", ".join(f"{k} → {_REMOVED_TRACKER_KEYS[k]}" for k in removed)
                 raise ValueError(
                     f"tracker: {hints} — these keys belong to the previous tracker; "
-                    "replace them with the new parameters (see `adapt config`)"
+                    "replace them with the new parameters (see `adapt config --show tracker`)"
                 )
         return data
 
@@ -195,7 +195,7 @@ class InternalTrackerConfig(AdaptBaseModel):
         """Runtime cell UID configuration."""
 
         width: int = Field(ge=1)
-        alphabet: Literal["base36_upper"]
+        alphabet: Literal["base36_upper"]  # OBSOLETE — never read (see CellUidConfig.alphabet)
 
     cell_threshold: float
     polarity: Literal[1, -1]
@@ -219,7 +219,7 @@ class InternalTrackerConfig(AdaptBaseModel):
 class InternalVisualizationConfig(AdaptBaseModel):
     """Runtime visualization settings."""
 
-    enabled: bool
+    enabled: bool  # OBSOLETE — never read (see VisualizationConfig.enabled)
     dpi: int
     figsize: tuple[float, float]
     output_format: Literal["png", "pdf", "jpeg"]
@@ -238,7 +238,7 @@ class InternalVisualizationConfig(AdaptBaseModel):
 class InternalOutputConfig(AdaptBaseModel):
     """Runtime output configuration."""
 
-    compression: Literal["snappy", "gzip", "lz4", "none"]
+    compression: Literal["snappy", "gzip", "lz4", "none"]  # OBSOLETE — never read
 
 
 class InternalLoggingConfig(AdaptBaseModel):
@@ -251,12 +251,13 @@ class InternalLoggingConfig(AdaptBaseModel):
     """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    console_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "WARNING"
-    enabled: bool = True
-    traces: bool = True
-    metrics: bool = True
-    json_logs: bool = False
-    console_logs: bool = True
+    console_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    enabled: bool
+    traces: bool
+    metrics: bool
+    json_logs: bool
+    console_logs: bool
+    # OBSOLETE — never read: ObsSettings.progress_every has no reader. Remove both.
     progress_every: float = Field(default=30.0, gt=0.0)
 
 
@@ -264,9 +265,23 @@ class InternalProcessorConfig(AdaptBaseModel):
     """Runtime processor configuration."""
 
     max_history: int = Field(default=2, ge=2, le=10)  # Frame history for optical flow
-    min_file_size: int = Field(default=5000, ge=1000)  # Minimum file size in bytes
-    # Database filename pattern
+    # OBSOLETE — never read: sources filter by downloader.min_file_size.
+    min_file_size: int = Field(default=5000, ge=1000)
+    # OBSOLETE — never read: the store layout names every database.
     db_filename_pattern: str = Field(default="{radar}_cells_statistics.db")
+
+
+class PipelineProvenance(AdaptBaseModel):
+    """The pipeline file a run was configured from. Recorded only; nothing runs on it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(description="Pipeline name: the file's stem")
+    file: str = Field(description="Path of the pipeline file")
+    content: dict[str, Any] = Field(
+        description="The file's sections as validated: run (launcher settings included), "
+        "module lists, consumer sections and params"
+    )
 
 
 # =============================================================================
@@ -311,11 +326,10 @@ class InternalConfig(AdaptBaseModel):
     )
     run_id: str | None = Field(
         default=None,
-        description="Unique run identifier generated during initialization",
+        description="Unique run identifier, set by the pipeline-file loader",
     )
-    output_dirs: dict[str, str] | None = Field(
-        default=None, description="Output directory paths from initialization"
-    )
+    # OBSOLETE — never read: the store root (base_dir) lays out every output.
+    output_dirs: dict[str, str] | None = None
     reader: InternalReaderConfig
     downloader: InternalDownloaderConfig
     regridder: InternalRegridderConfig
@@ -328,14 +342,15 @@ class InternalConfig(AdaptBaseModel):
     output: InternalOutputConfig
     logging: InternalLoggingConfig
     processor: InternalProcessorConfig = Field(default_factory=InternalProcessorConfig)
-    extensions: list[str] = Field(default_factory=list)
     module_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # Module selection. ``modules`` is the file allowlist (None = run all
-    # registered); ``only_modules`` / ``exclude_modules`` are the CLI --only / --not
-    # overrides. The processor resolves these into the final enabled set.
+    # The live module allowlist: a pipeline file's core + extended modules, in
+    # file order (always set explicitly there). None = every registered module.
     modules: list[str] | None = None
-    only_modules: list[str] | None = None
-    exclude_modules: list[str] | None = None
+    pipeline: PipelineProvenance | None = Field(
+        default=None,
+        description="The pipeline file this run was configured from; None when the "
+        "config was not built from one",
+    )
 
     model_config = ConfigDict(
         extra="forbid",
@@ -345,3 +360,13 @@ class InternalConfig(AdaptBaseModel):
         frozen=True,  # Immutable after construction
         populate_by_name=True,  # Allow both 'global' and 'global_'
     )
+
+    def with_module_params(self, params: dict[str, dict[str, Any]]) -> "InternalConfig":
+        """This config with ``params`` laid over ``module_params``, module by module.
+
+        A given key wins; the module's other recorded keys are kept.
+        """
+        merged = {name: dict(options) for name, options in self.module_params.items()}
+        for name, options in params.items():
+            merged[name] = {**merged.get(name, {}), **options}
+        return self.model_copy(update={"module_params": merged})

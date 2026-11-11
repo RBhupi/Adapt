@@ -62,11 +62,7 @@ class _Module(SimpleNamespace):
 # so target selection sees the scans; nothing reads its contents.
 _INGEST = _Module(
     name="ingest",
-    persistence=(
-        NetcdfArtifact(
-            key="grid_ds", product_type="gridded3d", producer="ingest", description="grid"
-        ),
-    ),
+    persistence=(NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid"),),
 )
 _ANALYSIS = _Module(
     name="projection",
@@ -74,7 +70,6 @@ _ANALYSIS = _Module(
         NetcdfArtifact(
             key="analysis_ds",
             product_type="segmentation2d",
-            producer="projection",
             description="analysis",
         ),
     ),

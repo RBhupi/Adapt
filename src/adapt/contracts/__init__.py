@@ -41,7 +41,7 @@ from adapt.contracts.decisions import (
     check_tracking_decisions,
 )
 from adapt.contracts.grid import assert_gridded, check_grid_ds_2d
-from adapt.contracts.history import check_prior_scan, check_scan_history
+from adapt.contracts.history import check_prior_scans
 from adapt.contracts.persistence import (
     DecisionTableWrite,
     NetcdfArtifact,
@@ -51,7 +51,7 @@ from adapt.contracts.persistence import (
     ScanRecord,
     TrackTablesWrite,
 )
-from adapt.contracts.pipeline import ContractViolation, require
+from adapt.contracts.pipeline import SCAN_SEEDS, ContractViolation, config_key, require
 from adapt.contracts.projection import assert_projected, check_projected_ds
 from adapt.contracts.segmentation import assert_segmented, check_seed_carry, check_segmented_ds
 from adapt.contracts.time import assert_time_normalized, check_time_normalized
@@ -72,6 +72,8 @@ __all__ = [
     # primitives
     "ContractViolation",
     "require",
+    "SCAN_SEEDS",
+    "config_key",
     # canonical naming
     "CELL_LABELS_VAR",
     "stat_column",
@@ -108,8 +110,7 @@ __all__ = [
     "assert_xlma_stat_scan",
     # bound checks — register these in input_contracts / output_contracts
     "check_grid_ds_2d",
-    "check_scan_history",
-    "check_prior_scan",
+    "check_prior_scans",
     "check_segmented_ds",
     "check_seed_carry",
     "check_projected_ds",

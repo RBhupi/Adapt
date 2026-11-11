@@ -29,7 +29,7 @@ _NON_GATE_COLUMNS = frozenset({"run_id", "scan_time", "cell_uid", "cell_label", 
 # Default priority weights. Growth is kept small: on real data the area-slope
 # estimate spikes when cells merge or split, and a large weight lets that noise
 # dominate the score (see the KLOT replay notebook).
-_DEFAULT_WEIGHTS = {"field": 1.0, "area": 0.05, "growth_rate": 0.2}
+_DEFAULT_WEIGHTS = {"field_max": 1.0, "cell_area_sqkm": 0.05, "growth_rate_sqkm_per_min": 0.2}
 _DEFAULT_PROJECTION_STEPS = 3
 
 # Semantic overlay colours — three distinct, colourblind-safe states.
@@ -77,15 +77,18 @@ def build_tse_config(
             gates.append({"field": field, "op": "ge", "value": float(lo)})
         if hi is not None:
             gates.append({"field": field, "op": "le", "value": float(hi)})
+    if min_age_s > 0:
+        gates.append({"field": "age_seconds", "op": "ge", "value": float(min_age_s)})
     return TSEConfig.model_validate(
         {
-            "candidate": {"gates": gates, "min_age_seconds": float(min_age_s)},
-            "priority": {"weights": dict(_DEFAULT_WEIGHTS)},
-            "site_preference": {"projection_steps": _DEFAULT_PROJECTION_STEPS, "sites": []},
-            "selection": {
-                "switch_margin": float(switch_margin),
-                "max_observation_seconds": float(max_obs_s),
+            "entry": {"gates": gates},
+            "score": {
+                "weights": dict(_DEFAULT_WEIGHTS),
+                "site_preference": {"projection_steps": _DEFAULT_PROJECTION_STEPS, "sites": []},
             },
+            "hold": {"gates": gates},  # the tab's rules decide holding as well as entry
+            "switch": {"allow": True, "margin": float(switch_margin)},
+            "duration": {"max_minutes": float(max_obs_s) / 60.0},
             "snapshot": {"growth_window_scans": int(growth_window)},
         }
     )
@@ -256,18 +259,13 @@ _OP_SYMBOL = {"gt": ">", "ge": "≥", "lt": "<", "le": "≤"}
 
 def _score_terms(cell, cfg: TSEConfig) -> list[tuple[str, float, float]]:
     """The (name, value, weight) triples that sum to the priority score."""
-    w = cfg.priority.weights
-    return [
-        ("field_max", cell.field_max, w.field),
-        ("area_sqkm", cell.area_sqkm, w.area),
-        ("growth_km2/min", cell.growth_rate_sqkm_per_min, w.growth_rate),
-    ]
+    return [(name, cell.values[name], w) for name, w in cfg.score.weights.items()]
 
 
-def _gate_summary(cell, candidate_cfg) -> str:
-    """Each candidate gate as ``field op value (=cell value)``."""
+def _gate_summary(cell, entry_cfg) -> str:
+    """Each entry gate as ``field op value (=cell value)``."""
     parts = []
-    for gate in candidate_cfg.gates:
+    for gate in entry_cfg.gates:
         v = cell.values.get(gate.field)
         shown = f"{v:.1f}" if isinstance(v, (int, float)) and not isinstance(v, bool) else "n/a"
         parts.append(f"{gate.field} {_OP_SYMBOL[gate.op]} {gate.value:g} (={shown})")
@@ -311,14 +309,14 @@ def format_rationale(snapshot, cfg: TSEConfig, selection, candidate_uids) -> str
     if sel is not None:
         for name, value, weight in _score_terms(sel, cfg):
             lines.append(f"    {name:15s} {value:8.2f} × {weight:<5g} = {value * weight:7.2f}")
-        lines.append(f"    gates: {_gate_summary(sel, cfg.candidate)}")
+        lines.append(f"    gates: {_gate_summary(sel, cfg.entry)}")
 
     others = [u for u in ranked if u != selection.cell_uid]
     lines.append("")
     lines.append(f"QUALIFIED, NOT SELECTED ({len(others)}):")
     if not others:
         lines.append("  (none)")
-    margin = cfg.selection.switch_margin
+    margin = cfg.switch.margin
     for u in others:
         score = total_score(cells[u], cfg)
         lines.append(f"  {u}   score {score:.1f}  —  {_why_not(score, selection.score, margin)}")

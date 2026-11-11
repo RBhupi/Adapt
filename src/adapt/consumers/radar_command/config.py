@@ -1,17 +1,16 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Frozen YAML configuration for radar command generation.
+"""Frozen configuration for radar command generation.
 
-Read from the ``radar_command`` section of the shared consumer YAML; sibling
-sections belong to other components. Unknown keys raise and every number must
-be finite. A missing key raises too, except these:
+The ``radar_command`` section of a pipeline file's ``consumers:``, validated
+with ``RadarCommandConfig.model_validate``. Where commands are written is not
+configurable (see the runner). Unknown keys raise and every number must be
+finite. A missing key raises too, except these:
 
 - ``planning`` (and each of its keys): a 12-minute plan, one entry a minute;
 - ``extent.vertical_band``: none, so a run without cell_volume_stats has no
   vertical extent;
-- ``output.current_file`` / ``output.history_directory``: ``current_targets.json``
-  and ``history`` inside ``output.directory``;
 - ``api``: none, so commands are only written to files (a dry run).
 
 The API key never appears here: ``api.api_key_env`` names the environment
@@ -19,11 +18,8 @@ variable that holds it.
 """
 
 import hashlib
-from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from adapt.utils.files import read_yaml_section
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -36,8 +32,12 @@ class PlanningConfig(BaseModel):
 
     model_config = _FROZEN
 
-    horizon_minutes: int = Field(default=12, ge=1, le=60)
-    interval_seconds: int = Field(default=60, gt=0)
+    horizon_minutes: int = Field(
+        default=12, ge=1, le=60, description="How far ahead (minutes) each plan reaches"
+    )
+    interval_seconds: int = Field(
+        default=60, gt=0, description="Spacing (seconds, whole minutes) of a plan's target entries"
+    )
 
     @model_validator(mode="after")
     def _on_projection_minutes(self) -> "PlanningConfig":
@@ -56,8 +56,8 @@ class PlanningConfig(BaseModel):
 class RadarConfig(BaseModel):
     model_config = _FROZEN
 
-    scan_pattern: str = Field(min_length=1)
-    user_id: str = Field(min_length=1)
+    scan_pattern: str = Field(min_length=1, description="Scan pattern the radar is asked to run")
+    user_id: str = Field(min_length=1, description="User id sent with every command")
 
 
 class ApiConfig(BaseModel):
@@ -65,9 +65,15 @@ class ApiConfig(BaseModel):
 
     model_config = _FROZEN
 
-    base_url: str = Field(pattern=r"^https?://\S+$")
-    api_key_env: str = Field(min_length=1)
-    timeout_seconds: float = Field(gt=0)
+    base_url: str = Field(
+        pattern=r"^https?://\S+$",
+        description="Base URL of the radar API; commands are POSTed to {base_url}/publish/command",
+    )
+    api_key_env: str = Field(
+        min_length=1,
+        description="Environment variable that holds the API key; the key is never in the file",
+    )
+    timeout_seconds: float = Field(gt=0, description="Timeout (seconds) of each publish request")
 
 
 class AltitudeBand(BaseModel):
@@ -75,8 +81,8 @@ class AltitudeBand(BaseModel):
 
     model_config = _FROZEN
 
-    altitude_min_m: float
-    altitude_max_m: float
+    altitude_min_m: float = Field(description="Bottom of the band (m above mean sea level)")
+    altitude_max_m: float = Field(description="Top of the band (m above mean sea level)")
 
     @model_validator(mode="after")
     def _non_empty(self) -> "AltitudeBand":
@@ -94,38 +100,29 @@ class ExtentConfig(BaseModel):
 
     model_config = _FROZEN
 
-    horizontal_buffer_km: float = Field(ge=0)
-    vertical_band: AltitudeBand | None = None
-
-
-class OutputConfig(BaseModel):
-    model_config = _FROZEN
-
-    directory: str = Field(min_length=1)
-    current_file: str = "current_targets.json"
-    history_directory: str = "history"
-
-    @field_validator("current_file", "history_directory")
-    @classmethod
-    def _plain_name(cls, name: str) -> str:
-        if name in ("", ".", "..") or "/" in name or "\\" in name:
-            raise ValueError(f"{name!r} must be a plain name inside output.directory")
-        return name
+    horizontal_buffer_km: float = Field(
+        ge=0,
+        description="Margin (km) added around each projected footprint's box, beyond half "
+        "a grid pixel",
+    )
+    vertical_band: AltitudeBand | None = Field(
+        default=None,
+        description="Fixed altitude band, used only when the run wrote no cell_volume_stats rows",
+    )
 
 
 class RadarCommandConfig(BaseModel):
     model_config = _FROZEN
 
-    planning: PlanningConfig = PlanningConfig()
-    radar: RadarConfig
-    extent: ExtentConfig
-    output: OutputConfig
-    api: ApiConfig | None = None
-
-
-def load_config(path: str | Path) -> RadarCommandConfig:
-    """Load and validate the ``radar_command`` section of a YAML config file."""
-    return RadarCommandConfig.model_validate(read_yaml_section(path, "radar_command"))
+    planning: PlanningConfig = Field(
+        default=PlanningConfig(),
+        description="How far ahead a plan reaches and how its entries are spaced",
+    )
+    radar: RadarConfig = Field(description="What the radar is asked to do")
+    extent: ExtentConfig = Field(description="Size of the target box around each footprint")
+    api: ApiConfig | None = Field(
+        default=None, description="Where commands are sent; absent, they are only written to files"
+    )
 
 
 def config_hash(cfg: RadarCommandConfig) -> str:

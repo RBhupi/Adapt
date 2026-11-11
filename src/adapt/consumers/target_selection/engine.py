@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from adapt.consumers.target_selection.config import TSEConfig
 from adapt.consumers.target_selection.rules import (
+    cap_seconds,
     continue_or_switch,
     is_candidate,
     select_best,
@@ -50,7 +51,7 @@ class TargetSelectionEngine:
     def decide(self, snapshot: Snapshot) -> Decision:
         """Apply the science rules to one snapshot, update state, and say what happened."""
         previous = self._current
-        candidates = {c.uid: c for c in snapshot.cells if is_candidate(c, self._config.candidate)}
+        candidates = {c.uid: c for c in snapshot.cells if is_candidate(c, self._config.entry)}
         scored = {uid: total_score(c, self._config) for uid, c in candidates.items()}
         stop: StopReason | None = None
 
@@ -91,10 +92,8 @@ class TargetSelectionEngine:
         candidates: dict[str, CellSnapshot],
         scored: dict[str, float],
     ) -> TargetSelection:
-        if self._config.selection.allow_switch:
-            uid, reason = continue_or_switch(
-                current.cell_uid, scored, self._config.selection.switch_margin
-            )
+        if self._config.switch.allow:
+            uid, reason = continue_or_switch(current.cell_uid, scored, self._config.switch.margin)
         else:
             uid, reason = current.cell_uid, SelectionReason.CONTINUATION
         if reason is SelectionReason.SWITCH:
@@ -134,7 +133,8 @@ class TargetSelectionEngine:
         *,
         started_at: datetime,
     ) -> TargetSelection:
-        window_end = started_at + timedelta(seconds=self._config.selection.max_observation_seconds)
+        cap = cap_seconds(self._config.duration)
+        window_end = None if cap is None else started_at + timedelta(seconds=cap)
         return TargetSelection(
             cell_uid=cell.uid,
             reason=reason,

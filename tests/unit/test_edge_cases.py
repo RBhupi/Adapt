@@ -283,22 +283,22 @@ class TestExecutorAdversarial:
             def run(self, ctx):
                 return {}
 
-        nodes = GraphBuilder([Sink()]).build()
-        result = GraphExecutor(nodes).run({"x": 1, "unexpected": 99})
+        nodes = GraphBuilder([Sink()], provided=frozenset({"x"})).build()
+        result = GraphExecutor(nodes).run({"x": 1, "unexpected": 99}, history=0).context
         assert result["unexpected"] == 99
 
     def test_builder_with_zero_modules_returns_empty_list(self):
         """Building a graph with no modules produces an empty node list."""
         from adapt.execution.graph.builder import GraphBuilder
 
-        nodes = GraphBuilder([]).build()
+        nodes = GraphBuilder([], provided=frozenset()).build()
         assert nodes == []
 
     def test_executor_with_empty_graph_returns_context_unchanged(self):
         """Running an executor with no nodes returns the initial context."""
         from adapt.execution.graph.executor import GraphExecutor
 
-        result = GraphExecutor([]).run({"key": "value"})
+        result = GraphExecutor([]).run({"key": "value"}, history=0).context
         assert result == {"key": "value"}
 
 

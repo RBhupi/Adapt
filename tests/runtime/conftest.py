@@ -108,7 +108,7 @@ def pipeline_config(store_root) -> InternalConfig:
     """InternalConfig for pipeline tests; base_dir is an initialized store root."""
     param = ParamConfig()
     user = UserConfig(radar="TEST_RADAR", base_dir=str(store_root))
-    config_dict = resolve_config(param, user, None).model_dump()
+    config_dict = resolve_config(param, user).model_dump()
     config_dict["run_id"] = "test-run"
     return InternalConfig.model_validate(config_dict)
 

@@ -1,28 +1,31 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Frozen YAML configuration for the target selection engine.
+"""Frozen configuration for the target selection engine: one rule in five parts.
 
-Every threshold and weight lives here, under the file's top-level
-``target_selection:`` section (sibling sections belong to other consumers and
-are ignored). Unknown keys raise, and so does any missing key except these,
-each of which has a documented meaning when absent:
+The ``target_selection`` section of a pipeline file's ``consumers:``, validated
+with ``TSEConfig.model_validate``. A rule has five parts, each a section:
 
-- ``output`` (and its ``decision_log``): no decision log;
-- ``candidate.hold_gates``: the entry gates also decide whether a target is kept;
-- ``priority.weights.extra``: no score beyond field, area and growth rate;
-- ``selection.allow_switch``: true, a better challenger may take over;
-- ``snapshot.trend_fields``: no trend columns;
-- ``snapshot.track_summary``: ``at_scan``, the causal view live selection has.
+1. ``entry``    — gates a cell must pass to be a candidate;
+2. ``score``    — the weighted sum that ranks the candidates (plus site bonuses);
+3. ``hold``     — gates the current target must keep passing to stay the target;
+4. ``switch``   — whether, and by what margin, a newcomer may displace it;
+5. ``duration`` — how long a target is followed at most.
+
+``snapshot`` says which derived per-cell values the gates and weights can use.
+Gates and weights name columns of the per-cell snapshot: every numeric column of
+cells_by_scan and the track summary, plus ``age_seconds``, ``field_max`` (the
+run's tracking field), ``growth_rate_sqkm_per_min``, ``origin_is_split`` and the
+``trend_<column>_per_min`` columns. Where decisions are written is not
+configurable (see the runner). Unknown keys raise; every key is required except
+``snapshot.trend_fields`` (no trend columns) and ``snapshot.track_summary``
+(``at_scan``, the causal view live selection has).
 """
 
 import hashlib
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from adapt.utils.files import read_yaml_section
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
@@ -44,77 +47,109 @@ class QualityGate(BaseModel):
 
     model_config = _FROZEN
 
-    field: str
-    op: GateOp
-    value: float
+    field: str = Field(
+        description="Numeric snapshot column the gate tests, such as n_scans or "
+        "trend_area_40dbz_km2_per_min"
+    )
+    op: GateOp = Field(description="Comparison of the column with value: gt, ge, lt or le")
+    value: float = Field(
+        description="Value the column is compared with; a NaN column value fails the gate"
+    )
 
 
-class CandidateConfig(BaseModel):
-    """A cell is a candidate only if every gate passes and it is old enough.
-
-    ``hold_gates``, when given, are the gates a *current* target must keep
-    passing to remain the target; the entry ``gates`` are then checked only at
-    selection. Without them the entry gates double as hold gates, so a cell
-    selected for being young and growing is dropped the moment it stops
-    growing.
-    """
+class EntryConfig(BaseModel):
+    """Part 1: a cell is a candidate only if every entry gate passes."""
 
     model_config = _FROZEN
 
-    gates: tuple[QualityGate, ...]
-    min_age_seconds: float
-    hold_gates: tuple[QualityGate, ...] | None = None
-
-
-class PriorityWeights(BaseModel):
-    """Weights carry units: points per dBZ, per km2, per km2/min.
-
-    ``extra`` weights any other numeric snapshot column by name (points per
-    unit of that column), including the derived ``trend_<column>_per_min``
-    columns and ``origin_is_split``. A negative weight is a penalty.
-    """
-
-    model_config = _FROZEN
-
-    field: float
-    area: float
-    growth_rate: float
-    extra: dict[str, float] = {}
-
-
-class PriorityConfig(BaseModel):
-    model_config = _FROZEN
-
-    weights: PriorityWeights
+    gates: tuple[QualityGate, ...] = Field(
+        description="Entry gates: a cell is a candidate only when every gate passes "
+        "(an age floor is a gate on age_seconds)"
+    )
 
 
 class SiteConfig(BaseModel):
     model_config = _FROZEN
 
-    name: str
-    lat: float
-    lon: float
-    radius_km: float
-    bonus: float
+    name: str = Field(description="Site name")
+    lat: float = Field(description="Site latitude (degrees)")
+    lon: float = Field(description="Site longitude (degrees)")
+    radius_km: float = Field(
+        description="A projected cell position within this distance (km) earns the bonus"
+    )
+    bonus: float = Field(
+        description="Points added once when any checked projected position is within radius_km"
+    )
 
 
 class SitePreferenceConfig(BaseModel):
     model_config = _FROZEN
 
-    projection_steps: int = Field(ge=1)
-    sites: tuple[SiteConfig, ...]
+    projection_steps: int = Field(
+        ge=1, description="How many of a cell's projected positions are checked against the sites"
+    )
+    sites: tuple[SiteConfig, ...] = Field(
+        description="Sites that add a bonus to cells projected to pass over them"
+    )
 
 
-class SelectionConfig(BaseModel):
-    """``allow_switch: false`` keeps the current target until it stops (hold
-    gates, loss, or the duration cap) regardless of challengers' scores; the
-    switch margin is then irrelevant."""
+class ScoreConfig(BaseModel):
+    """Part 2: a candidate's score is the weighted sum of its values, plus site bonuses.
+
+    Weights carry units — points per unit of the named column (dBZ, km2,
+    km2/min, ...). A negative weight is a penalty. Scores depend on the cell
+    alone plus fixed site geometry, so they stay stable as other cells come and go.
+    """
 
     model_config = _FROZEN
 
-    switch_margin: float
-    max_observation_seconds: float
-    allow_switch: bool = True
+    weights: dict[str, float] = Field(
+        description="Points per unit of each named snapshot column; a negative weight is a penalty"
+    )
+    site_preference: SitePreferenceConfig = Field(
+        description="Bonus for cells heading over instrumented sites"
+    )
+
+
+class HoldConfig(BaseModel):
+    """Part 3: the current target stays the target while every hold gate passes.
+
+    Hold gates are usually looser than entry gates: a cell selected for being
+    young and growing should not be dropped the moment it stops growing. Empty
+    gates hold the target until the tracker ends the cell or the duration cap
+    is reached.
+    """
+
+    model_config = _FROZEN
+
+    gates: tuple[QualityGate, ...] = Field(
+        description="Gates the current target must keep passing; empty: held until the "
+        "tracker ends it or the duration cap"
+    )
+
+
+class SwitchConfig(BaseModel):
+    """Part 4: whether a better-scoring newcomer may displace the current target."""
+
+    model_config = _FROZEN
+
+    allow: bool = Field(
+        description="Let a better-scoring newcomer take over; false keeps the target until it stops"
+    )
+    margin: float = Field(
+        description="A newcomer takes over only when it outscores the target by more than this"
+    )
+
+
+class DurationConfig(BaseModel):
+    """Part 5: how long a target is followed at most."""
+
+    model_config = _FROZEN
+
+    max_minutes: float | None = Field(
+        gt=0,
+        description="A target is dropped once it has been followed this long; null = no cap",
+    )
 
 
 class SnapshotConfig(BaseModel):
@@ -125,39 +160,34 @@ class SnapshotConfig(BaseModel):
 
     model_config = _FROZEN
 
-    growth_window_scans: int = Field(ge=2)
-    trend_fields: tuple[str, ...] = ()
-    track_summary: TrackSummary = "at_scan"
-
-
-class OutputConfig(BaseModel):
-    """``decision_log``: JSONL log with one line per scan, target or not."""
-
-    model_config = _FROZEN
-
-    decision_log: str | None = None
+    growth_window_scans: int = Field(
+        ge=2, description="Scans over which growth rates and trends are fitted"
+    )
+    trend_fields: tuple[str, ...] = Field(
+        default=(),
+        description="cells_by_scan columns whose per-minute slope is added as "
+        "trend_<column>_per_min",
+    )
+    track_summary: TrackSummary = Field(
+        default="at_scan",
+        description="Track summary a scan sees: at_scan (as live selection sees it) or "
+        "end_of_run (an oracle, for replay studies)",
+    )
 
 
 class TSEConfig(BaseModel):
     model_config = _FROZEN
 
-    candidate: CandidateConfig
-    priority: PriorityConfig
-    site_preference: SitePreferenceConfig
-    selection: SelectionConfig
-    snapshot: SnapshotConfig
-    output: OutputConfig = OutputConfig()
-
-
-def load_config(path: str | Path) -> TSEConfig:
-    """Load and validate the ``target_selection`` section. Raises on any invalid content."""
-    return TSEConfig.model_validate(read_yaml_section(path, "target_selection"))
+    entry: EntryConfig = Field(description="1. Which cells may be selected")
+    score: ScoreConfig = Field(description="2. How candidates are ranked")
+    hold: HoldConfig = Field(description="3. When the current target is kept")
+    switch: SwitchConfig = Field(description="4. Whether a newcomer may displace it")
+    duration: DurationConfig = Field(description="5. How long a target is followed at most")
+    snapshot: SnapshotConfig = Field(
+        description="Derived per-cell values the gates and weights can use"
+    )
 
 
 def config_hash(cfg: TSEConfig) -> str:
-    """16-hex-char identity of the effective rules: equal configs hash equal.
-
-    ``output`` is excluded — where decisions are written does not change them.
-    """
-    rules = cfg.model_dump_json(exclude={"output"})
-    return hashlib.sha256(rules.encode()).hexdigest()[:16]
+    """16-hex-char identity of the effective rules: equal configs hash equal."""
+    return hashlib.sha256(cfg.model_dump_json().encode()).hexdigest()[:16]

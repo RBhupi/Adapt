@@ -15,7 +15,7 @@ import pytest
 import xarray as xr
 
 from adapt.configuration.schemas.user import UserSegmenterConfig
-from adapt.contracts import ContractViolation, check_prior_scan, check_seed_carry
+from adapt.contracts import ContractViolation, check_prior_scans, check_seed_carry
 from adapt.execution.nodes.detection import DetectModule
 
 pytestmark = pytest.mark.unit
@@ -59,12 +59,12 @@ def _prior(advected: np.ndarray | None, ages: tuple[int, ...]) -> dict:
     return prior
 
 
-def _run(make_detection_config, prior, **segmenter_kw) -> dict:
+def _run(make_detection_config, *prior_scans, **segmenter_kw) -> dict:
     kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry": True, **segmenter_kw}
     ctx = {
         "grid_ds_2d": _plateau_ds(),
         "grid_ds": None,
-        "prior_scan": prior,
+        "prior_scans": list(prior_scans),
         "detection_config": make_detection_config(
             threshold=35.0, segmenter=UserSegmenterConfig(**kw)
         ),
@@ -72,10 +72,10 @@ def _run(make_detection_config, prior, **segmenter_kw) -> dict:
     return DetectModule().run(ctx)
 
 
-def test_node_declares_prior_scan_input_and_seed_carry_output():
-    assert "prior_scan" in DetectModule.inputs
+def test_node_declares_prior_scans_input_and_seed_carry_output():
+    assert "prior_scans" in DetectModule.inputs
     assert "seed_carry" in DetectModule.outputs
-    assert DetectModule.input_contracts["prior_scan"] is check_prior_scan
+    assert DetectModule.input_contracts["prior_scans"] is check_prior_scans
     assert DetectModule.output_contracts["seed_carry"] is check_seed_carry
 
 
@@ -85,10 +85,17 @@ def test_seed_carry_is_empty_with_the_flag_off(make_detection_config):
     assert out["num_cells"] == 1
 
 
-def test_no_carry_when_prior_scan_is_none(make_detection_config):
-    out = _run(make_detection_config, None)
+def test_no_carry_without_a_prior_scan(make_detection_config):
+    out = _run(make_detection_config)
     assert out["num_cells"] == 1
     assert out["seed_carry"] == (0,)
+
+
+def test_carry_comes_from_the_most_recent_prior_scan(make_detection_config):
+    older = _prior(None, (0,))  # no motion field: nothing to carry from it
+    latest = _prior(_advected(PEAK_A, BUMP_B), (0, 0))
+    out = _run(make_detection_config, older, latest)
+    assert out["num_cells"] == 2
 
 
 def test_no_carry_when_prior_has_no_motion_field(make_detection_config):

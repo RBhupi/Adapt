@@ -4,6 +4,7 @@
 """XlmaStatModule declarations + config building."""
 
 import pytest
+from pydantic import ValidationError
 
 from adapt.execution.nodes.xlma_stat import XlmaStatModule
 from adapt.modules.base import POSTPROCESS_PHASE
@@ -47,18 +48,39 @@ def test_config_has_no_clustering_or_projection_knobs():
     assert set(XlmaStatConfig.model_fields) == {"input_dir", "search_radius_m"}
 
 
-def test_build_config_reads_module_params(make_config):
+def test_build_config_reads_module_params(make_config, tmp_path):
+    (tmp_path / "flashes.nc").write_bytes(b"")
     cfg = make_config(
-        module_params={"xlma_stat": {"input_dir": "/data/lma", "search_radius_m": 750.0}}
+        module_params={"xlma_stat": {"input_dir": str(tmp_path), "search_radius_m": 750.0}}
     )
     xlma_cfg = XlmaStatModule.build_config(cfg)
     assert isinstance(xlma_cfg, XlmaStatConfig)
-    assert xlma_cfg.input_dir == "/data/lma"
+    assert xlma_cfg.input_dir == str(tmp_path)
     assert xlma_cfg.search_radius_m == 750.0
 
 
-def test_build_config_without_input_dir_defaults_none(make_config):
-    # Config-build must not fail for an unselected module; the node enforces
-    # input_dir loudly at run() instead.
+def test_build_config_without_input_dir_is_refused(make_config):
+    # Building a module's config means it is about to run: no folder, no run.
     cfg = make_config(module_params={"xlma_stat": {}})
-    assert XlmaStatModule.build_config(cfg).input_dir is None
+    with pytest.raises(ValueError, match=r"params: xlma_stat: \{input_dir"):
+        XlmaStatModule.build_config(cfg)
+
+
+def test_build_config_with_a_missing_folder_is_refused(make_config, tmp_path):
+    cfg = make_config(module_params={"xlma_stat": {"input_dir": str(tmp_path / "absent")}})
+    with pytest.raises(ValueError, match="absent"):
+        XlmaStatModule.build_config(cfg)
+
+
+def test_build_config_rejects_a_mistyped_param(make_config):
+    cfg = make_config(module_params={"xlma_stat": {"search_radius": 750.0}})
+    with pytest.raises(ValidationError, match=r"search_radius\s+Extra inputs"):
+        XlmaStatModule.build_config(cfg)
+
+
+def test_build_config_with_a_folder_holding_no_netcdf_is_refused(make_config, tmp_path):
+    (tmp_path / "LYLOUT_240617_180000_0600.dat").write_text("raw ascii")
+    cfg = make_config(module_params={"xlma_stat": {"input_dir": str(tmp_path)}})
+
+    with pytest.raises(ValueError, match=r"\*\.nc"):
+        XlmaStatModule.build_config(cfg)

@@ -2,7 +2,7 @@ Persistence
 ===========
 
 The data store: root-level registry plus per-collection catalog, product
-tables, and immutable object store. Created only by ``adapt init``; consumers
+tables, and object store. Created only by ``adapt init``; consumers
 read through :class:`~adapt.api.StoreClient`.
 
 .. automodule:: adapt.persistence.store

@@ -16,7 +16,7 @@ masks, or estimates motion). Two extension tables result:
 - ``xlma_stat_scan`` — radar-aligned aggregate, one row per
   ``(cell_uid, scan)``, derived only from the minute rows.
 
-Run only by the PostProcessor (``adapt postprocess --module xlma_stat``)
+Run only by the PostProcessor (the pipeline file's ``postprocessing:`` list)
 against a completed run. Core tables are never modified.
 """
 
@@ -36,7 +36,10 @@ logger = logging.getLogger(__name__)
 
 class XlmaStatModule(BaseModule):
     name = "xlma_stat"
-    summary = "Lightning (xLMA) statistics on minute-projected cells; needs --input-dir"
+    summary = (
+        "Lightning (xLMA) statistics on minute-projected cells; "
+        "needs params: xlma_stat: {input_dir: ...}"
+    )
     pipeline_phase = POSTPROCESS_PHASE
     config_class = XlmaStatConfig
     inputs = ["xlma_stat_config", "minute_masks", "radar_origin", "run_id"]
@@ -62,28 +65,30 @@ class XlmaStatModule(BaseModule):
 
     @classmethod
     def build_config(cls, cfg) -> XlmaStatConfig:
-        params = cfg.module_params.get("xlma_stat", {})
-        return XlmaStatConfig(**params)
+        """The run's config; refuses a run without an existing ``input_dir`` folder."""
+        config = XlmaStatConfig(**cfg.module_params.get("xlma_stat", {}))
+        if config.input_dir is None:
+            raise ValueError(
+                "xlma_stat needs the folder of xLMA flash-sorted NetCDF files; set it "
+                "in the pipeline file as params: xlma_stat: {input_dir: ...}"
+            )
+        if not os.path.isdir(config.input_dir):
+            raise ValueError(f"params.xlma_stat.input_dir '{config.input_dir}' is not a folder")
+        if not any(name.endswith(".nc") for name in os.listdir(config.input_dir)):
+            raise ValueError(
+                f"params.xlma_stat.input_dir '{config.input_dir}' holds no flash-sorted NetCDF "
+                "(*.nc) files; convert raw LYLOUT ASCII sources with xLMA/pyxlma first"
+            )
+        return config
 
     def run(self, context: dict) -> dict:
         config = context["xlma_stat_config"]
-        if not config.input_dir:
-            raise ValueError(
-                "xlma_stat requires an input directory; pass --input-dir or set "
-                "xlma_stat.input_dir."
-            )
         masks = [MinuteMask(**m) for m in context["minute_masks"]]
         radar_origin = context["radar_origin"]
         run_id = context["run_id"]
 
         files = sorted(glob.glob(os.path.join(config.input_dir, "*")))
-        nc_files = [f for f in files if f.endswith(".nc")]
-        if not nc_files:
-            raise ValueError(
-                f"No flash-sorted NetCDF (*.nc) files found in xlma_stat input_dir "
-                f"'{config.input_dir}'. Convert raw LYLOUT ASCII sources to "
-                "flash-sorted NetCDF in xLMA/pyxlma first."
-            )
+        nc_files = [f for f in files if f.endswith(".nc")]  # build_config saw at least one
         ignored = len(files) - len(nc_files)
         if ignored:
             logger.info(

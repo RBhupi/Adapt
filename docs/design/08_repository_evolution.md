@@ -101,7 +101,8 @@ Decision 8's "stable IDs" are realized as a per-scan **`scan_id`**:
         ├── catalog.db
         ├── products.db
         ├── objects/
-        │   └── {artifact_id}.{suffix}
+        │   ├── raw/{original filename}
+        │   └── {run_id}/{module}/{source stem}.{product}.nc
         └── lake/
             ├── silver/
             └── gold/
@@ -109,7 +110,7 @@ Decision 8's "stable IDs" are realized as a per-scan **`scan_id`**:
 
 A **collection** is a coherent data stream or domain. It may be a NEXRAD radar such as `KDIX`, an MRMS domain, a GOES product/region, or another future source. Its source type is metadata (`source_kind`), not a directory convention.
 
-`objects/` stores immutable file-backed artifacts by artifact ID. Original filenames, source URIs, observation times, and format metadata are catalog fields. No API consumer constructs an object path.
+`objects/` stores file-backed artifacts under readable names (a raw file keeps its original name; a module's file is named for its run, module and source file). The artifact ID, original filenames, source URIs, observation times, and format metadata are catalog fields. No API consumer constructs an object path.
 
 Date partitioning is not a live repository rule. If a future silver/gold Parquet product needs partitions, its materialiser may partition by each record's UTC observation date and query workload. A run crossing midnight therefore requires no special case.
 

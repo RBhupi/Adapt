@@ -1,10 +1,11 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Tests for RadarProcessor post-persistence (enrich) handling.
+"""Tests for RadarProcessor extended-module (post-persistence) writes.
 
-Enrich modules run only after cell_uid is committed, and their returned
-DataFrame is written generically via the module's declared SqliteTable spec.
+An extended module's returned DataFrame is written generically via the module's
+declared table spec, stamped with the scan's identity. Which extended modules
+run on a scan is the graph's business (``tests/execution/test_scan_graph.py``).
 """
 
 import queue
@@ -27,7 +28,7 @@ class _ProbeEnrichModule(BaseModule):
     name = "enrich_probe"
     pipeline_phase = 3
     required_history = 1
-    inputs = ["run_id", "scan_time"]
+    inputs = ["scan_time"]
     outputs = ["enrich_probe_rows"]
     persistence = (
         ProductTableWrite(
@@ -60,29 +61,6 @@ def proc_with_enrich(pipeline_config, store_env):
         registry.unregister("enrich_probe")
 
 
-def _tracked(with_uid: bool) -> pd.DataFrame:
-    cols: dict[str, list[object]] = {"cell_label": [1]}
-    if with_uid:
-        cols["cell_uid"] = ["a"]
-    return pd.DataFrame(cols)
-
-
-class TestEnrichUidGuard:
-    def test_skips_enrich_when_tracked_cells_none(self, proc_with_enrich):
-        assert proc_with_enrich._should_run_enrichment({"tracked_cells": None}) is False
-
-    def test_skips_enrich_when_tracked_cells_empty(self, proc_with_enrich):
-        assert proc_with_enrich._should_run_enrichment({"tracked_cells": pd.DataFrame()}) is False
-
-    def test_skips_enrich_when_no_cell_uid_column(self, proc_with_enrich):
-        result = {"tracked_cells": _tracked(with_uid=False)}
-        assert proc_with_enrich._should_run_enrichment(result) is False
-
-    def test_runs_enrich_when_cell_uid_present(self, proc_with_enrich):
-        result = {"tracked_cells": _tracked(with_uid=True)}
-        assert proc_with_enrich._should_run_enrichment(result) is True
-
-
 class TestEnrichWrite:
     def test_enrich_results_routed_to_declared_table(self, proc_with_enrich, store_env):
         from datetime import UTC, datetime
@@ -106,7 +84,7 @@ class TestEnrichWrite:
             source_file="",
             collection_id="TEST_RADAR",
         )
-        proc_with_enrich._router.persist(proc_with_enrich._post_modules, ext_result, meta)
+        proc_with_enrich._router.persist(proc_with_enrich._extended_modules, ext_result, meta)
 
         conn = sqlite3.connect(str(store_env.collection.products_path))
         try:
@@ -116,3 +94,35 @@ class TestEnrichWrite:
         # The writer stamped run and scan identity from PersistenceMeta — enrich
         # modules never supply them.
         assert rows == [(store_env.run_id, "sid-test", "a", 1.0)]
+
+
+def test_a_processed_scan_stores_its_extended_modules_rows(
+    proc_with_enrich, store_env, tmp_path, monkeypatch
+):
+    """process_file runs the extended pass after the core one and stores what it returns."""
+    from datetime import UTC, datetime
+
+    from adapt.execution.graph.executor import GraphRun
+    from tests.helpers.fake_graph import NEEDS_PRIOR_SCAN
+    from tests.helpers.queue_msg import msg
+
+    # Stand in for the core pass only (a first scan); the extended pass and the store are real.
+    monkeypatch.setattr(
+        proc_with_enrich._core_executor,
+        "run",
+        lambda context, *, history, skipped=frozenset(): GraphRun(
+            context=dict(context), skipped=NEEDS_PRIOR_SCAN
+        ),
+    )
+    message = msg(store_env, tmp_path, "f1", scan_time=datetime(2024, 1, 1, tzinfo=UTC))
+
+    assert proc_with_enrich.process_file(message) is True
+
+    conn = sqlite3.connect(str(store_env.collection.products_path))
+    try:
+        rows = conn.execute("SELECT run_id, scan_id, cell_uid, v FROM enrich_probe").fetchall()
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+    assert rows == [(store_env.run_id, message["scan_id"], "a", 1.0)]
+    assert "cell_volume_stats" not in tables  # downstream of tracking, skipped on a first scan

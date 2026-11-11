@@ -4,18 +4,16 @@
 """Radar data processor thread.
 
 Reads acquired-scan messages from the source queue, resolves the raw object
-through the store, and delegates all scientific processing to GraphExecutors
-built at startup:
-
-- ``_single_executor``: ingest + detection (runs every file)
-- ``_multi_executor``: projection + analysis + tracking (runs when 2-frame
-  pair is ready)
+through the store, and runs every enabled per-scan module as one graph
+(``scan_graph``). The graph is walked in two passes: the core modules, then —
+after the scan's core outputs are stored — the extended ones. A module that
+needs more prior scans than are usable is skipped, and so is everything
+downstream of it; the processor names no module.
 
 Responsibilities of this class (orchestration only):
 - Queue management: pop acquired-scan messages, mark task done
 - Completed-scan skip via the collection catalog (scan_is_complete)
-- Frame pairing: accumulate segmented history, validate time gap
-- Context assembly: inject dataset_history before calling multi-executor
+- Rolling history: provide ``prior_scans``, bounded by the time-gap limit
 - Persistence handoff: route module-declared outputs through the StoreOutputRouter
 - Stop/start lifecycle
 """
@@ -31,11 +29,14 @@ from typing import TYPE_CHECKING
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.contracts import ContractViolation, PersistenceMeta
 from adapt.contracts.observability import Observability
-from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry as module_registry
-from adapt.execution.pipeline_builder import _ensure_modules_registered, resolve_enabled_modules
-from adapt.modules.base import POSTPROCESS_PHASE
+from adapt.execution.pipeline_builder import (
+    _ensure_modules_registered,
+    resolve_enabled_modules,
+    scan_graph,
+)
+from adapt.modules.base import EXTENDED_PHASE, POSTPROCESS_PHASE
 from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.runtime.diagnostics import silence_hdf5_errors
@@ -51,25 +52,20 @@ __all__ = ["RadarProcessor"]
 
 logger = logging.getLogger(__name__)
 
-# Context keys the processor injects per group; they must never enter a scan's
-# result (and hence the rolling history), or each entry would retain its
-# predecessor and every scan's grids would stay alive for the whole run.
-_INJECTED_CONTEXT_KEYS = frozenset({"scan_history", "prior_scan"})
+# The history key the processor provides. It must never enter a scan's result
+# (and hence the rolling history), or each entry would retain its predecessor
+# and every scan's grids would stay alive for the whole run.
+_PRIOR_SCANS = "prior_scans"
 
 
 class RadarProcessor(threading.Thread):
-    """Worker thread that processes NEXRAD files through two execution graphs.
+    """Worker thread that runs each scan through the one per-scan module graph.
 
-    Receives file paths from the downloader queue. For each file:
-
-    1. Runs the single-frame graph (ingest → detection) via ``_single_executor``.
-    2. Accumulates segmented datasets in a rolling history.
-    3. When a valid 2-frame pair is ready, runs the multi-frame graph
-       (projection → analysis → tracking) via ``_multi_executor``,
-       passing the frame history in context.
-
-    Both executors enforce input/output contracts at every DAG edge via
-    ``GraphExecutor``. The processor itself performs no validation.
+    For each queued scan it provides the scan identity, every module config and
+    ``prior_scans`` (the usable previous scans), runs the core modules, stores
+    their outputs, then runs the extended modules and stores theirs.
+    ``GraphExecutor`` enforces the contracts at every edge; the processor itself
+    performs no validation.
 
     Example usage (called by PipelineOrchestrator)::
 
@@ -119,69 +115,58 @@ class RadarProcessor(threading.Thread):
         # Observational "what am I doing now" for the live status line (display only).
         self._current_scan_id: str | None = None
         self._stop_event = threading.Event()
+        self._contract_violated = False
         self.output_lock = threading.Lock()
 
-        # Build one execution graph per required_history value.
-        # Module instances are shared (stateful projector/tracker persists across files).
-        _ensure_modules_registered(config.extensions)
-        modules = module_registry.create_modules()
-        modules = resolve_enabled_modules(
-            modules,
-            modules=config.modules,
-            only=config.only_modules,
-            exclude=config.exclude_modules,
-        )
+        # One graph over every enabled per-scan module. Module instances live as
+        # long as the processor (stateful projector/tracker persist across scans).
+        _ensure_modules_registered()
+        modules = resolve_enabled_modules(module_registry.create_modules(), modules=config.modules)
         logger.info("Enabled modules: [%s]", ", ".join(m.name for m in modules))
 
         rogue = sorted(m.name for m in modules if m.pipeline_phase >= POSTPROCESS_PHASE)
         if rogue:
             raise ValueError(
                 f"Post-process module(s) {', '.join(rogue)} cannot run in the live "
-                "pipeline; run them with 'adapt postprocess --module ...'"
+                "pipeline; list them under 'postprocessing:' in the pipeline file"
             )
 
-        in_pipeline = [m for m in modules if m.pipeline_phase != 3]
-        post_persist = [m for m in modules if m.pipeline_phase == 3]
-        self._pipeline_modules = in_pipeline
+        self._module_configs = resolve_module_configs(config, [m.name for m in modules])
+        nodes = scan_graph(modules)
+        core = [n for n in nodes if n.module.pipeline_phase < EXTENDED_PHASE]
+        extended = [n for n in nodes if n.module.pipeline_phase >= EXTENDED_PHASE]
+        self._core_modules = [n.module for n in core]
+        self._extended_modules = [n.module for n in extended]
+        self._core_executor = GraphExecutor(core, observability=self._obs)
+        # Extended modules run after the scan's core outputs are stored.
+        self._extended_executor: GraphExecutor | None = (
+            GraphExecutor(extended, observability=self._obs) if extended else None
+        )
         self._router = StoreOutputRouter(collection)
 
-        history_groups: dict[int, list] = {}
-        for m in in_pipeline:
-            history_groups.setdefault(m.required_history, []).append(m)
-
-        self._executors: dict[int, GraphExecutor] = {
-            req: GraphExecutor(GraphBuilder(mods).build(), observability=self._obs)
-            for req, mods in sorted(history_groups.items())
-        }
-
-        self._post_modules = post_persist
-        self._post_executor: GraphExecutor | None = (
-            GraphExecutor(GraphBuilder(post_persist).build(), observability=self._obs)
-            if post_persist
-            else None
-        )
-
-        self._module_configs = resolve_module_configs(config)
-
-        for req, mods in sorted(history_groups.items()):
-            logger.info(
-                "RadarProcessor required_history=%d: [%s]",
-                req,
-                ", ".join(m.name for m in mods),
-            )
-        if post_persist:
+        logger.info("RadarProcessor core: [%s]", ", ".join(m.name for m in self._core_modules))
+        if extended:
             logger.info(
                 "RadarProcessor post-persistence: [%s]",
-                ", ".join(m.name for m in post_persist),
+                ", ".join(m.name for m in self._extended_modules),
             )
 
-        # Rolling scan history (replaces per-phase segmented_history)
+        # Rolling history of completed scan contexts, newest last.
         self._scan_history: list[dict] = []
         self._max_history = config.processor.max_history
+        # Prior scans the most demanding module needs (none without modules).
+        # ``prior_scans`` always reaches back at least one scan: detection's seed
+        # carry reads the last one.
+        self._prior_needed = max((m.required_history for m in modules), default=1) - 1
         # One bound for every stage that pairs frames (see global_.max_scan_gap_minutes):
         # beyond it no seed is carried, no projection runs and tracking resets.
         self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
         self._last_skipped = False
+
+    @property
+    def module_names(self) -> tuple[str, ...]:
+        """Enabled per-scan modules: core, then extended, each in registration order."""
+        return tuple(m.name for m in (*self._core_modules, *self._extended_modules))
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -192,6 +177,10 @@ class RadarProcessor(threading.Thread):
     def stopped(self) -> bool:
         """True if stop() has been called or a ContractViolation forced stop."""
         return self._stop_event.is_set()
+
+    def contract_violated(self) -> bool:
+        """True once a ContractViolation forced this processor to stop."""
+        return self._contract_violated
 
     def current_activity(self) -> str | None:
         """Short 'what am I doing now' for the live status line; None when idle."""
@@ -248,26 +237,12 @@ class RadarProcessor(threading.Thread):
     # ── Per-file processing ───────────────────────────────────────────────────
 
     def process_file(self, filepath) -> bool:
-        """Process a NEXRAD file with frame-pairing orchestration.
-
-        Phase 1 — pipeline_phase=1 modules (every file):
-            Per-file executor. Contract-validated by GraphExecutor.
-
-        Frame pairing:
-            Accumulates segmented datasets. Waits until 2 frames are ready.
-
-        Phase 2 — pipeline_phase=2 modules (when pair is ready):
-            Injects dataset_history into context. Per-pair executor.
-            Contract-validated by GraphExecutor.
-
-        Phase 3 — pipeline_phase=3 modules (after persistence, when pair ran):
-            Post-persistence executor. Context: run_id, scan_time, plus the
-            in-memory grid on demand. No-op if no phase-3 modules are registered.
+        """Process one queued scan: skip it if complete, else run the module graph.
 
         Returns
         -------
         bool
-            True if processed or deferred (waiting for pair), False on error.
+            True if processed or already complete, False on error.
         """
         if not isinstance(filepath, dict):
             raise TypeError(
@@ -348,50 +323,14 @@ class RadarProcessor(threading.Thread):
                 **self._module_configs,
             }
 
-            # ── Rolling window: run all executor groups in history-size order
-            # required_history=N means N scans total (N-1 prior + current).
-            # Skip if fewer than N-1 prior scans are available.
-            # The previous completed scan is a usable predecessor only when the
-            # time gap to it is within the multi-scan bound (False on the first
-            # scan). Single-scan modules that want it (detection's seed carry)
-            # read ``prior_scan``; multi-scan groups gate on the same check.
-            time_gap_valid, time_gap_minutes = self._validate_time_gap(base_ctx["scan_time"])
-            prior_scan = self._scan_history[-1] if time_gap_valid else None
-
-            result: dict = {}
-            for req_hist, executor in sorted(self._executors.items()):
-                prior_needed = req_hist - 1
-                if len(self._scan_history) < prior_needed:
-                    logger.info(
-                        "Waiting for history: need %d prior scans, have %d (%s)",
-                        prior_needed,
-                        len(self._scan_history),
-                        Path(filepath).name,
-                    )
-                    continue
-
-                if req_hist > 1 and not time_gap_valid:
-                    logger.warning(
-                        "Time gap %.1f min > %.1f min, skipping multi-scan modules.",
-                        time_gap_minutes,
-                        self._max_time_gap_minutes,
-                    )
-                    continue
-
-                ctx = {**base_ctx, **result, "prior_scan": prior_scan}
-                if req_hist > 1:
-                    # Build scan_history: (N-1) prior entries + current partial context
-                    prior = self._scan_history[-prior_needed:] if prior_needed else []
-                    # base_ctx AFTER result: the source-owned scan_time is
-                    # authoritative — a module result must never override it.
-                    ctx["scan_history"] = list(prior) + [{**result, **base_ctx}]
-                group_result = executor.run(ctx)
-                # The executor returns the whole context. Injected keys must not
-                # enter ``result``: it becomes the next history entry, and an
-                # entry holding its predecessor would retain every scan's grids.
-                result.update(
-                    {k: v for k, v in group_result.items() if k not in _INJECTED_CONTEXT_KEYS}
-                )
+            # ── One pass over the core modules. ``prior_scans`` is the usable
+            # history; a module needing more than it holds is skipped by the
+            # executor, with everything downstream of it.
+            prior = self._usable_prior_scans(base_ctx["scan_time"], Path(filepath).name)
+            core = self._core_executor.run({**base_ctx, _PRIOR_SCANS: prior}, history=len(prior))
+            # ``result`` becomes the next history entry: it must not hold its
+            # predecessors, or every scan's grids would be retained.
+            result = {k: v for k, v in core.context.items() if k != _PRIOR_SCANS}
 
             scan_time = base_ctx["scan_time"]
             elapsed_s = time.perf_counter() - t0
@@ -423,25 +362,16 @@ class RadarProcessor(threading.Thread):
                 source_file=str(filepath),
                 collection_id=self.config.downloader.radar,
             )
-            if result:
-                self._router.persist(self._pipeline_modules, result, meta)
+            self._router.persist(self._core_modules, result, meta)
 
-            # ── Post-persistence enrichment (pipeline_phase=3) ─────────────
-            # Enrich modules index on (scan_id, cell_uid); they only run once
-            # tracking has committed cell_uid for this scan.
-            if self._post_executor is not None and self._should_run_enrichment(result):
-                post_ctx = self._build_enrich_context(result, scan_time, scan_id)
-                ext_result = self._post_executor.run(post_ctx)
-                # Per-scan enrichment: the writer stamps scan identity and time
-                # from this meta; modules never carry identity columns.
-                enrich_meta = PersistenceMeta(
-                    scan_time=scan_time,
-                    scan_id=scan_id,
-                    run_id=self.run_id,
-                    source_file=str(filepath),
-                    collection_id=self.config.downloader.radar,
+            # ── Extended modules: the same graph, after the core write. They
+            # follow the core pass's skips; the writer stamps scan identity and
+            # time from ``meta``, modules never carry identity columns.
+            if self._extended_executor is not None:
+                extended = self._extended_executor.run(
+                    {**result, _PRIOR_SCANS: prior}, history=len(prior), skipped=core.skipped
                 )
-                self._router.persist(self._post_modules, ext_result, enrich_meta)
+                self._router.persist(self._extended_modules, extended.context, meta)
 
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0
@@ -464,6 +394,7 @@ class RadarProcessor(threading.Thread):
 
         except ContractViolation as e:
             logger.critical("CRITICAL: Pipeline contract violated: %s. Stopping pipeline.", e)
+            self._contract_violated = True
             self.stop()
             self._record_scan_failure(scan_id)
             return False
@@ -485,42 +416,31 @@ class RadarProcessor(threading.Thread):
             self._record_scan_failure(scan_id)
             return False
 
-    # ── Enrichment (post-persistence) helpers ─────────────────────────────────
+    # ── Rolling history helpers ───────────────────────────────────────────────
 
-    def _should_run_enrichment(self, result: dict) -> bool:
-        """True when enrich modules may run: they require committed cell_uid."""
-        if self._post_executor is None:
-            return False
-        tracked_cells = result.get("tracked_cells")
-        return (
-            tracked_cells is not None
-            and not tracked_cells.empty
-            and "cell_uid" in tracked_cells.columns
-        )
+    def _usable_prior_scans(self, scan_time, file_name: str) -> list[dict]:
+        """Previous scans this scan may use, oldest first; says why when it has too few.
 
-    def _build_enrich_context(self, result: dict, scan_time, scan_id: str) -> dict:
-        """Assemble the post-persistence context; the 3D grid stays in-memory.
-
-        Modules never touch storage. If any enrich module declares ``grid_ds_3d``
-        as an input, the processor injects ingest's in-memory ``grid_ds`` from
-        this scan's result — no store round-trip.
+        Empty on the first scan and when the gap to the last scan exceeds the
+        multi-scan bound.
         """
-        ctx = {
-            **result,
-            "run_id": self.run_id,
-            "scan_id": scan_id,
-            "scan_time": scan_time,
-        }
-        if any("grid_ds_3d" in m.inputs for m in self._post_modules):
-            if "grid_ds" not in result:
-                raise RuntimeError(
-                    f"Enrichment for scan '{scan_id}' declares grid_ds_3d but the "
-                    "scan result carries no grid_ds — ingest did not run"
-                )
-            ctx["grid_ds_3d"] = result["grid_ds"]
-        return ctx
-
-    # ── Frame pairing helpers ─────────────────────────────────────────────────
+        time_gap_valid, time_gap_minutes = self._validate_time_gap(scan_time)
+        if len(self._scan_history) < self._prior_needed:
+            logger.info(
+                "Waiting for history: need %d prior scans, have %d (%s)",
+                self._prior_needed,
+                len(self._scan_history),
+                file_name,
+            )
+        elif self._prior_needed and not time_gap_valid:
+            logger.warning(
+                "Time gap %.1f min > %.1f min, skipping multi-scan modules.",
+                time_gap_minutes,
+                self._max_time_gap_minutes,
+            )
+        if not time_gap_valid:
+            return []
+        return self._scan_history[-max(1, self._prior_needed) :]
 
     def _validate_time_gap(self, current_scan_time=None):
         """Return (valid, gap_minutes) between the most recent history entry and current scan."""

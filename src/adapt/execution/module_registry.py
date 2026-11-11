@@ -22,8 +22,8 @@ Usage::
 
     # In the controller:
     modules = registry.create_modules()
-    nodes = GraphBuilder(modules).build()
-    GraphExecutor(nodes).run(context)
+    nodes = GraphBuilder(modules, provided=frozenset(context)).build()
+    GraphExecutor(nodes).run(context, history=0)
 """
 
 from typing import TYPE_CHECKING
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 class ModuleRegistry:
-    """Central registry for Adapt modules and extensions.
+    """Central registry for Adapt modules (core, extended and post-processing).
 
     Stores module *classes*. Instantiates them on demand via
     ``create_modules()``. This allows each module to be configured

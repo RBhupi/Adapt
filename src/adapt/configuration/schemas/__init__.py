@@ -1,20 +1,22 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Complete runtime initialization for Adapt pipeline.
+"""Configuration schemas and resolution for the Adapt pipeline.
 
-This module handles configuration resolution, directory setup, cleanup,
-and persistence. It provides a single entry point for complete runtime
-initialization.
+ParamConfig (expert defaults) + UserConfig (overrides) resolve to the frozen
+InternalConfig runtime code sees (``resolve.resolve_config``); module configs are
+built from it by ``resolve_module_configs``. Pipeline files are loaded and
+translated into this layer by ``adapt.configuration.pipeline_file``.
 
 Exports
 -------
-init_runtime_config : function
-    Complete runtime initialization - the ONLY public function
+ConfigError : exception
+    A configuration value is invalid; carries a ready-to-print message.
+resolve_module_configs : function
+    One frozen config per registered module.
 """
 
 from adapt.configuration.schemas.errors import ConfigError
-from adapt.configuration.schemas.initialization import init_runtime_config
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-__all__ = ["ConfigError", "init_runtime_config", "resolve_module_configs"]
+__all__ = ["ConfigError", "resolve_module_configs"]

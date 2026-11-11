@@ -35,33 +35,21 @@ def test_modules_allowlist_restricts_and_preserves_order():
     assert _names(out) == ["a", "b", "c", "ext"]  # original order, not arg order
 
 
-def test_only_takes_exact_set():
-    out = resolve_enabled_modules(_mods(), only=["a", "ext"])
-    assert _names(out) == ["a", "ext"]
-
-
-def test_exclude_subtracts():
-    out = resolve_enabled_modules(_mods(), exclude=["ext"])
-    assert _names(out) == ["a", "b", "c"]
-
-
-def test_only_overrides_modules_allowlist():
-    out = resolve_enabled_modules(_mods(), modules=["a", "b", "c", "ext"], only=["ext"])
-    assert _names(out) == ["ext"]
+def test_empty_allowlist_enables_nothing():
+    assert resolve_enabled_modules(_mods(), modules=[]) == []
 
 
 def test_unknown_name_raises():
-    for kwargs in ({"modules": ["nope"]}, {"only": ["nope"]}, {"exclude": ["nope"]}):
-        with pytest.raises(ValueError, match="Unknown module 'nope'"):
-            resolve_enabled_modules(_mods(), **kwargs)
+    with pytest.raises(ValueError, match="Unknown module 'nope'"):
+        resolve_enabled_modules(_mods(), modules=["nope"])
 
 
 def test_disabled_dependency_raises():
-    # Disabling 'b' orphans 'c', which needs 'y' produced by 'b'.
-    with pytest.raises(ValueError, match="'c' needs input 'y'.*disabled module 'b'"):
-        resolve_enabled_modules(_mods(), exclude=["b"])
+    # Leaving 'b' out orphans 'c', which needs 'y' produced by 'b'.
+    with pytest.raises(ValueError, match="'c' needs input 'y', which module 'b' produces"):
+        resolve_enabled_modules(_mods(), modules=["a", "c", "ext"])
 
 
 def test_disabling_leaf_is_allowed():
-    # 'c' produces 'z' which nothing consumes → safe to disable.
-    assert _names(resolve_enabled_modules(_mods(), exclude=["c"])) == ["a", "b", "ext"]
+    # 'c' produces 'z' which nothing consumes → safe to leave out.
+    assert _names(resolve_enabled_modules(_mods(), modules=["a", "b", "ext"])) == ["a", "b", "ext"]

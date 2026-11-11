@@ -97,7 +97,7 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
 
     param = ParamConfig()
     user = UserConfig(radar=radar, base_dir=str(root))
-    config_dict = resolve_config(param, user, None).model_dump()
+    config_dict = resolve_config(param, user).model_dump()
     run_id = f"2026AUG13-1731-{radar}"
     config_dict["run_id"] = run_id
     config = InternalConfig.model_validate(config_dict)
@@ -157,12 +157,16 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         # ── every object cataloged: checksum + lineage to the raw volume ─────
         artifacts = client.artifacts(radar)
         rows_by_object = {row["object_name"]: row for row in artifacts}
+        objects_dir = root / "collections" / radar / "objects"
         object_files = sorted(
-            p for p in (root / "collections" / radar / "objects").iterdir() if p.name != ".staging"
+            p
+            for p in objects_dir.rglob("*")
+            if p.is_file() and ".staging" not in p.relative_to(objects_dir).parts
         )
         assert len(object_files) >= _N_VOLUMES * 3  # raw + gridded3d + segmentation2d(2..N)
         for object_file in object_files:
-            row = rows_by_object[object_file.name]  # KeyError = uncataloged object
+            # KeyError = uncataloged object
+            row = rows_by_object[object_file.relative_to(objects_dir).as_posix()]
             assert row["checksum_sha256"] == hashlib.sha256(object_file.read_bytes()).hexdigest()
             assert row["size_bytes"] == object_file.stat().st_size
         orphans = client.sql(
