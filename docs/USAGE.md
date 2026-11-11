@@ -63,19 +63,25 @@ in the window is processed.
 
 The whole chain — read scans, find and track cells, choose a target, plan the
 radar command — runs from one pipeline file. In `nexrad.yaml`, uncomment the two
-consumer lines (`radar_command` acts on what `target_selection` writes, so it
-needs it):
+module lines (`radar_command` acts on the decision `target_selection` makes, so
+it needs it):
 
 ```yaml
-consumers:
-  target_selection:           # adapt config --show target_selection
-  radar_command:              # adapt config --show radar_command
+modules:
+  - ingest
+  - detection
+  - projection
+  - analysis
+  - tracking
+  - cell_volume_stats
+  - target_selection          # adapt config --show target_selection
+  - radar_command             # adapt config --show radar_command
 ```
 
 Check the wiring, then run:
 
 ```bash
-adapt graph nexrad    # prints the chain: ingest -> ... -> tracking -> store -> target_selection -> radar_command
+adapt graph nexrad    # prints the chain: ingest -> ... -> tracking -> target_selection -> radar_command
 adapt run nexrad
 ```
 
@@ -84,8 +90,9 @@ see it as a diagram. `adapt run` checks the whole file before anything starts,
 then prints one line per scan with the time each module took:
 
 ```
-scan KHGX20261110_153521_V06  │  ingest 18.7s  detection 19ms  │  0 cells  18.7s
-scan KHGX20261110_154224_V06  │  ingest 18.5s  detection 19ms  projection 1.1s  analysis 29ms  tracking 11ms  cell_volume_stats 881ms  │  15 cells  20.5s
+scan KHGX20261110_153521_V06  │  ingest 18.7s  detection 19ms  cell_volume_stats 1.2s  │  0 cells  19.9s
+radar_command: command 1ba038bbaaf258f7 written for cell R0D4RLVKBZ at scan 861d02fd2064ba58 of run 2026NOV10-1530-KHGX
+scan KHGX20261110_154224_V06  │  ingest 18.5s  detection 19ms  projection 1.1s  analysis 29ms  tracking 11ms  cell_volume_stats 881ms  target_selection 12ms  radar_command 3ms  │  15 cells  20.5s
 ```
 
 The first scan of a run is only read and segmented: projection, tracking and
@@ -93,21 +100,28 @@ everything after them need a previous scan, so they start with the second one
 (and again after a gap between scans longer than `max_scan_gap_minutes`, 10 by
 default, a `global` option under `params:`).
 
-What to look at, all under `consumers/<run_id>/` in the folder:
+Every module's results are in the store. The two that matter here are tables
+of the collection's `products.db`, read through `adapt.api.StoreClient` or the
+dashboard:
 
-| File | What it holds |
-|------|---------------|
-| `target_selection/decisions.jsonl` | one line per decided scan: the chosen cell, or why none |
-| `target_selection/current_selection.json` | the newest decision |
-| `radar_command/current_targets.json` | the newest radar command (centre, extents, scan pattern) |
-| `radar_command/history/<plan_id>.json` | every command planned |
-| `radar_command/history/activity.jsonl` | one event per step: `SELECTION_RECEIVED`, `PLAN_GENERATED`, `PUBLISHED`, `NO_TARGET`, ... |
+| Table | What it holds |
+|-------|---------------|
+| `target_selection` | one row per decided scan: the chosen cell (`cell_uid`), or none, and why |
+| `radar_commands` | one row per decision: the outcome (`PUBLISHED`, `NO_TARGET`, `TARGET_UNAVAILABLE`, ...) and the command itself (centre, extents, scan pattern) |
 
 **Nothing is sent to a radar unless you ask for it.** As packaged, `radar_command`
-is a dry run: commands are written to those files only. To send them, add an
-`api:` block under `radar_command:` (`adapt config --show radar_command` prints
-it) and export the key in the environment variable it names before `adapt run`;
-`SENT` or `SEND_FAILED` events then appear in `activity.jsonl`.
+is a dry run: commands are recorded in that table only (outcome `PUBLISHED`). To
+send them, add an `api:` part under `params: radar_command:`
+(`adapt config --show radar_command` prints it) and export the key in the
+environment variable it names before `adapt run`; the outcome is then `SENT` or
+`SEND_FAILED`.
+
+If the run stops — `Ctrl-C`, a crash, a reboot — start it again with its id and
+it goes on from the last complete scan, with the same result as an unbroken run:
+
+```bash
+adapt run nexrad --run-id 2026NOV10-1530-KHGX
+```
 
 To try the chain on scans you already have on disk instead of downloading, point
 the file at the folder; the run ends when every file in the window is processed:
@@ -123,16 +137,15 @@ run:
 ```
 
 To try other target-selection rules on a run you have already made, without
-processing the scans again, replay it: see *Stored-run replay* in the
-[CLI Reference](cli_reference.md).
+processing the scans again, run the two modules over the stored run: see
+*Running modules over a stored run* in the [CLI Reference](cli_reference.md).
 
 ### Changing options
 
-The pipeline file lists only names, and a name alone runs with its defaults: a
-listed module with its default options, an uncommented consumer line
-(`target_selection:`, `radar_command:`) with its packaged preset. Set only what
-you change: module options under `params:`, a consumer's under its own line
-(e.g. `target_selection:` then `  duration: {max_minutes: 15}`). Print a module's or section's options with their
+The pipeline file lists only names, and a name alone runs with its defaults
+(`target_selection` and `radar_command` with their packaged rule and command
+setup). Set only what you change, under `params:` (e.g. `target_selection:` then
+`  duration: {max_minutes: 15}`). Print a module's or section's options with their
 defaults and meanings, then paste what it prints under the file's `params:`
 line, as its first line says (`params:` is the template's last line, so
 `adapt config --show detection >> nexrad.yaml` does it too; an entry given twice
@@ -147,15 +160,14 @@ adapt config --show global      # settings shared by several modules
 overwriting). A store can hold several pipelines: copy `nexrad.yaml` to, say,
 `kdix.yaml`, edit it, and run `adapt run kdix`.
 
-### Consumers and post-processing
+### Adding a module to a run you already have
 
-The `consumers:` section adds things that act on the results while the pipeline
-runs — target selection, radar commands, plots — each writing under
-`consumers/<run_id>/<consumer>/` in the store. The `postprocessing:` section
-lists modules (e.g. `xlma_stat`) that run over the run once it completes. A file
-with no `core:` modules replays a stored run instead: `adapt run NAME --run-id ID`,
-writing into a new `consumers/<run_id>/replay-<n>/` each time. See the
-[CLI Reference](cli_reference.md) for both.
+Every step is a module in the file's one `modules:` list. A file with
+`run.source: stored_run` runs its modules over a run the store already has
+instead of over new scans — `adapt run NAME --run-id ID` — reading what they
+need from the store: lightning statistics (`xlma_stat`) for a finished run, or
+target selection again with another rule. See the
+[CLI Reference](cli_reference.md).
 
 ### Verbose logging
 
@@ -237,8 +249,6 @@ my_case/
 ├── nexrad.yaml                # the pipeline file (adapt init / adapt config nexrad)
 ├── registry.db                # runs (with their full config and pipeline file), collections, events
 ├── logs/                      # run log files
-├── consumers/                 # consumer outputs: consumers/<run_id>/<consumer>/ (replays: replay-<n>/),
-│                              # each run's or replay's folder holding a copy of its pipeline file
 └── collections/
     └── KLOT/                  # one collection per radar
         ├── catalog.db         # scans, artifacts, checksums, lineage
@@ -246,7 +256,7 @@ my_case/
         ├── decisions.db       # the segmenter's and tracker's decision log (analysis only)
         └── objects/           # the files themselves, under readable names
             ├── raw/           # downloaded scans, under their original names
-            └── <run_id>/<module>/   # what each module wrote in that run
+            └── <run_id>/<module>/   # what each module wrote in that run (checkpoint/: the state a resumed run goes on from)
 ```
 
 Files in `objects/` have readable names: a downloaded scan keeps its original

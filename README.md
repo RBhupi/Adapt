@@ -73,7 +73,7 @@ Adapt is at an alpha stage of development.
 - The reference NEXRAD pipeline (ingest, detection, projection, analysis, tracking) runs end to end in
   real-time and historical modes.
 - A read-only query API and GUI dashboard provide access to pipeline output.
-- Post-processing modules enrich completed storm tracks with observations from other instruments.
+- Modules run over a stored run enrich completed storm tracks with observations from other instruments.
 - Rule-based target selection for adaptive scanning is under active development.
 - Supported platforms: macOS, Linux, and Windows. See [Installation](https://arm-doe.github.io/Adapt/installation.html).
 

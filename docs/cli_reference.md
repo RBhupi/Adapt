@@ -20,8 +20,8 @@ to. `adapt --help` and `adapt <command> --help` describe each command from the
 command line.
 
 Exit codes: `0` success; `1` a run that did not complete or was stopped, a run
-in which a scan failed, a consumer that failed, or a store error (not a store,
-already a store, unknown run); `2` an invalid pipeline file or option.
+in which a scan failed, or a store error (not a store, already a store, unknown
+run); `2` an invalid pipeline file or option.
 
 ---
 
@@ -46,14 +46,15 @@ adapt init /data/kilx # initialize a specific directory
 ## `adapt config`
 
 ```bash
-adapt config nexrad              # (re)write ./nexrad.yaml; asks before overwriting
-adapt config --show segmenter    # print options to paste into a pipeline file
+adapt config nexrad                   # (re)write ./nexrad.yaml; asks before overwriting
+adapt config --show segmenter         # print options to paste into a pipeline file
+adapt config --show target_selection  # a module's packaged options, with their comments
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `NAME` | Pipeline template to write as `./NAME.yaml`. Available: `nexrad`. An unknown name lists the available templates. |
-| `--show NAME` | Print NAME's options as commented lines to paste under the pipeline file's `params:` line (`consumers:` for a consumer), each with a one-line meaning. |
+| `--show NAME` | Print NAME's options as commented lines to paste under the pipeline file's `params:` line, each with a one-line meaning. |
 
 `--show` accepts:
 
@@ -61,35 +62,37 @@ adapt config --show segmenter    # print options to paste into a pipeline file
   print the `params:` sections that hold their options (ingest → `reader`,
   `regridder`; detection → `segmenter`; projection → `projector`; analysis →
   `analyzer`; tracking → `tracker`); `cell_volume_stats` and `xlma_stat` print
-  their own `NAME:` entry;
+  their own `NAME:` entry; `target_selection` and `radar_command` print their
+  packaged options with the reasoning in comments (the `growing_isolated` rule
+  and a dry-run `sandbox` command setup);
 - a **params section**: `reader`, `downloader`, `regridder`, `segmenter`,
   `global` (settings shared by several modules), `projector`, `analyzer`,
   `tracker`, `visualization`, `logging` (`output` is accepted but says it has no
-  options left: the ones it had are obsolete);
-- a **consumer**: `target_selection`, `radar_command`, `plots` print their entry
-  (`target_selection` and `radar_command` print a packaged example: the
-  `growing_isolated` rules and a dry-run `sandbox` command setup).
+  options left: the ones it had are obsolete).
 
 An unknown name lists every valid one. The first line of the output names the
-line to paste the rest under: the file's `params:` line, or its `consumers:`
-line for a consumer. Paste it there as printed — the entries are indented to sit
-under that line, and fragments pasted one after another load together. The
-template ends with `params:`, so `adapt config --show NAME >> nexrad.yaml` pastes
-a module's or section's options there too. You rarely need the whole fragment:
-a name alone runs with defaults. A listed module uses its default options, and a
-bare consumer line (the template's commented line, uncommented) runs with the
-packaged preset `--show` prints. Give only what you change; it is laid over the
-defaults part by part, so
+line to paste the rest under: the file's `params:` line. Paste it there as
+printed — the entries are indented to sit under that line, and fragments pasted
+one after another load together. The template ends with `params:`, so
+`adapt config --show NAME >> nexrad.yaml` pastes them there too. You rarely need
+the whole fragment: a module listed under `modules:` runs with its defaults,
+which for `target_selection` and `radar_command` are the packaged options
+`--show` prints. Give only what you change; it is laid over the defaults part
+by part, so
 
 ```yaml
-consumers:
+modules:
+  - ...
+  - target_selection
+  - radar_command
+
+params:
   target_selection:
-    duration: {max_minutes: 15}   # the preset's rule with a 15-minute cap
-  radar_command:                  # the sandbox preset as packaged
+    duration: {max_minutes: 15}   # the packaged rule with a 15-minute cap
 ```
 
-changes the cap and keeps every other part of the preset. A misspelled option
-is still refused, naming it. An entry given twice is an error, never silently
+changes the cap and keeps every other part of the rule. A misspelled option is
+refused, naming it. An entry given twice is an error, never silently
 half-dropped.
 
 ---
@@ -97,62 +100,57 @@ half-dropped.
 ## The pipeline file
 
 `adapt init` and `adapt config nexrad` write this short form (shown here
-without its header comments and per-module summaries). Only names are listed;
-every module option not given under `params:` uses its default. The file names
-no pipeline, so a copy of it is right as is.
+without its header comments). Only names are listed; every module option not
+given under `params:` uses its default. The file names no pipeline, so a copy
+of it is right as is.
 
 ```yaml
 run:
-  source: aws_nexrad          # where scans come from: aws_nexrad | local_directory
+  source: aws_nexrad          # where scans come from: aws_nexrad | local_directory | stored_run
   radar: KLOT                 # radar / collection id
   mode: realtime              # realtime | historical
   start_time: null            # historical: ISO 8601 UTC, e.g. 2025-06-17T18:00:00Z
   end_time: null
   source_dir: null            # local_directory: folder of Level-II files
   max_runtime_minutes: null   # realtime: stop after this many minutes; null = until Ctrl-C
-  poll_seconds: 10            # how often consumers check for new scans
 
-core:                         # per-scan modules; Adapt orders them by their inputs and outputs
-  - ingest
-  - detection
-  - projection
-  - analysis
-  - tracking
-
-extended:                     # per-scan enrichment, after each scan is stored
-  - cell_volume_stats
-
-consumers:                    # things that act on the results while the pipeline runs
-  # target_selection:         # adapt config --show target_selection
-  # radar_command:            # adapt config --show radar_command
-  # plots:                    # adapt config --show plots
-
-postprocessing:               # modules run after the core run completes
-  # - xlma_stat               # needs params: xlma_stat: {input_dir: ...}
+modules:                      # per-scan modules; Adapt orders them by their inputs and outputs
+  - ingest                    # read + regrid radar volumes
+  - detection                 # segment cells from the grid
+  - projection                # optical-flow projection between scans
+  - analysis                  # 2D per-cell statistics
+  - tracking                  # link cells across scans
+  - cell_volume_stats         # 3D volume stats per cell (base, top, echo-top heights)
+  # - target_selection        # choose the cell the radar should watch
+  # - radar_command           # command the radar to the selected cell; needs target_selection
+  # - xlma_stat               # Lightning (xLMA) statistics; needs params: xlma_stat: {input_dir: ...}
 
 params:
 ```
 
 | Section | Holds |
 |---------|-------|
-| `run` | Where scans come from (`source`, `radar`, `mode`, `start_time`, `end_time`, `source_dir`) and launcher settings (`max_runtime_minutes`, `poll_seconds`). Times need a time zone (`Z` = UTC) and are for `mode: historical` only, with `end_time` after `start_time`; `max_runtime_minutes` is for `mode: realtime` only; `source_dir` is required by, and only for, `source: local_directory`, which needs `mode: historical`: the folder's Level-II files must be named for `run.radar` (`RADARYYYYMMDD_HHMMSS...`; hidden files are ignored), and only those within `start_time`..`end_time` are processed — a folder with no scan in the window is refused. |
-| `core` | Per-scan modules (`ingest`, `detection`, `projection`, `analysis`, `tracking`). A module whose input another, unlisted, module produces is refused. |
-| `extended` | Per-scan enrichment run after each scan is stored (`cell_volume_stats`). Needs `core`. |
-| `consumers` | Consumer name → its options: `target_selection`, `radar_command` (needs `target_selection`), `plots` (live runs only). |
-| `postprocessing` | Modules run over the run after it completes (`xlma_stat`). |
-| `params` | A params section name (`segmenter`, `tracker`, `global`, …) or the name of an extended/post-processing module the file lists → options. |
+| `run` | Where scans come from (`source`, `radar`, `mode`, `start_time`, `end_time`, `source_dir`) and `max_runtime_minutes`. Times need a time zone (`Z` = UTC) and are for `mode: historical` only, with `end_time` after `start_time`; `max_runtime_minutes` is for `mode: realtime` only; `source_dir` is required by, and only for, `source: local_directory`, which needs `mode: historical`: the folder's Level-II files must be named for `run.radar` (`RADARYYYYMMDD_HHMMSS...`; hidden files are ignored), and only those within `start_time`..`end_time` are processed — a folder with no scan in the window is refused. `source: stored_run` runs the modules over a run the store already has (below); it needs `mode: historical` and no time window. |
+| `modules` | The modules to run on every scan, in any order: Adapt orders them by what each reads and writes. A module whose input another, unlisted, module produces is refused, naming the module to list. |
+| `params` | A params section name (`segmenter`, `tracker`, `global`, …), or the name of a listed module that owns its options (`cell_volume_stats`, `target_selection`, `radar_command`, `xlma_stat`) → options. |
+
+There is one kind of module. Every listed module runs once per scan, as soon as
+the modules it reads from are done, and its outputs are written to the store
+when it finishes. `target_selection` and `radar_command` are modules like the
+others: their decisions and commands are store tables (`target_selection`,
+`radar_commands`), not files.
 
 Every section must be present; one whose entries are all commented out is
-empty. A module under the wrong section, an unknown key anywhere (an option of
-`params.cell_volume_stats` or `params.xlma_stat` included), a key given twice,
-or a core module name under `params:` (its options live in its params sections)
-is an error that names the valid choices. Each params section is checked against
-its schema, in a live run and in a stored-run replay alike: a value out of its
-bounds is refused, and so is an obsolete option (one `--show` no longer offers,
-which would have no effect). Params of an extended or post-processing module the
-file does not list are refused: list the module or remove them.
-`params.downloader` cannot set `radar`, `mode`, `start_time` or `end_time` —
-those belong to `run:`.
+empty. An unknown module, an unknown key anywhere, a key given twice, or the
+name of a module whose options live in params sections (`ingest`, `detection`,
+…) under `params:` is an error that names the valid choices. A file with the
+sections of earlier versions (`core:`, `extended:`, `consumers:`,
+`postprocessing:`) is refused: write a new one with `adapt config nexrad` and
+list the modules under `modules:`. Each params section is checked against its
+schema: a value out of its bounds is refused, and so is an obsolete option.
+Params of a module the file does not list are refused: list the module or
+remove them. `params.downloader` cannot set `radar`, `mode`, `start_time` or
+`end_time` — those belong to `run:`.
 
 A store may hold several pipeline files: copy `nexrad.yaml` to `kdix.yaml`,
 edit it, and run `adapt run kdix`.
@@ -164,143 +162,135 @@ edit it, and run `adapt run kdix`.
 ```bash
 adapt run nexrad                              # run ./nexrad.yaml
 adapt run nexrad -v                           # with DEBUG logging
-adapt run nexrad --run-id 2026OCT21-1052-KFSX # continue that run, or start one with this id
+adapt run nexrad --run-id 2026OCT21-1052-KFSX # resume that run, or start one with this id
+adapt run nexrad --run-id 2026OCT21-1052-KFSX --skip-failed
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `NAME` | Pipeline name: the file `./NAME.yaml` in the current folder (a store). |
-| `--run-id ID` | Live run: a run already in the store is continued with its recorded modules and params — of the file only `run.poll_seconds`, `run.max_runtime_minutes`, `consumers:` and `postprocessing:` (with its params) apply, and `run.radar` must be the run's; an unknown id (format `YYYYMONDD-HHMM-RADAR`, ending with `-` and the file's `run.radar`) starts a new run with that id. Without `--run-id` a new run's id is the minute it starts; a second run started within that minute is refused (wait a minute, or name it with `--run-id`), never joined to the first. Stored-run replay: the run to replay (required). |
-| `-v`, `--verbose` | DEBUG-level logging in the run's log and on the console (live runs). |
+| `--run-id ID` | A run already in the store is resumed from its last checkpoint with its recorded modules and params — of the file only `run.max_runtime_minutes` applies, and `run.radar` must be the run's. An unknown id (format `YYYYMONDD-HHMM-RADAR`, ending with `-` and the file's `run.radar`) starts a new run with that id. Without `--run-id` a new run's id is the minute it starts; a second run started within that minute is refused (wait a minute, or name it with `--run-id`), never joined to the first. With `run.source: stored_run`: the run to run over (required). |
+| `--skip-failed` | Resuming `--run-id`: leave the scans that failed before as failed instead of processing them again. |
+| `-v`, `--verbose` | DEBUG-level logging in the run's log and on the console. |
 
-The whole file is checked before anything starts: the pipeline, every
-consumer section, every module the run will run — each configured with its
-options as it will run, so a module missing an input (`projection` for
-`analysis`, `params.xlma_stat.input_dir` for `xlma_stat`) is refused now, not
-after the run — the source, and, when `radar_command` has an `api:` section,
-that its API key is set in the environment.
+The whole file is checked before anything starts: every listed module is
+configured with its options as it will run and wired into the graph, so a
+module missing an input (`projection` for `analysis`,
+`params.xlma_stat.input_dir` for `xlma_stat`) is refused now, not mid-run — and
+so are the source and, when `radar_command` has an `api:` part, a missing API
+key in the environment.
 
-### Live run (`core:` lists modules)
+### What a run does
 
-The pipeline downloads and processes scans; once it has recorded the run, each
-consumer starts on its own thread and writes under
-`consumers/<run_id>/<consumer>/` in the store:
+The source provides scans; for each scan the listed modules run as one graph
+(`adapt graph NAME` prints it), and each module's outputs are stored when it
+finishes:
 
-| Consumer | Writes |
-|----------|--------|
-| `target_selection` | `decisions.jsonl` (one decision per decided scan) and `current_selection.json` (the newest) |
-| `radar_command` | `current_targets.json` (the newest command), `history/<plan_id>.json` (every command) and `history/activity.jsonl`, one event per step: `SELECTION_RECEIVED`, `PLAN_GENERATED`, `PUBLISHED` (written to the files), `SENT` / `SEND_FAILED` (the radar API, only when `api:` is set), `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `OUT_OF_ORDER` |
-| `plots` | PNG plots of each decided scan (`show_live: true` also opens a live window) |
-| `target_study` | Replays only. Scores the file's `target_selection` rule, each `variants:` entry (a name plus the parts it changes) and an oracle against the run's ideal targets: `summary.csv` (one row per rule: captured with the peak scanned, captured but peak missed, lost because the radar was busy, lost outranked, never eligible, episodes, episodes on non-ideal cells, median share of life scanned), `fates.csv` (one row per ideal target per rule), `summary.txt`. `ideal:` sets what an ideal target is (defaults: not a split child, ≥ 6 scans, ≥ 45 dBZ, peak at observation ≥ 3). |
+| Module | Stores |
+|--------|--------|
+| `ingest` | the gridded volume (NetCDF, one file per scan) |
+| `detection` | its decision log (`decisions.db`) |
+| `analysis` | tables `cell_stats`, `cell_adjacency` |
+| `tracking` | the segmented and projected 2D fields with their cell labels (NetCDF, one file per scan); tables `cell_identity` (cell label → `cell_uid` per scan), `cell_events`, `cell_tracks`; the view `cells_by_scan`, which joins identity and statistics; its decision log |
+| `cell_volume_stats` | table `cell_volume_stats`, keyed by scan and cell label |
+| `target_selection` | table `target_selection`: one decision per scan (the selected `cell_uid`, or none) |
+| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `SENT` / `SEND_FAILED` (the radar API, only when `api:` is set) — and the command as sent |
+| `xlma_stat` | tables `xlma_stat_minutes`, `xlma_stat_scan` |
 
-The first scan of a run is only ingested (tracking needs a pair), so a run of N
-scans gives N−1 decisions, commands and plots. Each run's `consumers/<run_id>/`
-also holds `pipeline.yaml`, a copy of the file that produced it.
+`radar_command` also prints one line per scan on the console (the command it
+wrote or sent, or why there is none). Read the tables through
+`adapt.api.StoreClient` or the dashboard.
 
-Once the run has ended, each consumer is stopped after what it follows
-(`radar_command` after `target_selection` has written its last selection) and
-makes one last pass, however long its `poll_seconds`. A consumer that fails —
-during the run or in that last pass — is logged as an error in the run's log
-and its events; the pipeline keeps running and the command exits non-zero.
-`Ctrl-C` (or SIGTERM) stops the pipeline and its consumers: no new scan starts,
-the scan in progress is finished and saved (a stop pressed while a scan is being
-read may take until that read ends, 10–30 s on a full volume, to be acted on;
-a second `Ctrl-C` within that wait is merged into the first), and the run is
-recorded `cancelled`. Press `Ctrl-C` again once the pipeline is stopping to
-abandon the consumers still running. A run that went through with failed
-scans is recorded `completed`, says so in its summary (`COMPLETED, 2 SCANS
-FAILED`) and exits `1`. When the run completes, the `postprocessing:` modules
-run over it (also after failed scans: the completed scans are there); after a
-cancelled or failed run, or a stop requested while the consumers finished, they
-are skipped with a message.
-Only one live pipeline runs at a time (PID file `~/.adapt/pipeline.pid`; one
-left behind by a pipeline that has exited is ignored).
+A module that needs the scan before (projection, and everything that reads from
+it) is skipped on the first scan of a run and after a gap longer than
+`global.max_scan_gap_minutes`, so a run of N scans gives N−1 decisions and
+commands. A module that fails skips the modules that read from it; the scan is
+recorded `failed` with the reason per module, the run goes on with the next
+scan as if the failed one had not arrived, and the command exits `1` with a
+summary that says so (`COMPLETED, 2 SCANS FAILED`).
 
-### Stored-run replay (`core:` and `extended:` empty)
+`Ctrl-C` (or SIGTERM) stops the run: no new scan starts, the scan in progress is
+finished and saved (a stop pressed while a scan is being read may take until
+that read ends, 10–30 s on a full volume, to be acted on), and the run is
+recorded `cancelled`. Only one pipeline runs at a time (PID file
+`~/.adapt/pipeline.pid`; one left behind by a pipeline that has exited is
+ignored).
 
-No pipeline runs. The consumers replay the stored run `--run-id` in scan order
-— `radar_command` gets one command per decided scan — and then the
-`postprocessing:` modules run over it. The run must be of `run.radar` and must
-have ended (a run still `running` is refused; an unknown id lists the store's
-runs of the radar). Each replay writes into a new folder
-`consumers/<run_id>/replay-<n>/<consumer>/`, apart from the live run's
-consumers and from earlier replays, with a copy of the pipeline file that
-produced it (`pipeline.yaml`), so replays of different rules can be told apart.
-A replay never sends to the radar API (the `api:` section is dropped, with a
-message), and `plots` is refused. `Ctrl-C` stops a replay, naming the partial
-folder.
+### Resuming a run
 
-Of the `run:` section a replay uses `radar` (the run's collection); the other
-keys are still checked as a run's would be, so the simplest is to copy a live
-file. To compare target-selection rules, replay the same run with a different
-`target_selection` section (`snapshot.track_summary: end_of_run` gives the
-oracle that sees each track's final values, for a hindsight baseline):
+After every complete scan the run saves a checkpoint: what its modules carry
+from scan to scan (the tracker's tracks, the current target, the commands
+already published) and the last scans they read back. Only the latest is kept.
+`adapt run NAME --run-id ID` goes on from it, after a `Ctrl-C`, a crash or a
+kill alike, and the result is the same as if the run had never stopped:
+
+- scans completed before the stop are not processed again;
+- the scan that was in progress, or that failed last, is processed again
+  (`--skip-failed` leaves a failed one as it is);
+- a scan that failed earlier, with complete scans after it, stays failed: its
+  turn has passed.
+
+The resumed run keeps the modules and params it was started with. A run whose
+checkpoint does not hold the state its modules need is refused, naming them.
+
+### Running modules over a stored run (`run.source: stored_run`)
+
+With `source: stored_run` no scan is downloaded or read: the listed modules run
+over every scan of the run `--run-id`, in scan order, and each input that no
+listed module produces is read back from the store. This is how a module is
+added to a run after the fact, or run again with other options:
 
 ```yaml
-# rules_a.yaml: replay target selection and the radar commands it would send
+# rules_b.yaml: another target selection rule over a stored run
 run:
-  source: aws_nexrad
+  source: stored_run
   radar: KFSX
-  mode: realtime
-core: []
-extended: []
-consumers:
-  target_selection:           # paste from: adapt config --show target_selection
-    entry: {...}              # 1. gates that make a cell a candidate
-    score: {...}              # 2. weights that rank the candidates (+ site bonuses)
-    hold: {...}               # 3. gates the current target must keep passing
-    switch: {...}             # 4. whether a newcomer may displace it, and by what margin
-    duration: {...}           # 5. how long a target is followed at most
-    snapshot: {...}
-  radar_command:              # paste from: adapt config --show radar_command
-    planning: {...}
-    radar: {...}
-    extent: {...}
-postprocessing: []
+  mode: historical
+
+modules:
+  - target_selection
+  - radar_command
+
 params:
+  target_selection:           # only the parts that differ from the packaged rule
+    entry:
+      gates:
+        - {field: radar_reflectivity_max, op: ge, value: 50}
+    switch: {allow: true, margin: 2.0}
 ```
 
 ```bash
-adapt run rules_a --run-id 2026OCT21-1052-KFSX    # -> consumers/2026OCT21-1052-KFSX/replay-1/
-```
-
-To score rules in hindsight instead of inspecting one replay, add a `target_study`
-section next to `target_selection`: every variant names the parts of the rule it
-changes, and the study replays the rule, each variant and the oracle (a scheduler
-that knows every track's future) against the ideal targets the completed run
-reveals:
-
-```yaml
-  target_study:
-    ideal: {min_scans: 6, min_field_max: 45, min_peak_observation: 3, exclude_split: true}
-    variants:
-      - name: switch if 20 points better
-        switch: {allow: true, margin: 20}
-      - name: no duration cap
-        duration: {max_minutes: null}
-      - name: release when the 40 dBZ core vanishes
-        hold: {gates: [{field: area_40dbz_km2, op: gt, value: 0}]}
+adapt run rules_b --run-id 2026OCT21-1052-KFSX
 ```
 
 ```yaml
 # lightning.yaml: add xLMA lightning statistics to a stored run
 run:
-  source: aws_nexrad
+  source: stored_run
   radar: KLOT
   mode: historical
-core: []
-extended: []
-consumers: {}
-postprocessing:
+
+modules:
   - xlma_stat
+
 params:
   xlma_stat:
     input_dir: /data/lma      # folder of xLMA flash-sorted NetCDF files
 ```
 
-```bash
-adapt run lightning --run-id 2026OCT21-1052-KLOT
-```
+- The run must be of `run.radar` and must have ended (a run still `running` is
+  refused; an unknown id lists the store's runs of the radar).
+- The run keeps the settings it was made with: params sections (`tracker`,
+  `segmenter`, …) are refused; the options of the listed modules that own
+  theirs apply.
+- A listed module always runs, replacing what it stored before under the same
+  key. `target_selection` and `radar_commands` rows are keyed by the hash of the
+  options that made them (`config_hash`), so decisions under different rules
+  sit side by side in the same tables.
+- A module whose input is not in the store for a scan is skipped for that scan,
+  with the reason recorded.
+- `radar_command` never sends over a stored run, with or without `api:`.
+- The run's checkpoint is left as it is.
 
 ---
 
@@ -315,25 +305,24 @@ adapt graph nexrad                # print the graph
 adapt graph nexrad > nexrad.mmd   # save it; open it in any Mermaid viewer
 ```
 
-The graph is built from the modules' own declared inputs and outputs, the same
-way a run wires them, so it shows the modules `adapt run NAME` runs and the data
-that passes between them:
+The graph is the one a new run of the file would build, from the modules'
+declared inputs and outputs and the file's options:
 
-- `core` — the per-scan modules, and `extended (after store write)` — the
-  per-scan modules that run once the scan's core outputs are stored. Each arrow
-  is labelled with the data one module hands the next, e.g.
-  `ingest -->|grid_ds_2d, grid_ds| detection`.
+- `modules` — the listed modules. Each arrow is labelled with the data one
+  module hands the next, e.g. `ingest -->|grid_ds_2d, grid_ds| detection`.
 - `scan` and `prior_scans` — what Adapt provides to every scan: the file and its
-  identity, and the previous scans. A module that needs a prior scan is skipped
-  on the first scan and after a too-long gap, and so is every module downstream
-  of it.
-- `postprocessing (after run)` — the modules run over the finished run.
-- `consumers` — each reads the store, or the consumer it follows.
+  identity, and what modules read back from the scans before. A module that
+  needs a prior scan is skipped on the first scan and after a too-long gap, and
+  so is every module downstream of it.
+- `store` — what is read from the store: the cells and tracks so far (for
+  `target_selection`) and, over a stored run, every input no listed module
+  produces.
 
-A file with an unknown module or consumer, a consumer listed without the one it
-follows, or a module listed without the module that produces its input is refused
-here with the message a run gives, exit code `2`. The options under `params:` and
-under each consumer are not checked by `adapt graph`; `adapt run` checks them.
+An option can change what a module reads: with
+`radar_command.extent.vertical_band` set, `radar_command` no longer reads
+`cell_volume_stats`, and the arrow is gone. A file a run would refuse — an
+unknown module, a wrong option, a module listed without the one that produces
+its input — is refused here with the same message, exit code `2`.
 
 ---
 
