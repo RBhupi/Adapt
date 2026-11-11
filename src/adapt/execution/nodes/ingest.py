@@ -42,7 +42,6 @@ class LoadModule(BaseModule):
     summary = "read + regrid radar volumes"
     param_sections = ("reader", "regridder")
     required_history = 1
-    pipeline_phase = 0
     inputs = ["nexrad_file", "ingest_config", "scan_time"]
     outputs = ["grid_ds", "grid_ds_2d"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}

@@ -22,21 +22,6 @@ class NetcdfArtifact:
 
 
 @dataclass(frozen=True)
-class TrackTablesWrite:
-    """Joint write of the core tracking tables; consumes four context keys.
-
-    DEBT: encodes tracking science that lives in TrackStore.write_scan.
-    Follow-up ticket: tracking emits final row DataFrames so this decomposes
-    into plain ProductTableWrite specs.
-    """
-
-    tracked_key: str
-    events_key: str
-    stats_key: str
-    adjacency_key: str
-
-
-@dataclass(frozen=True)
 class ScanRecord:
     """One scan's registration in the catalog; built by the runtime after persist.
 
@@ -67,6 +52,25 @@ class ProductTableWrite:
     table: str
     primary_key: tuple[str, ...]
     index_columns: tuple[str, ...] = ()
+    # Columns frozen as INTEGER: counts and flags that are never missing. Every
+    # other numeric column freezes as REAL (see SchemaLedger).
+    integer_columns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProductView:
+    """A read-only products.db view over product tables: ``SELECT`` text ``select``.
+
+    The view has a row for every row of table ``rows_from``, so each scan with
+    rows there is linked to the view by name and readers can wait for it like
+    any other product. ``reads`` names the other tables the SELECT uses: all of
+    them must exist by the time ``rows_from`` is first written.
+    """
+
+    name: str
+    select: str
+    rows_from: str
+    reads: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -77,25 +81,21 @@ class DecisionTableWrite:
     key: str
 
 
-PersistenceSpec = NetcdfArtifact | TrackTablesWrite | ProductTableWrite | DecisionTableWrite
+PersistenceSpec = NetcdfArtifact | ProductTableWrite | ProductView | DecisionTableWrite
 
 
 @dataclass(frozen=True)
 class PersistenceMeta:
     """Run-scoped metadata the persistence router needs; built by the runtime per scan.
 
-    ``scan_id`` is the content-derived scan identity minted at the source
-    boundary — the single join key across tracking tables, catalog rows, and
-    artifacts. It may be None only for run-level persists that aggregate many
-    scans; any per-scan write raises on a missing scan_id.
-
-    ``scan_time`` may be None only for run-level persists whose specs do not
-    stamp a time (SqliteTable rows carry their own); any time-stamped artifact
-    write raises on a missing scan_time — wall-clock substitution is forbidden.
+    Every write is one module's outputs for one scan. ``scan_id`` is the
+    content-derived scan identity minted at the source boundary — the single
+    join key across tables, catalog rows, and artifacts; ``scan_time`` is that
+    scan's observation time, never the wall clock.
     """
 
-    scan_time: datetime | None  # tz-aware UTC (ordering/display metadata)
-    scan_id: str | None  # content-derived scan identity (join key)
+    scan_time: datetime  # tz-aware UTC (ordering/display metadata)
+    scan_id: str  # content-derived scan identity (join key)
     run_id: str
     source_file: str  # source scan path -> filename_stem, ds.attrs["source"]
     collection_id: str  # collection (radar/site data domain) identity; value = radar ID today

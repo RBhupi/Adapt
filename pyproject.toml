@@ -81,8 +81,8 @@ namespaces = false
 [tool.setuptools.package-data]
 "adapt.configuration" = ["*.yaml"]
 "adapt.configuration.schemas" = ["*.sql"]
-"adapt.consumers.radar_command.presets" = ["*.yaml"]
-"adapt.consumers.target_selection.presets" = ["*.yaml"]
+"adapt.modules.radar_command.presets" = ["*.yaml"]
+"adapt.modules.target_selection.presets" = ["*.yaml"]
 
 [tool.setuptools_scm]
 version_scheme = "post-release"

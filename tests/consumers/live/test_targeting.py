@@ -23,7 +23,7 @@ from adapt.consumers.live._targeting import (
     draw_tse_map,
     format_rationale,
 )
-from adapt.consumers.target_selection import (
+from adapt.modules.target_selection import (
     CellSnapshot,
     SelectionReason,
     Snapshot,

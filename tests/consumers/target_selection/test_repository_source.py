@@ -3,7 +3,7 @@
 
 """build_snapshot against a synthetic on-disk store.
 
-The tracking rows are written through the real TrackStore (frozen first-frame
+The tracking rows are written as the pipeline writes them (frozen first-frame
 schema — the projection columns freeze with the first stats frame), and read
 back through the real StoreClient. No hand-copied DDL.
 """
@@ -16,10 +16,9 @@ import pytest
 from adapt.api.store_client import StoreClient
 from adapt.consumers.target_selection.repository_source import build_snapshot
 from adapt.persistence.errors import StoreError
-from adapt.persistence.products import SchemaLedger
 from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
-from adapt.persistence.track_store import TrackStore
+from tests.helpers.tracking_store import TrackedScans
 
 pytestmark = pytest.mark.unit
 
@@ -72,43 +71,32 @@ def _build_store(tmp_path):
             environment_json="{}",
         )
     )
-    ledger = SchemaLedger(collection.products_path, collection.catalog)
-    no_adjacency = pd.DataFrame(
-        columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"]
+    scans = TrackedScans(collection, RUN_ID)
+    # T0: alpha (no projections), beta (area 100), delta (projections, only scan)
+    scans.write(
+        "sid-t0",
+        T0,
+        stats=_stats(
+            [
+                (1, 30.0, 34.8, -97.3, 42.0, None, None, None, None),
+                (2, 100.0, 35.0, -97.0, 48.1, None, None, None, None),
+                (4, 60.0, 35.2, -97.1, 40.0, 35.25, -97.1, 35.3, -97.1),
+            ]
+        ),
+        tracked=_tracked([(1, "uid_alpha"), (2, "uid_beta"), (4, "uid_delta")]),
     )
-
-    with TrackStore(collection.products_path, ledger=ledger) as ts:
-        # T0: alpha (no projections), beta (area 100), delta (projections, only scan)
-        ts.write_scan(
-            run_id=RUN_ID,
-            scan_time=T0,
-            cell_stats_df=_stats(
-                [
-                    (1, 30.0, 34.8, -97.3, 42.0, None, None, None, None),
-                    (2, 100.0, 35.0, -97.0, 48.1, None, None, None, None),
-                    (4, 60.0, 35.2, -97.1, 40.0, 35.25, -97.1, 35.3, -97.1),
-                ]
-            ),
-            tracked_cells_df=_tracked([(1, "uid_alpha"), (2, "uid_beta"), (4, "uid_delta")]),
-            cell_events_df=pd.DataFrame(),
-            cell_adjacency_df=no_adjacency,
-            scan_id="sid-t0",
-        )
-        # T1: beta grew to 160 with projections; gamma is new, no projections.
-        ts.write_scan(
-            run_id=RUN_ID,
-            scan_time=T1,
-            cell_stats_df=_stats(
-                [
-                    (2, 160.0, 35.05, -97.0, 55.0, 35.1, -97.0, 35.2, -97.0),
-                    (3, 50.0, 34.9, -97.2, 30.0, None, None, None, None),
-                ]
-            ),
-            tracked_cells_df=_tracked([(2, "uid_beta"), (3, "uid_gamma")]),
-            cell_events_df=pd.DataFrame(),
-            cell_adjacency_df=no_adjacency,
-            scan_id="sid-t1",
-        )
+    # T1: beta grew to 160 with projections; gamma is new, no projections.
+    scans.write(
+        "sid-t1",
+        T1,
+        stats=_stats(
+            [
+                (2, 160.0, 35.05, -97.0, 55.0, 35.1, -97.0, 35.2, -97.0),
+                (3, 50.0, 34.9, -97.2, 30.0, None, None, None, None),
+            ]
+        ),
+        tracked=_tracked([(2, "uid_beta"), (3, "uid_gamma")]),
+    )
     store.close()
     return root
 

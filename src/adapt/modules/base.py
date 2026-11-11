@@ -4,8 +4,8 @@
 """Base interface for all Adapt execution nodes.
 
 Every node in the system — registered from the module catalog
-(``configuration/defaults.yaml`` and ``postprocess_defaults.yaml``) — must
-declare its name, inputs, outputs, and optionally input/output contracts.
+(``configuration/defaults.yaml``) — must declare its name, inputs, outputs, and
+optionally input/output contracts.
 The graph engine uses these declarations to build the execution DAG automatically.
 
 Contract functions come from adapt.contracts — import them there, not here.
@@ -16,16 +16,6 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from adapt.contracts import PersistenceSpec
-
-# Pipeline phase of per-scan enrichment that runs after each scan is stored, on
-# the scan's in-memory data (the pipeline file's ``extended:`` section). Lower
-# phases are the per-scan core (``core:``).
-EXTENDED_PHASE = 3
-
-# Pipeline phase reserved for out-of-band repository enrichment run by the
-# PostProcessor (never by the live RadarProcessor, which only knows phases 0–3).
-# A module with this phase is selected exclusively by the PostProcessor.
-POSTPROCESS_PHASE = 4
 
 
 class BaseModule(ABC):
@@ -40,6 +30,12 @@ class BaseModule(ABC):
 
     The graph engine matches ``outputs`` of upstream nodes to ``inputs``
     of downstream nodes to resolve execution order automatically.
+
+    A module keeps nothing between scans. What it needs at its next scan it
+    returns under a key it also lists in ``inputs``: the runtime hands the value
+    back next time (``None`` before the module has run) and saves it with the
+    run's checkpoint. What it needs of earlier scans' ordinary outputs it names
+    in ``prior_inputs`` and reads from ``prior_scans``.
     Contract callables (from adapt.contracts) are invoked by GraphExecutor
     automatically — nodes do not call them manually.
 
@@ -67,16 +63,18 @@ class BaseModule(ABC):
     input_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
     output_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
     required_history: ClassVar[int] = 1
-    pipeline_phase: ClassVar[int] = 0
+    # The outputs of earlier scans this module reads from ``prior_scans``: the
+    # runtime keeps exactly these (of every module) for the scans that follow.
+    prior_inputs: ClassVar[tuple[str, ...]] = ()
     config_class: ClassVar[type | None] = None
     # How each output is persisted (see adapt.contracts.persistence). The
     # OutputRouter writes declared outputs mechanically; modules never touch
     # storage. Empty tuple = this module persists nothing directly.
     persistence: ClassVar[tuple[PersistenceSpec, ...]] = ()
     injected_global_fields: ClassVar[frozenset[str]] = frozenset()
-    # Core modules only: the ParamConfig sections (pipeline-file ``params:`` keys)
-    # that hold this module's options. Modules of phase >= EXTENDED_PHASE own their
-    # options instead, under ``params: {<name>: ...}``.
+    # The ParamConfig sections (pipeline-file ``params:`` keys) that hold this
+    # module's options. A module without any owns its options instead, under
+    # ``params: {<name>: ...}``.
     param_sections: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
@@ -111,12 +109,29 @@ class BaseModule(ABC):
         }
 
     @classmethod
+    def options_text(cls) -> str | None:
+        """This module's options as commented YAML to paste under ``params:``.
+
+        None (the default) when ``default_params`` and the option descriptions
+        say it all; a module whose options are a packaged preset returns it.
+        """
+        return None
+
+    @classmethod
+    def inputs_for(cls, config: Any) -> list[str]:
+        """The context keys this module reads when configured with ``config``.
+
+        ``inputs`` unless an option makes one unnecessary.
+        """
+        return cls.inputs
+
+    @classmethod
     def build_config(cls, internal_config: Any) -> Any | None:
         """Build this module's frozen config by slicing the resolved InternalConfig.
 
         The module decides what it needs: global values, its own section, and
         (rarely) a cross-reference to another section. Returns None when the
-        module needs no config. Core modules override this with the slicing
+        module needs no config. Modules override this with the slicing
         logic; the config engine calls it once per registered module at startup.
         """
         return None

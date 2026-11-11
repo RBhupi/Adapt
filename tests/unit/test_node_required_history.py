@@ -6,7 +6,6 @@
 Only projection needs a prior scan (required_history=2). Analysis and tracking
 need none of their own: they are skipped exactly when projection, upstream of
 them, is skipped.
-No in-pipeline node should use pipeline_phase=1 or pipeline_phase=2.
 """
 
 import pytest
@@ -39,21 +38,3 @@ class TestNodeRequiredHistory:
         from adapt.execution.nodes.tracking import TrackingModule
 
         assert TrackingModule.required_history == 1
-
-    def test_no_in_pipeline_node_uses_pipeline_phase_one(self):
-        """pipeline_phase=1 is retired — all in-pipeline nodes use pipeline_phase=0."""
-        from adapt.execution.nodes.detection import DetectModule
-        from adapt.execution.nodes.ingest import LoadModule
-
-        assert LoadModule.pipeline_phase == 0
-        assert DetectModule.pipeline_phase == 0
-
-    def test_no_in_pipeline_node_uses_pipeline_phase_two(self):
-        """pipeline_phase=2 is retired — all in-pipeline nodes use pipeline_phase=0."""
-        from adapt.execution.nodes.analysis import AnalysisModule
-        from adapt.execution.nodes.projection import ProjectionModule
-        from adapt.execution.nodes.tracking import TrackingModule
-
-        assert ProjectionModule.pipeline_phase == 0
-        assert AnalysisModule.pipeline_phase == 0
-        assert TrackingModule.pipeline_phase == 0

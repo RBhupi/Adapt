@@ -242,15 +242,28 @@ class StoreClient:
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int | None = None,
+        product: str | None = None,
     ) -> list[Scan]:
         """Complete scans, time-ordered; ``run_id=None`` unions across runs.
+
+        With ``product`` (an artifact type or a product table/view name), the
+        scans that have that product instead: a reader names what it reads and
+        sees a scan as soon as that is stored, whether or not the rest of the
+        scan's modules are done.
 
         Cross-run rows always carry their ``run_id`` — deduplication across
         reprocessed scans is the caller's decision.
         """
         handle = self._handle(collection)
-        sql = "SELECT * FROM scans WHERE status = 'complete'"
         params: list = []
+        if product is None:
+            sql = "SELECT * FROM scans WHERE status = 'complete'"
+        else:
+            sql = (
+                "SELECT * FROM scans WHERE EXISTS (SELECT 1 FROM scan_products p "
+                "WHERE p.run_id = scans.run_id AND p.scan_id = scans.scan_id AND p.product = ?)"
+            )
+            params.append(product)
         if run_id is not None:
             sql += " AND run_id = ?"
             params.append(run_id)
@@ -279,18 +292,18 @@ class StoreClient:
             for row in rows
         ]
 
-    def scan_timeline(self, collection: str, run_id: str) -> list[ScanRef]:
-        """The run's ordered, complete-only scan timeline (the dashboard seam)."""
+    def scan_timeline(self, collection: str, run_id: str, product: str) -> list[ScanRef]:
+        """The run's ordered timeline of the scans that have ``product``."""
         return [
             ScanRef(run_id=s.run_id, scan_id=s.scan_id, scan_time=s.scan_time)
-            for s in self.scans(collection, run_id=run_id)
+            for s in self.scans(collection, run_id=run_id, product=product)
         ]
 
     def scans_since(
-        self, collection: str, run_id: str, after: ScanRef | None = None
+        self, collection: str, run_id: str, product: str, after: ScanRef | None = None
     ) -> list[ScanRef]:
-        """Live-follow: complete scans newer than the watermark (all when None)."""
-        timeline = self.scan_timeline(collection, run_id)
+        """Live-follow: scans with ``product`` newer than the watermark (all when None)."""
+        timeline = self.scan_timeline(collection, run_id, product)
         if after is None:
             return timeline
         return [ref for ref in timeline if ref.scan_time > after.scan_time]
@@ -343,12 +356,9 @@ class StoreClient:
         return ScanRaster(dataset, ref, product)
 
     def scan_bundle(self, run_id: str, scan_id: str, collection: str) -> ScanBundle:
-        """Everything for one COMPLETE scan, resolved through catalog links."""
+        """One scan's segmentation raster, cells and tracks; the scan must have
+        its segmentation2d product."""
         scan = self._scan(collection, run_id, scan_id)
-        if scan.status != "complete":
-            raise StoreError(
-                f"Scan '{scan_id}' of run '{run_id}' is not complete (status '{scan.status}')"
-            )
         raster = self.open_scan_raster(collection, run_id, scan_id)
         cells = self.cells_at_scan(run_id, scan_id, collection)
         tracks = [
@@ -379,7 +389,10 @@ class StoreClient:
         handle = self._handle(collection)
         exists = (
             handle.products()
-            .execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,))
+            .execute(
+                "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+                (table,),
+            )
             .fetchone()
         )
         if exists is None:
@@ -498,14 +511,14 @@ class StoreClient:
         if cell_uid is None:
             return self._tracking_frame(
                 collection,
-                "SELECT * FROM cell_events WHERE run_id = ? ORDER BY event_id",
+                "SELECT * FROM cell_events WHERE run_id = ? ORDER BY scan_time, event_seq",
                 (run_id,),
                 table="cell_events",
             )
         return self._tracking_frame(
             collection,
             "SELECT * FROM cell_events WHERE run_id = ? "
-            "AND (source_cell_uid = ? OR target_cell_uid = ?) ORDER BY event_id",
+            "AND (source_cell_uid = ? OR target_cell_uid = ?) ORDER BY scan_time, event_seq",
             (run_id, cell_uid, cell_uid),
             table="cell_events",
         )
@@ -553,7 +566,7 @@ class StoreClient:
         events = pd.read_sql_query(
             f"SELECT * FROM cell_events WHERE run_id = ? "
             f"AND (source_cell_uid IN ({placeholders}) OR target_cell_uid IN ({placeholders})) "
-            "ORDER BY event_id",
+            "ORDER BY scan_time, event_seq",
             handle.products(),
             params=[run_id, *uids, *uids],
         )
@@ -685,7 +698,10 @@ class StoreClient:
     def _table_columns(self, handle: _CollectionHandle, name: str) -> set[str]:
         known = (
             handle.products()
-            .execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,))
+            .execute(
+                "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+                (name,),
+            )
             .fetchone()
         )
         if known is None:

@@ -9,7 +9,11 @@ can be imported from anywhere without creating import cycles.
 """
 
 # Keys the processor provides to every per-scan module; not produced by any module.
-SCAN_SEEDS = frozenset({"nexrad_file", "scan_id", "scan_time", "prior_scans"})
+SCAN_SEEDS = frozenset({"nexrad_file", "run_id", "scan_id", "scan_time", "prior_scans"})
+
+# Inputs the runtime builds from the run's tables up to the scan, for a module
+# that reads the run's history; no module produces them.
+STORE_VIEWS = frozenset({"cells_so_far", "tracks_so_far"})
 
 
 def config_key(module: str) -> str:

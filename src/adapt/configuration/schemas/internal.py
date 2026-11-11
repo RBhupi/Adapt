@@ -280,7 +280,7 @@ class PipelineProvenance(AdaptBaseModel):
     file: str = Field(description="Path of the pipeline file")
     content: dict[str, Any] = Field(
         description="The file's sections as validated: run (launcher settings included), "
-        "module lists, consumer sections and params"
+        "modules and params"
     )
 
 
@@ -343,8 +343,8 @@ class InternalConfig(AdaptBaseModel):
     logging: InternalLoggingConfig
     processor: InternalProcessorConfig = Field(default_factory=InternalProcessorConfig)
     module_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # The live module allowlist: a pipeline file's core + extended modules, in
-    # file order (always set explicitly there). None = every registered module.
+    # The run's modules: a pipeline file's ``modules:`` list, in file order
+    # (always set explicitly there). None = every registered module.
     modules: list[str] | None = None
     pipeline: PipelineProvenance | None = Field(
         default=None,

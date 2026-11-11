@@ -27,12 +27,9 @@ from adapt.consumers.live._targeting import (
 )
 from adapt.consumers.live._utils import require_scan_identity
 from adapt.consumers.live._widgets import _CompactToolbar
-from adapt.consumers.target_selection import (
-    TargetSelectionEngine,
-    build_snapshot,
-    is_candidate,
-)
+from adapt.consumers.target_selection import build_snapshot
 from adapt.contracts import stat_column
+from adapt.modules.target_selection import TargetSelectionEngine, is_candidate
 from adapt.utils.time import from_scan_iso
 
 logger = logging.getLogger(__name__)
@@ -328,7 +325,8 @@ class TargetSelectionTab:
             return {}
         require_scan_identity(hist)
         ref_by_sid = {
-            ref.scan_id: ref for ref in self.ctx.client().scan_timeline(collection, run_id)
+            ref.scan_id: ref
+            for ref in self.ctx.client().scan_timeline(collection, run_id, "cells_by_scan")
         }
         pairs = hist[["scan_id", "scan_time"]].drop_duplicates()
         return {

@@ -37,12 +37,6 @@ def _scan_meta(scan_id: str = "abc123") -> PersistenceMeta:
     )
 
 
-def _run_meta() -> PersistenceMeta:
-    return PersistenceMeta(
-        scan_time=None, scan_id=None, run_id="run-1", source_file="", collection_id="KILX"
-    )
-
-
 def _frame(**overrides) -> pd.DataFrame:
     data = {"run_id": ["run-1", "run-1"], "cell_label": [1, 2], "area": [10.5, 20.5]}
     data.update(overrides)
@@ -136,11 +130,11 @@ class TestFirstFrameFreeze:
             with pytest.raises(StoreError, match=reserved):
                 TableWriter(ledger, spec, owner_module="rogue")
 
-    def test_tracking_tables_cannot_be_claimed(self, ledger):
-        for core in ("cells_by_scan", "cell_events", "cell_tracks"):
-            spec = ProductTableWrite(key="x", table=core, primary_key=("run_id",))
-            with pytest.raises(StoreError, match="tracking"):
-                TableWriter(ledger, spec, owner_module="rogue")
+    def test_a_view_cannot_take_the_name_of_a_table(self, writer, ledger):
+        writer.write(_frame(), _scan_meta())
+
+        with pytest.raises(StoreError, match="cell_stats"):
+            ledger.ensure_view("cell_stats", "SELECT 1")
 
 
 class TestEnforcement:
@@ -223,27 +217,6 @@ class TestIdentityStamping:
         with pytest.raises(StoreError, match="scan_id"):
             writer.write(_frame(scan_id=["x", "y"]), _scan_meta())
 
-    def test_scan_granular_per_scan_write_requires_scan_time(self, writer):
-        meta = PersistenceMeta(
-            scan_time=None, scan_id="abc123", run_id="run-1", source_file="", collection_id="KILX"
-        )
-
-        with pytest.raises(StoreError, match="scan_time"):
-            writer.write(_frame(), meta)
-
-    def test_run_level_write_to_scan_table_requires_scan_id_column(self, ledger):
-        spec = ProductTableWrite(
-            key="x", table="xlma_stat_scan", primary_key=("run_id", "scan_id", "cell_uid")
-        )
-        writer = TableWriter(ledger, spec, owner_module="xlma_stat")
-        frame = pd.DataFrame({"run_id": ["run-1"], "cell_uid": ["c1"], "flashes": [3]})
-
-        with pytest.raises(StoreError, match="scan_id"):
-            writer.write(frame, _run_meta())
-
-        frame["scan_id"] = ["abc123"]
-        writer.write(frame, _run_meta())
-
     def test_time_granular_table_requires_valid_time(self, ledger, collection):
         spec = ProductTableWrite(
             key="x", table="xlma_stat_minutes", primary_key=("run_id", "valid_time", "cell_uid")
@@ -251,13 +224,13 @@ class TestIdentityStamping:
         writer = TableWriter(ledger, spec, owner_module="xlma_stat")
 
         with pytest.raises(StoreError, match="valid_time"):
-            writer.write(pd.DataFrame({"run_id": ["run-1"], "cell_uid": ["c1"]}), _run_meta())
+            writer.write(pd.DataFrame({"run_id": ["run-1"], "cell_uid": ["c1"]}), _scan_meta())
 
         writer.write(
             pd.DataFrame(
                 {"run_id": ["run-1"], "cell_uid": ["c1"], "valid_time": ["2026-08-13T17:32:00Z"]}
             ),
-            _run_meta(),
+            _scan_meta(),
         )
         assert _snapshot(collection.products_path, "xlma_stat_minutes")["granularity"] == "time"
 

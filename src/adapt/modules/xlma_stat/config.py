@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Config schema for the xlma_stat post-process module.
+"""Config schema for the xlma_stat module.
 
 Holds exactly what the reader and the science class consume. Frozen. Built at
 startup by the node's build_config from the resolved InternalConfig. Only pydantic

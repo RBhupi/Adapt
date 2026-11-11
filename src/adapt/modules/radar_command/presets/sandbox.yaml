@@ -1,0 +1,30 @@
+# Radar command preset: a dry run for the radar sandbox.
+#
+# radar_command turns each target_selection decision into a radar command, so the
+# pipeline file must also list target_selection (and cell_volume_stats, unless
+# extent.vertical_band is set). Every command is recorded in the run's
+# radar_commands table. This preset has no api: section, so nothing is sent. To
+# send commands to the sandbox API, uncomment the api: block and export the key in
+# the environment variable that api_key_env names before `adapt run`; the key never
+# goes in this file. A run over a stored run (run.source: stored_run) never sends,
+# with or without api:.
+
+radar_command:
+  planning:
+    horizon_minutes: 12         # each plan reaches 12 minutes ahead,
+    interval_seconds: 60        # one target entry a minute (whole minutes that divide the horizon)
+
+  radar:
+    scan_pattern: 3rhi_7ppi     # the scan pattern the radar is asked to run
+    user_id: adapt_sandbox      # sent with every command
+
+  extent:
+    horizontal_buffer_km: 2.0   # margin around each projected footprint's box
+    # vertical_band:            # a fixed band for every target, instead of each cell's measured base/top
+    #   altitude_min_m: 500.0   # metres above mean sea level
+    #   altitude_max_m: 15000.0
+
+  # api:
+  #   base_url: https://radar-sandbox.example   # commands are POSTed to {base_url}/publish/command
+  #   api_key_env: ADAPT_RADAR_API_KEY          # environment variable that holds the key
+  #   timeout_seconds: 10

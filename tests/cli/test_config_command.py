@@ -7,7 +7,7 @@ import pytest
 
 from adapt.configuration.pipeline_file import load_pipeline_file
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("isolated_catalog")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def test_writes_the_short_pipeline_file_in_the_current_directory(cwd, adapt, cap
 
     path = cwd / "nexrad.yaml"
     assert path.read_text().startswith("# Adapt pipeline file. Run it with:  adapt run ")
-    assert load_pipeline_file(path).core
+    assert load_pipeline_file(path).modules
     assert "adapt run nexrad" in capsys.readouterr().out
 
 

@@ -1,9 +1,9 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Output contracts for the xlma_stat post-process module.
+"""Output contracts for the xlma_stat module.
 
-Validates the two extension-table frames the module returns. Empty frames are
+Validates the two table frames the module returns. Empty frames are
 tolerated: a repository / time window with no lightning legitimately produces no
 rows.
 """

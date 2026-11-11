@@ -5,7 +5,6 @@ All tests must use these fixtures instead of creating raw dict configs.
 """
 
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -13,7 +12,6 @@ import pytest
 
 from adapt.configuration.schemas.resolve import resolve_config
 from adapt.configuration.schemas.user import UserConfig
-from adapt.execution.module_registry import registry
 from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.ingest import LoadModule
@@ -38,21 +36,6 @@ def _reset_repository_registry():
     """
     yield
     StoreRegistry.close_all()
-
-
-@pytest.fixture
-def isolated_catalog():
-    """Validating a pipeline file, or listing what ``adapt config --show`` can
-    print, imports the whole module catalog, the post-process node xlma_stat
-    included (postprocess_defaults.yaml).
-
-    Drop it from the registry and the import cache afterwards, so the global
-    singleton stays the live-pipeline set the rest of the suite expects and a
-    later import registers it fresh.
-    """
-    yield
-    registry.unregister("xlma_stat")
-    sys.modules.pop("adapt.execution.nodes.xlma_stat", None)
 
 
 # =============================================================================

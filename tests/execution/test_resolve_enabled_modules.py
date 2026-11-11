@@ -44,12 +44,6 @@ def test_unknown_name_raises():
         resolve_enabled_modules(_mods(), modules=["nope"])
 
 
-def test_disabled_dependency_raises():
-    # Leaving 'b' out orphans 'c', which needs 'y' produced by 'b'.
-    with pytest.raises(ValueError, match="'c' needs input 'y', which module 'b' produces"):
-        resolve_enabled_modules(_mods(), modules=["a", "c", "ext"])
-
-
 def test_disabling_leaf_is_allowed():
     # 'c' produces 'z' which nothing consumes → safe to leave out.
     assert _names(resolve_enabled_modules(_mods(), modules=["a", "b", "ext"])) == ["a", "b", "ext"]

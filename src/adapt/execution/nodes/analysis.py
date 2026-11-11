@@ -40,7 +40,6 @@ class AnalysisModule(BaseModule):
     name = "analysis"
     summary = "2D per-cell statistics"
     param_sections = ("analyzer",)
-    pipeline_phase = 0
     inputs = ["projected_ds", "analysis_config", "scan_time"]
     outputs = ["cell_stats", "cell_adjacency"]
     output_contracts = {

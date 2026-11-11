@@ -110,6 +110,15 @@ def pipeline_config(store_root) -> InternalConfig:
     user = UserConfig(radar="TEST_RADAR", base_dir=str(store_root))
     config_dict = resolve_config(param, user).model_dump()
     config_dict["run_id"] = "test-run"
+    # The modules of a plain NEXRAD run; a test of another set says so.
+    config_dict["modules"] = [
+        "ingest",
+        "detection",
+        "projection",
+        "analysis",
+        "tracking",
+        "cell_volume_stats",
+    ]
     return InternalConfig.model_validate(config_dict)
 
 

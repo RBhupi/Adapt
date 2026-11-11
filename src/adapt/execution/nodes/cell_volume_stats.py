@@ -1,14 +1,16 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""cell_volume_stats — post-persistence enrichment node (pipeline_phase = 3).
+"""cell_volume_stats — per-cell 3D statistics from the gridded volume.
 
-Computes per-cell 3D statistics from the gridded volume and writes one row
-per (run_id, scan_id, cell_uid) to the cell_volume_stats table, joinable to
-cells_by_scan. The 3D grid is ingest's in-memory ``grid_ds``.
+One row per segmented cell, keyed (run_id, scan_id, cell_label) in the
+cell_volume_stats table: it needs the cells' labels, not their track identity,
+so it does not wait for tracking. Join it to ``cells_by_scan`` on
+(run_id, scan_id, cell_label) to reach a cell's uid. The 3D grid is ingest's
+in-memory ``grid_ds``.
 
 Output columns (authoritative — documented here, schema inferred from the frame):
-  run_id, scan_time, cell_uid, cell_label                     : index
+  run_id, scan_time, cell_label                               : index
   cell_area_km2, cell_volume_km3, cell_top_m/base_m/depth_m   : geometry
   dbz_{max,mean,std,min}, z_{mean,max,std}                    : reflectivity
   vol_{20,30,40,50,60}dbz_km3                                 : volume-by-threshold
@@ -18,6 +20,7 @@ Output columns (authoritative — documented here, schema inferred from the fram
   multilayer_fraction, mean_nlayers, max_nlayers              : storm structure
 """
 
+import numpy as np
 import pandas as pd
 
 from adapt.contracts import CELL_LABELS_VAR, ProductTableWrite, check_cell_volume_stats
@@ -29,8 +32,7 @@ from adapt.modules.cell_volume_stats.module import CellVolumeStatsAlgorithm
 
 class CellVolumeStatsModule(BaseModule):
     name = "cell_volume_stats"
-    summary = "3D volume stats (cloud-top height) from the in-memory grid"
-    pipeline_phase = 3
+    summary = "3D volume stats per cell (base, top, echo-top heights)"
     required_history = 1
     config_class = CellVolumeStatsConfig
     # Names filled from the shared global section by build_config; the remaining
@@ -43,7 +45,6 @@ class CellVolumeStatsModule(BaseModule):
         "cell_volume_stats_config",
         "grid_ds",
         "segmented_ds",
-        "tracked_cells",
     ]
     outputs = ["cell_volume_stats_rows"]
     output_contracts = {"cell_volume_stats_rows": check_cell_volume_stats}
@@ -51,8 +52,8 @@ class CellVolumeStatsModule(BaseModule):
         ProductTableWrite(
             key="cell_volume_stats_rows",
             table="cell_volume_stats",
-            primary_key=("run_id", "scan_id", "cell_uid"),
-            index_columns=("scan_time", "cell_uid"),
+            primary_key=("run_id", "scan_id", "cell_label"),
+            index_columns=("scan_time",),
         ),
     )
 
@@ -73,22 +74,11 @@ class CellVolumeStatsModule(BaseModule):
 
     def run(self, context: dict) -> dict:
         config = context["cell_volume_stats_config"]
-        grid_3d = context["grid_ds"]
-        tracked = context["tracked_cells"]
-
-        if tracked.empty:
-            return {"cell_volume_stats_rows": pd.DataFrame()}
-
         cell_labels_2d = context["segmented_ds"][config.labels_var].values
+        labels = np.unique(cell_labels_2d[cell_labels_2d > 0])
         algo = CellVolumeStatsAlgorithm(config)
         rows = [
-            algo.compute_cell(
-                grid_3d,
-                cell_labels_2d,
-                r.cell_label,
-                r.cell_uid,
-            )
-            for _, r in tracked.iterrows()
+            algo.compute_cell(context["grid_ds"], cell_labels_2d, int(label)) for label in labels
         ]
         return {"cell_volume_stats_rows": pd.DataFrame(rows)}
 

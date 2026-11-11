@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Config schema for the cell_volume_stats enrichment module.
+"""Config schema for the cell_volume_stats module.
 
 Holds exactly what CellVolumeStatsAlgorithm consumes. Frozen. Built at startup by
 the node's build_config from the resolved InternalConfig. Only pydantic + stdlib.

@@ -13,7 +13,6 @@ that prevents a declared write is an error and raises.
 
 import logging
 from collections.abc import Iterable
-from datetime import datetime
 
 from adapt.contracts import (
     DecisionTableWrite,
@@ -21,36 +20,16 @@ from adapt.contracts import (
     PersistenceMeta,
     PersistenceSpec,
     ProductTableWrite,
-    TrackTablesWrite,
+    ProductView,
 )
 from adapt.persistence.decision_store import DecisionStore
 from adapt.persistence.errors import StoreError
 from adapt.persistence.objects import ArtifactMeta, ObjectStore, product_object_name
 from adapt.persistence.products import SchemaLedger, TableWriter
 from adapt.persistence.store import Collection
-from adapt.persistence.track_store import TrackStore
 from adapt.utils.time import to_scan_iso
 
 logger = logging.getLogger(__name__)
-
-
-def _require_scan_time(module_name: str, spec, meta: PersistenceMeta) -> datetime:
-    if meta.scan_time is None:
-        raise ValueError(
-            f"{module_name}: {type(spec).__name__} needs scan_time but it is None — "
-            "refusing to persist with unknown observation time "
-            "(wall-clock substitution is forbidden)"
-        )
-    return meta.scan_time
-
-
-def _require_scan_id(module_name: str, spec, meta: PersistenceMeta) -> str:
-    if meta.scan_id is None:
-        raise ValueError(
-            f"{module_name}: {type(spec).__name__} needs scan_id but it is None — "
-            "refusing to persist rows without scan identity"
-        )
-    return meta.scan_id
 
 
 class StoreOutputRouter:
@@ -58,9 +37,9 @@ class StoreOutputRouter:
 
     Dispatch: NetcdfArtifact → object named for its run, module and source file
     (rewritten in place when the run writes the scan again) + catalog row +
-    lineage to the scan's raw volume + scan-product link; ProductTableWrite → products.db rows
-    (frozen first-frame schema) + table link; TrackTablesWrite → TrackStore on
-    products.db + auxiliary tracking link.
+    lineage to the scan's raw volume + scan-product link; ProductTableWrite →
+    products.db rows (frozen first-frame schema) + table link; ProductView → the
+    view + a link for each scan that has rows in it.
     """
 
     def __init__(self, collection: Collection) -> None:
@@ -81,8 +60,8 @@ class StoreOutputRouter:
                 self._write_netcdf(module_name, spec, result, meta)
             case ProductTableWrite():
                 self._write_table(module_name, spec, result, meta)
-            case TrackTablesWrite():
-                self._write_tracking(module_name, spec, result, meta)
+            case ProductView():
+                self._link_view(spec, meta)
             case DecisionTableWrite():
                 self._write_decisions(spec, result, meta)
             case _:
@@ -105,8 +84,7 @@ class StoreOutputRouter:
     ) -> None:
         if spec.key not in result:
             return
-        scan_time = _require_scan_time(module_name, spec, meta)
-        scan_id = _require_scan_id(module_name, spec, meta)
+        scan_time, scan_id = meta.scan_time, meta.scan_id
         raw = self._collection.catalog.find_artifact_by_scan(scan_id, "raw_volume")
         if raw is None:
             raise StoreError(
@@ -170,41 +148,21 @@ class StoreOutputRouter:
         if df is None or df.empty:
             return
         TableWriter(self._ledger, spec, owner_module=module_name).write(df, meta)
-        if meta.scan_id is not None:
-            self._collection.catalog.link_scan_product(
-                meta.run_id, meta.scan_id, spec.table, table_name=spec.table
-            )
-
-    def _write_tracking(
-        self, module_name: str, spec: TrackTablesWrite, result: dict, meta: PersistenceMeta
-    ) -> None:
-        if spec.tracked_key not in result:
-            return
-        tracked = result[spec.tracked_key]
-        if tracked.empty:
-            return
-        scan_time = _require_scan_time(module_name, spec, meta)
-        scan_id = _require_scan_id(module_name, spec, meta)
-        missing = [
-            k for k in (spec.events_key, spec.stats_key, spec.adjacency_key) if k not in result
-        ]
-        if missing:
-            raise KeyError(
-                f"{module_name}: TrackTablesWrite requires context keys {missing} "
-                f"alongside '{spec.tracked_key}'"
-            )
-        # Context-managed: one write per scan; a store left open would leak a
-        # products.db connection (plus WAL/SHM sidecars) every scan.
-        with TrackStore(self._collection.products_path, ledger=self._ledger) as store:
-            store.write_scan(
-                run_id=meta.run_id,
-                scan_time=scan_time,
-                cell_stats_df=result[spec.stats_key],
-                tracked_cells_df=tracked,
-                cell_events_df=result[spec.events_key],
-                cell_adjacency_df=result[spec.adjacency_key],
-                scan_id=scan_id,
-            )
         self._collection.catalog.link_scan_product(
-            meta.run_id, scan_id, "tracking", table_name="cells_by_scan"
+            meta.run_id, meta.scan_id, spec.table, table_name=spec.table
+        )
+
+    def _link_view(self, spec: ProductView, meta: PersistenceMeta) -> None:
+        """Link the scan to the view when the table its rows come from was written for it."""
+        if spec.rows_from not in self._collection.catalog.scan_products(meta.run_id, meta.scan_id):
+            return
+        missing = [t for t in (spec.rows_from, *spec.reads) if self._ledger.frozen(t) is None]
+        if missing:
+            raise StoreError(
+                f"View '{spec.name}' reads table(s) {', '.join(missing)}, never written in "
+                f"this collection, yet scan '{meta.scan_id}' has '{spec.rows_from}' rows"
+            )
+        self._ledger.ensure_view(spec.name, spec.select)
+        self._collection.catalog.link_scan_product(
+            meta.run_id, meta.scan_id, spec.name, table_name=spec.name
         )

@@ -7,27 +7,30 @@ The executor runs a simple topological loop: a node is settled once all its
 dependencies are settled. This single-threaded executor is the reference
 implementation.
 
-Skipping
---------
+Skipping and failing
+--------------------
 A node is skipped, not run, when it needs more prior scans than are usable
 (``required_history - 1 > history``) or when any of its dependencies was
-skipped. A dependency that ran without returning a key the node consumes is a
-bug and raises: it never looks like a skip.
+skipped or failed. A node that raises has failed: the pass goes on with the
+nodes that do not depend on it, and the caller is told which failed and why.
+A dependency that ran without returning a key the node consumes is a bug and
+raises: it never looks like a skip.
 
 Contract enforcement
 --------------------
 If a module declares ``input_contracts`` or ``output_contracts``, the
 executor calls each validator automatically before and after ``run()``.
-Validators raise ``ContractViolation`` on failure; the exception propagates
-up to the caller (e.g. ``RadarProcessor``) which handles it.
+Validators raise ``ContractViolation`` on failure; it is never a node failure
+and always propagates to the caller (e.g. ``RadarProcessor``), ending the pass.
 """
 
 import logging
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 
 from adapt.contracts.observability import Observability
-from adapt.contracts.pipeline import require
+from adapt.contracts.pipeline import ContractViolation, require
 from adapt.execution.graph.node import Node
 
 logger = logging.getLogger(__name__)
@@ -35,10 +38,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class GraphRun:
-    """One pass over a graph: the final context and the nodes that did not run."""
+    """One pass over a graph: the final context and what became of each node
+    that did not run to the end (name -> why it was skipped / what it raised)."""
 
     context: dict
-    skipped: frozenset[str]
+    skipped: dict[str, str]
+    failed: dict[str, Exception]
 
 
 class GraphExecutor:
@@ -47,9 +52,7 @@ class GraphExecutor:
     Parameters
     ----------
     nodes : list[Node]
-        Connected nodes returned by ``GraphBuilder.build()``, or a subset of
-        them: a dependency outside ``nodes`` counts as done unless the caller
-        names it in ``run(skipped=...)``.
+        Connected nodes returned by ``GraphBuilder.build()``.
 
     Example::
 
@@ -65,7 +68,12 @@ class GraphExecutor:
         self._obs = observability
 
     def run(
-        self, context: dict, *, history: int, skipped: frozenset[str] = frozenset()
+        self,
+        context: dict,
+        *,
+        history: int,
+        before_node: Callable[[Node, dict], str | None] | None = None,
+        after_node: Callable[[Node, dict], None] | None = None,
     ) -> GraphRun:
         """Execute the nodes in dependency order, skipping those that cannot run.
 
@@ -77,14 +85,20 @@ class GraphExecutor:
             after the node runs, making them available to downstream nodes.
         history : int
             Number of usable prior scans.
-        skipped : frozenset[str]
-            Nodes of an earlier pass over the same graph that did not run.
+        before_node : callable, optional
+            Called with ``(node, context)`` when a node is about to run; it may
+            add inputs to the context (the processor reads them from the store
+            here), or return why the node cannot run, which skips it.
+        after_node : callable, optional
+            Called with ``(node, context)`` once a node has run and its outputs
+            are in the context (the processor stores them here). If it raises,
+            the node has failed.
 
         Returns
         -------
         GraphRun
-            The final context with all module outputs, and every skipped node
-            (those passed in and this pass's own).
+            The final context with all module outputs, the skipped nodes and
+            the failed ones.
 
         Raises
         ------
@@ -95,29 +109,42 @@ class GraphExecutor:
             later node consumes.
         """
         context = dict(context)  # shallow copy — don't mutate caller's dict
-        own = {node.name for node in self.nodes}
         ran: set[str] = set()
-        not_run: set[str] = set(skipped)
+        skipped: dict[str, str] = {}
+        failed: dict[str, Exception] = {}
         pending = list(self.nodes)
 
         while pending:
             progress_made = False
             for node in list(pending):
-                # A node is ready once every dependency is settled (ran or skipped).
+                # A node is ready once every dependency is settled.
                 if any(
-                    dep.name in own and dep.name not in ran and dep.name not in not_run
+                    dep.name not in ran and dep.name not in skipped and dep.name not in failed
                     for dep in node.dependencies
                 ):
                     continue
                 pending.remove(node)
                 progress_made = True
-                if node.module.required_history - 1 > history or any(
-                    dep.name in not_run for dep in node.dependencies
-                ):
-                    not_run.add(node.name)
-                    logger.debug("Skipped node: %s", node.name)
+                reason = self._skip_reason(node, history, skipped, failed)
+                if reason is not None:
+                    skipped[node.name] = reason
+                    logger.debug("Skipped node %s: %s", node.name, reason)
                     continue
-                self._run_node(node, context)
+                try:
+                    if before_node is not None:
+                        reason = before_node(node, context)
+                    if reason is not None:
+                        skipped[node.name] = reason
+                        logger.debug("Skipped node %s: %s", node.name, reason)
+                        continue
+                    self._run_node(node, context)
+                    if after_node is not None:
+                        after_node(node, context)
+                except ContractViolation:
+                    raise
+                except Exception as exc:
+                    failed[node.name] = exc
+                    continue
                 ran.add(node.name)
                 logger.debug("Completed node: %s", node.name)
 
@@ -127,7 +154,22 @@ class GraphExecutor:
                     f"Pending: {[node.name for node in pending]}"
                 )
 
-        return GraphRun(context=context, skipped=frozenset(not_run))
+        return GraphRun(context=context, skipped=skipped, failed=failed)
+
+    @staticmethod
+    def _skip_reason(
+        node: Node, history: int, skipped: dict[str, str], failed: dict[str, Exception]
+    ) -> str | None:
+        """Why ``node`` cannot run in this pass; None when it can."""
+        needed = node.module.required_history - 1
+        if needed > history:
+            return f"needs {needed} prior scan(s), {history} usable"
+        for dep in node.dependencies:
+            if dep.name in failed:
+                return f"needs '{dep.name}', which failed"
+            if dep.name in skipped:
+                return f"needs '{dep.name}', which was skipped"
+        return None
 
     def _run_node(self, node: Node, context: dict) -> None:
         """Validate, run and merge one node; its dependencies all ran."""
@@ -149,17 +191,10 @@ class GraphExecutor:
             validator(context[key])
 
         # One span per node — the single auto-instrumentation seam. The span's
-        # exit captures any propagating exception and records errors_total.
+        # exit captures any exception the module raises and records errors_total.
         span_cm = self._obs.span(node.name) if self._obs is not None else nullcontext()
         with span_cm:
-            try:
-                outputs = node.module.run(context)
-            except Exception as exc:
-                # Name the failing stage on the exception so the scan-level
-                # handler reports *which* stage broke. The span still records
-                # the error; we re-raise unchanged (no swallowing, no wrapping).
-                exc.add_note(f"adapt: failing stage = {node.name}")
-                raise
+            outputs = node.module.run(context)
 
         # Validate outputs declared by the module
         if outputs:

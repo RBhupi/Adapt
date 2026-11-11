@@ -4,7 +4,7 @@
 """Node-level tests for CellVolumeStatsModule — covers the three review fixes:
 
 A) build_config does not read non-existent global var_names (no AttributeError).
-B) run() with no tracked cells returns an empty frame that PASSES the output contract.
+B) run() on a scan without cells returns an empty frame that PASSES the output contract.
 C) a datetime scan_time round-trips through the writer to the canonical join key.
 """
 
@@ -12,7 +12,6 @@ import sqlite3
 from datetime import UTC, datetime
 
 import numpy as np
-import pandas as pd
 import pytest
 import xarray as xr
 from pydantic import ValidationError
@@ -76,13 +75,12 @@ class TestBuildConfigFixA:
 
 
 class TestEmptyPathFixB:
-    def test_no_tracked_cells_returns_contract_safe_empty(self, internal_config):
+    def test_a_scan_without_cells_returns_contract_safe_empty(self, internal_config):
         mod = CellVolumeStatsModule()
         ctx = {
             "cell_volume_stats_config": CellVolumeStatsModule.build_config(internal_config),
             "grid_ds": _grid_3d(),
-            "segmented_ds": _segmented(),
-            "tracked_cells": pd.DataFrame(),
+            "segmented_ds": _segmented() * 0,
             "run_id": "R1",
             "scan_time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         }
@@ -100,7 +98,6 @@ class TestRunAndWriteFixC:
             "cell_volume_stats_config": CellVolumeStatsModule.build_config(internal_config),
             "grid_ds": _grid_3d(),
             "segmented_ds": _segmented(),
-            "tracked_cells": pd.DataFrame([{"cell_label": 1, "cell_uid": "a"}]),
             "run_id": "R1",
             "scan_time": scan_time,
         }
@@ -145,14 +142,14 @@ class TestRunAndWriteFixC:
 
 
 class TestNodeDeclarations:
-    def test_enrich_declarations(self):
-        assert CellVolumeStatsModule.pipeline_phase == 3
-        assert "grid_ds" in CellVolumeStatsModule.inputs
+    def test_it_reads_the_grid_and_the_cells_but_not_their_tracks(self):
+        assert {"grid_ds", "segmented_ds"} <= set(CellVolumeStatsModule.inputs)
+        assert "tracked_cells" not in CellVolumeStatsModule.inputs
         assert CellVolumeStatsModule.persistence[0].table == "cell_volume_stats"
         assert CellVolumeStatsModule.persistence[0].primary_key == (
             "run_id",
             "scan_id",
-            "cell_uid",
+            "cell_label",
         )
 
     def test_registered(self):

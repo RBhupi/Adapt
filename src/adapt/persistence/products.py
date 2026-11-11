@@ -6,9 +6,10 @@
 ``SchemaLedger`` freezes a table's schema on its first non-empty frame —
 declared primary key + payload columns — and writes identical snapshots to
 products.db and catalog.db. Frozen types are deterministic: core identity
-columns are contracted by name (``_CORE_COLUMN_TYPES``), every other numeric
-column freezes as REAL, so the schema depends on the column set — never on
-the values in whichever scan arrived first. ``TableWriter`` stamps scan identity from
+columns are contracted by name (``_CORE_COLUMN_TYPES``), the columns a spec
+declares as ``integer_columns`` freeze as INTEGER, every other numeric column
+freezes as REAL, so the schema depends on the column set — never on the values
+in whichever scan arrived first. ``TableWriter`` stamps scan identity from
 ``PersistenceMeta``, enforces the frozen schema (no new columns, no
 incompatible dtypes, no duplicate keys, no cross-module writes), and upserts
 on the declared key. There is no ALTER TABLE on the new path — ever.
@@ -39,9 +40,6 @@ from adapt.utils.time import to_scan_iso, to_scan_unix
 __all__ = ["SchemaLedger", "TableDeclaration", "TableWriter", "table_granularity"]
 
 _RESERVED_TABLES = frozenset({"table_schemas", "annotations"})
-# TrackStore owns these via bespoke DDL; no module may claim them through the
-# generic writer even before the first tracking write freezes them.
-_TRACKSTORE_TABLES = frozenset({"cells_by_scan", "cell_events", "cell_tracks"})
 
 # Core identity columns carry contracted types, fixed by NAME — never inferred
 # from a frame's dtype. Everything else is a source-dependent extra whose type
@@ -133,37 +131,21 @@ class SchemaLedger:
             conn.close()
         self._catalog.register_table_schema(snapshot)
 
-    def register_external(self, decl: TableDeclaration) -> None:
-        """Snapshot a table created by a bespoke writer (e.g. TrackStore DDL).
-
-        The table must already exist in products.db; only the dual snapshots
-        are written here.
-        """
-        if decl.table in _RESERVED_TABLES:
-            raise StoreError(f"'{decl.table}' is a reserved table name; modules cannot own it")
-        snapshot = _snapshot_row(decl)
+    def ensure_view(self, name: str, select: str) -> None:
+        """Create view ``name`` as ``select`` unless it exists already."""
+        if name in _RESERVED_TABLES:
+            raise StoreError(f"'{name}' is a reserved table name; modules cannot own it")
         conn = self._connect()
         try:
-            exists = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (decl.table,)
+            taken = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
             ).fetchone()
-            if exists is None:
-                raise StoreError(
-                    f"Cannot register '{decl.table}': the table does not exist in products.db"
-                )
-            try:
-                conn.execute(
-                    "INSERT INTO table_schemas (table_name, owner_module, granularity, "
-                    " primary_key, index_columns, columns_json, frozen_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    tuple(snapshot.values()),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise StoreError(f"Table '{decl.table}' is already frozen") from exc
+            if taken is not None:
+                raise StoreError(f"Cannot create view '{name}': a table of that name exists")
+            conn.execute(f"CREATE VIEW IF NOT EXISTS {name} AS {select}")
             conn.commit()
         finally:
             conn.close()
-        self._catalog.register_table_schema(snapshot)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.products_path), isolation_level="DEFERRED")
@@ -178,11 +160,6 @@ class TableWriter:
     def __init__(self, ledger: SchemaLedger, spec: ProductTableWrite, owner_module: str) -> None:
         if spec.table in _RESERVED_TABLES:
             raise StoreError(f"'{spec.table}' is a reserved table name; modules cannot own it")
-        if spec.table in _TRACKSTORE_TABLES and owner_module != "tracking":
-            raise StoreError(
-                f"'{spec.table}' is a tracking core table; module '{owner_module}' "
-                "may not write to it"
-            )
         self._ledger = ledger
         self._spec = spec
         self._owner = owner_module
@@ -214,7 +191,7 @@ class TableWriter:
                 granularity=self._granularity,
                 primary_key=tuple(self._spec.primary_key),
                 index_columns=tuple(self._spec.index_columns),
-                columns=tuple((c, _canonical_sqlite_type(c, df[c])) for c in df.columns),
+                columns=tuple((c, self._frozen_type(c, df[c])) for c in df.columns),
             )
             self._ledger.freeze(frozen)
         else:
@@ -225,6 +202,11 @@ class TableWriter:
                 )
             self._validate_frame(df, frozen)
         self._upsert(df)
+
+    def _frozen_type(self, name: str, series: pd.Series) -> str:
+        if name in self._spec.integer_columns:
+            return "INTEGER"
+        return _canonical_sqlite_type(name, series)
 
     # -- identity stamping -------------------------------------------------------
 
@@ -255,26 +237,11 @@ class TableWriter:
         return df
 
     def _stamp_scan_granular(self, df: pd.DataFrame, meta: PersistenceMeta) -> pd.DataFrame:
-        if meta.scan_id is None:
-            # Run-level persist over a scan-keyed table: every row carries its
-            # own scan identity (e.g. postprocess re-keying of many scans).
-            if "scan_id" not in df.columns:
-                raise StoreError(
-                    f"{self._spec.table}: primary key includes scan_id but this is a "
-                    "run-level persist and the frame carries no scan_id column"
-                )
-            return _with_scan_time_unix(df)
-
         carried = [c for c in ("scan_id", "scan_time", "scan_time_unix") if c in df.columns]
         if carried:
             raise StoreError(
                 f"{self._spec.table}: frame carries source-owned identity column(s) "
                 f"{', '.join(carried)} — the writer stamps them from PersistenceMeta"
-            )
-        if meta.scan_time is None:
-            raise StoreError(
-                f"{self._spec.table}: per-scan write is missing scan_time — "
-                "wall-clock substitution is forbidden"
             )
         df = df.copy()
         df["scan_id"] = meta.scan_id

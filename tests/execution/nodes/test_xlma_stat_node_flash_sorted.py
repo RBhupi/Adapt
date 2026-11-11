@@ -1,18 +1,20 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""XlmaStatModule.run() on flash-sorted NetCDF input + injected minute masks.
+"""XlmaStatModule.run() on flash-sorted NetCDF input and one scan's analysis dataset.
 
-End-to-end through the node: synthetic flash-sorted file + minute masks ->
-both extension-table frames, attributed to the cell at the radar origin.
+End-to-end through the node: synthetic flash-sorted file + the scan's minute
+masks -> both table frames, attributed to the cell at the radar origin.
 """
 
-import numpy as np
+from datetime import UTC, datetime
+
 import pandas as pd
 import pytest
 
 from adapt.execution.nodes.xlma_stat import XlmaStatModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
+from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc
 
 pytestmark = pytest.mark.unit
@@ -20,29 +22,28 @@ pytestmark = pytest.mark.unit
 pytest.importorskip("pyproj")  # geo projection of flash lon/lat onto the grid
 
 
-def _minute_mask(minute: str) -> dict:
-    """21x21 km grid centred on the radar; one cell covering the centre block."""
-    coords = np.linspace(-10_000.0, 10_000.0, 21)
-    labels = np.zeros((21, 21), dtype=int)
-    labels[8:13, 8:13] = 1
-    return {
-        "minute_time": pd.Timestamp(minute),
-        "cell_labels": labels,
-        "x": coords,
-        "y": coords,
-        "cell_uid_lut": np.array(["NONE", "CELL_A"]),
-        "source_scan_time": pd.Timestamp("2024-05-18T11:58:00"),
-        "target_scan_time": pd.Timestamp("2024-05-18T12:01:00"),
-        "interpolation_fraction": 0.5,
-    }
+def _analysis_ds(tracked_before: bool = True):
+    """Scan 12:01:30 after 11:58:30; the cell sits on the radar through minute 12:00."""
+    return make_analysis_ds(
+        "2024-05-18T12:01:30",
+        "2024-05-18T11:58:30",
+        cell_labels=cell_block(col=9),
+        cell_uids=["CELL_A"],
+        minute_labels={
+            "2024-05-18T11:59:00": cell_block(col=9),
+            "2024-05-18T12:00:00": cell_block(col=9),
+            "2024-05-18T12:01:00": cell_block(col=9),
+        },
+        registration_uids=["CELL_A"] if tracked_before else None,
+    ).assign_attrs(radar_latitude=40.0, radar_longitude=-88.0)
 
 
-def _run_context(input_dir) -> dict:
+def _run_context(input_dir, **overrides) -> dict:
     return {
         "xlma_stat_config": XlmaStatConfig(input_dir=str(input_dir)),
-        "minute_masks": [_minute_mask("2024-05-18T12:00:00")],
-        "radar_origin": (40.0, -88.0),
-        "run_id": "testrun1",
+        "analysis_ds": _analysis_ds(),
+        "scan_time": datetime(2024, 5, 18, 12, 1, 30, tzinfo=UTC),
+        **overrides,
     }
 
 
@@ -57,10 +58,8 @@ def test_run_on_flash_sorted_netcdf_produces_both_tables(tmp_path):
     assert (minutes["cell_uid"] == "CELL_A").all()
     assert int(minutes["flash_count"].sum()) == 3
     assert (scan["cell_uid"] == "CELL_A").all()
-    assert pd.Timestamp(scan.iloc[0]["scan_time"]) == pd.Timestamp("2024-05-18T12:01:00")
-    # run_id is stamped on every row of both extension tables
-    assert (minutes["run_id"] == "testrun1").all()
-    assert (scan["run_id"] == "testrun1").all()
+    assert pd.Timestamp(scan.iloc[0]["scan_time"]) == pd.Timestamp("2024-05-18T12:01:30")
+    assert scan.iloc[0]["n_minutes"] == 3
 
 
 def test_non_netcdf_files_are_ignored(tmp_path):
@@ -72,10 +71,26 @@ def test_non_netcdf_files_are_ignored(tmp_path):
     assert int(result["xlma_stat_minutes_rows"]["flash_count"].sum()) == 2
 
 
-def test_missing_minute_masks_fails_loudly(tmp_path):
+def test_a_scan_that_owns_no_minute_masks_has_no_rows(tmp_path):
+    """The previous scan was never tracked: nothing to attribute lightning to yet."""
     write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:00:00", 1)
-    context = _run_context(tmp_path)
-    context["minute_masks"] = []
 
-    with pytest.raises(ValueError, match="reprocess"):
-        XlmaStatModule().run(context)
+    result = XlmaStatModule().run(
+        _run_context(tmp_path, analysis_ds=_analysis_ds(tracked_before=False))
+    )
+
+    assert result["xlma_stat_minutes_rows"].empty
+    assert result["xlma_stat_scan_rows"].empty
+
+
+def test_files_arriving_between_scans_are_read(tmp_path):
+    """A live run sees the flash files that land while it runs."""
+    module = XlmaStatModule()
+    write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:00:00", 1)
+    first = module.run(_run_context(tmp_path))
+    write_flash_sorted_nc(tmp_path / "b.nc", "2024-05-18T12:00:30", 2)
+
+    second = module.run(_run_context(tmp_path))
+
+    assert int(first["xlma_stat_minutes_rows"]["flash_count"].sum()) == 1
+    assert int(second["xlma_stat_minutes_rows"]["flash_count"].sum()) == 3

@@ -173,7 +173,8 @@ def resolve_config(
     internal = validated(InternalConfig, merged, source="merged runtime configuration")
 
     # Conditional validation: Historical mode requires start_time and end_time
-    if internal.downloader.mode == "historical":
+    # (a pass over a stored run takes its scans from that run, not from a window).
+    if internal.downloader.mode == "historical" and internal.source != "stored_run":
         if not internal.downloader.start_time:
             raise ConfigError(
                 "start_time is required when mode='historical'. "

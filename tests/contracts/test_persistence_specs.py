@@ -28,7 +28,7 @@ def test_all_spec_types_exported():
     for name in (
         "ProductTableWrite",
         "NetcdfArtifact",
-        "TrackTablesWrite",
+        "ProductView",
         "DecisionTableWrite",
         "PersistenceSpec",
         "PersistenceMeta",

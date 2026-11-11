@@ -269,6 +269,16 @@ class StoreRegistry(SqliteStore):
                 ).fetchone()
         return dict(row) if row else None
 
+    def list_runs(self, collection_id: str) -> list[dict]:
+        """Every run of one collection, oldest first."""
+        conn = self._get_connection()
+        with self._lock:
+            rows = conn.execute(
+                "SELECT * FROM runs WHERE collection_id = ? ORDER BY started_at, run_id",
+                (collection_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_run(self, run_id: str) -> dict:
         conn = self._get_connection()
         with self._lock:

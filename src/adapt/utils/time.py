@@ -67,7 +67,7 @@ def to_scan_iso(dt) -> str:
     """Canonical scan-time string — ordering/display metadata, one format everywhere.
 
     Rows join on ``scan_id``; scan_time orders and labels them. Matches
-    ``cells_by_scan`` (track_store ``_to_iso``) so every table's time strings
+    ``cells_by_scan`` so every table's time strings
     compare consistently. Whole-second resolution.
     """
     return _to_utc_datetime(dt).strftime(_SCAN_ISO_FORMAT)

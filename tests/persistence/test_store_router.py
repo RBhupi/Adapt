@@ -16,11 +16,12 @@ from adapt.contracts.persistence import (
     PersistenceMeta,
     ProductTableWrite,
     ScanRecord,
-    TrackTablesWrite,
 )
+from adapt.modules.tracking.tables import Lifecycle
 from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store
+from tests.helpers.tracking_store import TRACKING_TABLES, going_on, no_adjacency, tracking_outputs
 
 pytestmark = pytest.mark.unit
 
@@ -32,12 +33,6 @@ NC_SPEC = NetcdfArtifact(key="analysis_ds", product_type="segmentation2d", descr
 NC_NAME = "run-1/tracking/KILX20260813_173158_V06.segmentation2d.nc"
 TABLE_SPEC = ProductTableWrite(
     key="cell_stats", table="cell_stats", primary_key=("run_id", "scan_id", "cell_label")
-)
-TRACK_SPEC = TrackTablesWrite(
-    tracked_key="tracked_cells",
-    events_key="cell_events",
-    stats_key="cell_stats",
-    adjacency_key="cell_adjacency",
 )
 
 
@@ -62,16 +57,18 @@ def _dataset() -> xr.Dataset:
 
 
 def _tracking_result() -> dict:
-    return {
-        "tracked_cells": pd.DataFrame(
-            {"cell_label": [1], "cell_uid": ["u1"], "area": [10.0], "max_reflectivity": [45.0]}
-        ),
-        "cell_events": pd.DataFrame(),
-        "cell_stats": pd.DataFrame({"cell_label": [1], "cell_area_sqkm": [10.0]}),
-        "cell_adjacency": pd.DataFrame(
-            columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"]
-        ),
-    }
+    tracked = pd.DataFrame(
+        {"cell_label": [1], "cell_uid": ["u1"], "area": [10.0], "max_reflectivity": [45.0]}
+    )
+    tables, _ = tracking_outputs(
+        tracked,
+        going_on(tracked),
+        no_adjacency(),
+        scan_id=SID,
+        scan_time=SCAN_TIME,
+        lifecycle=Lifecycle(),
+    )
+    return {"cell_stats": pd.DataFrame({"cell_label": [1], "cell_area_sqkm": [10.0]}), **tables}
 
 
 @pytest.fixture
@@ -269,12 +266,6 @@ class TestNetcdfArtifact:
     def test_absent_key_skips(self, router, raw_artifact_id):
         router.persist([_module("tracking", NC_SPEC)], {}, _meta())
 
-    def test_missing_scan_id_raises(self, router):
-        with pytest.raises(ValueError, match="scan_id"):
-            router.persist(
-                [_module("tracking", NC_SPEC)], {"analysis_ds": _dataset()}, _meta(scan_id=None)
-            )
-
 
 class TestProductTableWrite:
     def test_rows_written_and_table_linked(self, router, collection, raw_artifact_id):
@@ -289,62 +280,61 @@ class TestProductTableWrite:
         assert link["kind"] == "table"
         assert link["table_name"] == "cell_stats"
 
-    def test_run_level_write_makes_no_scan_link(self, router, collection):
-        spec = ProductTableWrite(
-            key="xs", table="xlma_stat_scan", primary_key=("run_id", "scan_id", "cell_uid")
-        )
-        df = pd.DataFrame({"run_id": [RUN], "scan_id": [SID], "cell_uid": ["u1"], "n": [3]})
-
-        router.persist(
-            [_module("xlma_stat", spec)], {"xs": df}, _meta(scan_id=None, scan_time=None)
-        )
-
-        rows = _products_rows(collection, "SELECT * FROM xlma_stat_scan")
-        assert len(rows) == 1
-        assert collection.catalog.scan_products(RUN, SID) == {}
-
     def test_empty_frame_skips(self, router, collection, raw_artifact_id):
         router.persist([_module("analysis", TABLE_SPEC)], {"cell_stats": pd.DataFrame()}, _meta())
 
         assert "cell_stats" not in collection.catalog.scan_products(RUN, SID)
 
 
-class TestTrackTablesWrite:
-    def test_cells_written_to_products_with_aux_link(self, router, collection, raw_artifact_id):
-        router.persist([_module("tracking", TRACK_SPEC)], _tracking_result(), _meta())
+class TestProductView:
+    """The tracking module's ``cells_by_scan`` view over its tables and cell_stats."""
+
+    def test_a_scan_with_cells_is_linked_to_the_view(self, router, collection, raw_artifact_id):
+        modules = [_module("analysis", TABLE_SPEC), _module("tracking", *TRACKING_TABLES)]
+        router.persist(modules, _tracking_result(), _meta())
 
         rows = _products_rows(collection, "SELECT * FROM cells_by_scan")
         assert len(rows) == 1
         assert rows[0]["scan_id"] == SID
         assert rows[0]["cell_uid"] == "u1"
-        link = collection.catalog.scan_products(RUN, SID)["tracking"]
-        assert link["kind"] == "table"
-        assert not collection.catalog.scan_is_complete(RUN, SID)
+        assert rows[0]["cell_area_sqkm"] == 10.0
+        assert collection.catalog.scan_products(RUN, SID)["cells_by_scan"]["kind"] == "table"
 
-    def test_missing_scan_id_raises(self, router):
-        with pytest.raises(ValueError, match="scan_id"):
-            router.persist(
-                [_module("tracking", TRACK_SPEC)], _tracking_result(), _meta(scan_id=None)
-            )
+    def test_a_scan_without_cells_is_not_linked(self, router, collection, raw_artifact_id):
+        empty = {key: frame.iloc[0:0] for key, frame in _tracking_result().items()}
+        modules = [_module("analysis", TABLE_SPEC), _module("tracking", *TRACKING_TABLES)]
+        router.persist(modules, empty, _meta())
+
+        assert "cells_by_scan" not in collection.catalog.scan_products(RUN, SID)
+
+    def test_cells_without_a_table_the_view_reads_are_refused(
+        self, router, collection, raw_artifact_id
+    ):
+        # cell_stats was never written: the view could not be read.
+        with pytest.raises(StoreError, match="cell_stats"):
+            router.persist([_module("tracking", *TRACKING_TABLES)], _tracking_result(), _meta())
 
 
-class TestCompletenessThroughRouter:
-    def test_required_products_complete_the_scan(self, router, collection, raw_artifact_id):
-        grid_spec = NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid")
-        result = {
-            "grid_ds": _dataset(),
-            "analysis_ds": _dataset(),
-            "cell_stats": pd.DataFrame({"run_id": [RUN], "cell_label": [1], "area": [1.0]}),
-        }
-
-        router.persist(
-            [
-                _module("ingest", grid_spec),
-                _module("tracking", NC_SPEC),
-                _module("analysis", TABLE_SPEC),
-            ],
-            result,
-            _meta(),
+class TestScanPass:
+    def test_a_pass_with_no_failure_completes_the_scan(self, collection, raw_artifact_id):
+        collection.catalog.record_scan_pass(
+            RUN, SID, {"ingest": ("done", None), "tracking": ("skipped", "needs 1 prior scan(s)")}
         )
 
         assert collection.catalog.scan_is_complete(RUN, SID)
+        modules = collection.catalog.scan_modules(RUN, SID)
+        assert modules["ingest"]["status"] == "done"
+        assert modules["tracking"]["reason"] == "needs 1 prior scan(s)"
+
+    def test_a_failed_module_fails_the_scan_until_a_later_pass(self, collection, raw_artifact_id):
+        collection.catalog.record_scan_pass(RUN, SID, {"ingest": ("failed", "OSError: bad file")})
+        assert not collection.catalog.scan_is_complete(RUN, SID)
+        assert collection.catalog.get_scan(RUN, SID)["status"] == "failed"
+
+        collection.catalog.record_scan_pass(RUN, SID, {"ingest": ("done", None)})
+        assert collection.catalog.scan_is_complete(RUN, SID)
+        assert collection.catalog.scan_modules(RUN, SID)["ingest"]["reason"] is None
+
+    def test_a_pass_over_an_unregistered_scan_is_refused(self, collection):
+        with pytest.raises(StoreError, match="ghost"):
+            collection.catalog.record_scan_pass(RUN, "ghost", {"ingest": ("done", None)})

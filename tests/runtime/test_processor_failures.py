@@ -15,7 +15,7 @@ import xarray as xr
 
 from adapt.contracts import ContractViolation
 from adapt.runtime.processor import RadarProcessor
-from tests.helpers.fake_graph import fake_core
+from tests.helpers.fake_graph import fake_graph
 from tests.helpers.queue_msg import msg as _msg
 
 # Distinct per-file times: two different scans sharing one nominal second
@@ -75,7 +75,7 @@ def test_process_file_pipeline_exception_returns_false(
     def _boom(context):
         raise OSError("disk failure")
 
-    fake_core(proc, monkeypatch, _boom)
+    fake_graph(proc, monkeypatch, _boom)
 
     ok = proc.process_file(_msg(store_env, tmp_path, "file"))
     assert ok is False
@@ -97,7 +97,7 @@ def test_process_file_contract_violation_stops_processor(
     def _boom_multi(context):
         raise ContractViolation("bad grid")
 
-    fake_core(proc, monkeypatch, _fake_single, _boom_multi)
+    fake_graph(proc, monkeypatch, _fake_single, _boom_multi)
 
     ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=t1))
     ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=t2))
@@ -130,35 +130,30 @@ def test_process_file_success_saves_netcdf_and_returns_true(
         "cell_adjacency": pd.DataFrame(),
     }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_result)
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: fake_result)
 
     persisted = []
     monkeypatch.setattr(
-        proc._router, "persist", lambda modules, result, meta: persisted.append(meta)
+        proc._router, "persist", lambda modules, result, meta: persisted.append(meta.scan_id)
     )
 
     ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=_MT1))
     ok2 = proc.process_file(_msg(store_env, tmp_path, "file_2", scan_time=_MT2))
     assert ok1 is True
     assert ok2 is True
-    assert len(persisted) == 2  # router invoked once per processed file
+    assert len(set(persisted)) == 2  # the router was handed both scans' outputs
 
 
 def test_process_file_skips_completed_scan(monkeypatch, pipeline_config, store_env, tmp_path):
     """process_file skips a scan the catalog already marks complete."""
     proc = _make_proc(pipeline_config, store_env)
     message = _msg(store_env, tmp_path, "file")
-    catalog = store_env.collection.catalog
-    for product in ("gridded3d", "segmentation2d"):
-        catalog.link_scan_product(
-            store_env.run_id, message["scan_id"], product, artifact_id=message["artifact_id"]
-        )
-    catalog.link_scan_product(
-        store_env.run_id, message["scan_id"], "cell_stats", table_name="cell_stats"
+    store_env.collection.catalog.record_scan_pass(
+        store_env.run_id, message["scan_id"], {"ingest": ("done", None)}
     )
 
     called = []
-    fake_core(
+    fake_graph(
         proc,
         monkeypatch,
         lambda ctx: called.append(1) or _fake_single_result(datetime.now(UTC)),

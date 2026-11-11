@@ -39,8 +39,6 @@ class DecisionStore(SqliteStore):
         self, decisions: TrackingDecisions | SegmentationDecisions, meta: PersistenceMeta
     ) -> None:
         """Write one scan's bundle; every table of the bundle is written, even if empty."""
-        if meta.scan_id is None or meta.scan_time is None:
-            raise ValueError("DecisionStore.write needs scan_id and scan_time")
         stamp = {
             "run_id": meta.run_id,
             "scan_id": meta.scan_id,

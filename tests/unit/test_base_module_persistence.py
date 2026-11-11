@@ -43,7 +43,7 @@ class TestBaseModulePersistence:
             DecisionTableWrite,
             NetcdfArtifact,
             ProductTableWrite,
-            TrackTablesWrite,
+            ProductView,
         )
         from adapt.execution.nodes.analysis import AnalysisModule
         from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
@@ -59,7 +59,10 @@ class TestBaseModulePersistence:
         assert adjacency.primary_key == ("run_id", "scan_id", "cell_label_a", "cell_label_b")
         assert {type(s) for s in TrackingModule.persistence} == {
             NetcdfArtifact,
-            TrackTablesWrite,
+            ProductTableWrite,
+            ProductView,
             DecisionTableWrite,
         }
+        tables = [s.table for s in TrackingModule.persistence if isinstance(s, ProductTableWrite)]
+        assert tables == ["cell_identity", "cell_events", "cell_tracks"]
         assert {type(s) for s in CellVolumeStatsModule.persistence} == {ProductTableWrite}

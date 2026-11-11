@@ -12,5 +12,6 @@ Available consumers
 adapt.consumers.live
     Operational scan viewer (Tkinter dashboard).
 adapt.consumers.target_selection
-    Target selection engine for adaptive scanning.
+    Replaying target selection rules over a stored run (the rules themselves
+    run in the pipeline: adapt.modules.target_selection).
 """

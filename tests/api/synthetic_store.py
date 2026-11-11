@@ -22,16 +22,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.contracts.persistence import (
-    NetcdfArtifact,
-    PersistenceMeta,
-    ProductTableWrite,
-    TrackTablesWrite,
-)
+from adapt.contracts.persistence import NetcdfArtifact, PersistenceMeta
+from adapt.modules.tracking.tables import Lifecycle
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
+from tests.helpers.tracking_store import going_on, persist_tracking
 
 COLLECTION = "KTST"
 RUN_1 = "run-1"
@@ -43,33 +40,25 @@ class _Module(SimpleNamespace):
     """Minimal module stand-in: name + declared persistence specs."""
 
 
-_GRID_SPEC = NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid")
-_ANALYSIS_SPEC = NetcdfArtifact(
+GRID_SPEC = NetcdfArtifact(key="grid_ds", product_type="gridded3d", description="grid")
+ANALYSIS_SPEC = NetcdfArtifact(
     key="analysis_ds", product_type="segmentation2d", description="analysis"
 )
-_STATS_SPEC = ProductTableWrite(
-    key="cell_stats",
-    table="cell_stats",
-    primary_key=("run_id", "scan_id", "cell_label"),
-    index_columns=("cell_label",),
-)
-_ADJ_SPEC = ProductTableWrite(
-    key="cell_adjacency",
-    table="cell_adjacency",
-    primary_key=("run_id", "scan_id", "cell_label_a", "cell_label_b"),
-)
-_TRACK_SPEC = TrackTablesWrite(
-    tracked_key="tracked_cells",
-    events_key="cell_events",
-    stats_key="cell_stats",
-    adjacency_key="cell_adjacency",
-)
 
-_MODULES = [
-    _Module(name="ingest", persistence=(_GRID_SPEC,)),
-    _Module(name="analysis", persistence=(_STATS_SPEC, _ADJ_SPEC)),
-    _Module(name="tracking", persistence=(_ANALYSIS_SPEC, _TRACK_SPEC)),
+# The NetCDF products of a scan; its tables go through ``persist_tracking``.
+MODULES = [
+    _Module(name="ingest", persistence=(GRID_SPEC,)),
+    _Module(name="tracking", persistence=(ANALYSIS_SPEC,)),
 ]
+
+
+def _persist(collection, router, meta: PersistenceMeta, result: dict, lifecycle) -> Lifecycle:
+    """Store one processed scan as the pipeline does, and mark it complete."""
+    router.persist(MODULES, result, meta)
+    lifecycle = persist_tracking(router, meta, result, lifecycle)
+    done = dict.fromkeys(("ingest", "analysis", "tracking"), ("done", None))
+    collection.catalog.record_scan_pass(meta.run_id, meta.scan_id, done)
+    return lifecycle
 
 
 def _analysis_ds(cell_label: int) -> xr.Dataset:
@@ -84,7 +73,7 @@ def _analysis_ds(cell_label: int) -> xr.Dataset:
     )
 
 
-def _scan_result(index: int, uid: str, events: pd.DataFrame) -> dict:
+def scan_result(index: int, uid: str, events: pd.DataFrame) -> dict:
     return {
         "grid_ds": _analysis_ds(1),
         "analysis_ds": _analysis_ds(1),
@@ -93,6 +82,7 @@ def _scan_result(index: int, uid: str, events: pd.DataFrame) -> dict:
                 "cell_label": [1],
                 "cell_area_sqkm": [10.0 * (index + 1)],
                 "radar_reflectivity_max": [45.0 + index],
+                "area_40dbz_km2": [float("nan")],  # analysed, with no 40 dBZ echo
                 "cell_centroid_mass_lat": [40.0 + 0.01 * index],
                 "cell_centroid_mass_lon": [-88.0 + 0.01 * index],
             }
@@ -112,7 +102,7 @@ def _scan_result(index: int, uid: str, events: pd.DataFrame) -> dict:
     }
 
 
-def _initiation(uid: str) -> pd.DataFrame:
+def initiation(uid: str) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
@@ -170,6 +160,7 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
         )
 
     uid = "uid-1"
+    lifecycle = Lifecycle()
     for index in (0, 1):  # scan 3 stays pending: acquired, never processed
         message = messages[index]
         meta = PersistenceMeta(
@@ -179,8 +170,8 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
             source_file=f"KTST20260601_12{index * 5:02d}00_V06",
             collection_id=COLLECTION,
         )
-        events = _initiation(uid) if index == 0 else pd.DataFrame()
-        router.persist(_MODULES, _scan_result(index, uid, events), meta)
+        events = initiation(uid) if index == 0 else pd.DataFrame()
+        lifecycle = _persist(collection, router, meta, scan_result(index, uid, events), lifecycle)
     registry.finalize_run(RUN_1, "completed", scans_processed=2)
 
     # Second run: reuses the first raw volume, processes it, stays running.
@@ -194,7 +185,9 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
         source_file="KTST20260601_120000_V06",
         collection_id=COLLECTION,
     )
-    router.persist(_MODULES, _scan_result(0, "uid-r2", _initiation("uid-r2")), meta_2)
+    lifecycle_2 = _persist(
+        collection, router, meta_2, scan_result(0, "uid-r2", initiation("uid-r2")), Lifecycle()
+    )
 
     store.close()
     return SimpleNamespace(
@@ -206,4 +199,30 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
         scan_times=[m["scan_time"] for m in messages],
         raw_artifact_ids=[m["artifact_id"] for m in messages],
         uid=uid,
+        # Each run's track lifecycle after the scans processed here.
+        lifecycles={RUN_1: lifecycle, RUN_2: lifecycle_2},
     )
+
+
+def persist_scan(built: SimpleNamespace, index: int, run_id: str, uid: str) -> None:
+    """Process raw scan ``index`` for ``run_id`` (already acquired by it): one cell,
+    going on as ``uid``, stored as the pipeline stores a scan."""
+    store = Store.open(built.root)
+    collection = store.collection(COLLECTION)
+    meta = PersistenceMeta(
+        scan_time=built.scan_times[index],
+        scan_id=built.scan_ids[index],
+        run_id=run_id,
+        source_file=f"KTST20260601_12{index * 5:02d}00_V06",
+        collection_id=COLLECTION,
+    )
+    result = scan_result(index, uid, going_on_events(uid))
+    built.lifecycles[run_id] = _persist(
+        collection, StoreOutputRouter(collection), meta, result, built.lifecycles[run_id]
+    )
+    store.close()
+
+
+def going_on_events(uid: str) -> pd.DataFrame:
+    """The events of a scan whose one cell simply goes on as ``uid``."""
+    return going_on(pd.DataFrame({"cell_label": [1], "cell_uid": [uid]}))

@@ -87,15 +87,15 @@ class AppContext:
         return latest.run_id if latest else None
 
     def timeline(self) -> list[ScanRef]:
-        """The active run's ordered, complete-only scan timeline.
+        """The active run's ordered timeline of the scans that have tracked cells.
 
         Discovery goes through the catalog — never by walking directories or
-        parsing filenames. An empty list means no complete scans yet.
+        parsing filenames. An empty list means no scan has cells yet.
         """
         run_id = self.active_run_id()
         if run_id is None:
             return []
-        return self.client().scan_timeline(self.collection(), run_id)
+        return self.client().scan_timeline(self.collection(), run_id, "cells_by_scan")
 
     def open_raster(self, ref: ScanRef, product: str = "segmentation2d") -> ScanRaster:
         """One scan's raster, fully in memory — close it (or use ``with``) per frame."""

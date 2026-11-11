@@ -58,6 +58,8 @@ class TestCollectionProvisioning:
             "artifact_lineage",
             "scans",
             "scan_products",
+            "scan_modules",
+            "run_checkpoints",
             "table_schemas",
         }
 
@@ -119,7 +121,7 @@ def _freeze_one_table(store) -> None:
     )
     meta = PersistenceMeta(
         scan_time=datetime(2026, 8, 13, 17, 31, 58, tzinfo=UTC),
-        scan_id=None,
+        scan_id="abc123",
         run_id="run-1",
         source_file="",
         collection_id="KILX",

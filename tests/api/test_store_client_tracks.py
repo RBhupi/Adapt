@@ -8,19 +8,16 @@ import pytest
 
 from adapt.api.store_client import StoreClient
 from adapt.persistence.errors import StoreError
-from adapt.persistence.products import SchemaLedger
 from adapt.persistence.store import Store
-from adapt.persistence.track_store import TrackStore
 from tests.api.synthetic_store import COLLECTION, RUN_1, RUN_2, T0, build_synthetic_store
+from tests.helpers.tracking_store import TrackedScans
 
 pytestmark = pytest.mark.unit
 
 
 def _split_third_scan(built) -> None:
-    """Process the pending third scan directly through TrackStore: uid-1 splits into uid-2."""
+    """Process the pending third scan: uid-1 goes on and splits off uid-2."""
     store = Store.open(built.root)
-    collection = store.collection(COLLECTION)
-    ledger = SchemaLedger(collection.products_path, collection.catalog)
     events = pd.DataFrame(
         [
             {
@@ -35,25 +32,20 @@ def _split_third_scan(built) -> None:
             }
         ]
     )
-    with TrackStore(collection.products_path, ledger=ledger) as ts:
-        ts.write_scan(
-            run_id=RUN_1,
-            scan_time=T0.replace(minute=10),
-            cell_stats_df=pd.DataFrame({"cell_label": [1, 2], "cell_area_sqkm": [30.0, 5.0]}),
-            tracked_cells_df=pd.DataFrame(
-                {
-                    "cell_label": [1, 2],
-                    "cell_uid": ["uid-1", "uid-2"],
-                    "area": [30.0, 5.0],
-                    "max_reflectivity": [47.0, 41.0],
-                }
-            ),
-            cell_events_df=events,
-            cell_adjacency_df=pd.DataFrame(
-                columns=["cell_label_a", "cell_label_b", "touching_boundary_pixels"]
-            ),
-            scan_id=built.scan_ids[2],
-        )
+    TrackedScans(store.collection(COLLECTION), RUN_1, built.lifecycles[RUN_1]).write(
+        built.scan_ids[2],
+        T0.replace(minute=10),
+        stats=pd.DataFrame({"cell_label": [1, 2], "cell_area_sqkm": [30.0, 5.0]}),
+        tracked=pd.DataFrame(
+            {
+                "cell_label": [1, 2],
+                "cell_uid": ["uid-1", "uid-2"],
+                "area": [30.0, 5.0],
+                "max_reflectivity": [47.0, 41.0],
+            }
+        ),
+        events=events,
+    )
     store.close()
 
 

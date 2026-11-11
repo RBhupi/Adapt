@@ -17,7 +17,6 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import xarray as xr
-from pydantic import BaseModel, ConfigDict, Field
 
 from adapt.contracts import CELL_LABELS_VAR  # noqa: E402  (layer-legal: contracts is a leaf)
 from adapt.utils.basemap import (  # noqa: E402  (layer-legal: utils is a leaf)
@@ -41,7 +40,7 @@ except ImportError:
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
 
-__all__ = ["PlotConsumer", "PlotsConfig", "RadarPlotter"]
+__all__ = ["PlotConsumer", "RadarPlotter"]
 
 logger = logging.getLogger(__name__)
 
@@ -669,23 +668,6 @@ class RadarPlotter:
             seg_ds.close()
 
         return plot_file
-
-
-class PlotsConfig(BaseModel):
-    """The plots consumer's section of a pipeline file (``consumers: plots:``).
-
-    How plots are drawn (dpi, colour scales, basemap, ...) is the ``visualization``
-    params section; these say when and where they are shown.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-
-    interval_seconds: float = Field(
-        default=2.0, gt=0, description="How often (seconds) the store is checked for a new scan"
-    )
-    show_live: bool = Field(
-        default=False, description="Also show each plot in a live window, not only save it"
-    )
 
 
 class PlotConsumer(threading.Thread):

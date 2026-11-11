@@ -8,6 +8,8 @@ Grid 1 km; cells at 40 dBZ over a 30 dBZ cell threshold unless stated.
 (``cell_projections[0]``); the flow fields carry latent footprints.
 """
 
+import pickle
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -290,6 +292,28 @@ def test_identical_input_gives_identical_output(make_tracking_config):
         outs = _run(tracker, [(prev, None), (merged, prev), (prev, merged)])
         runs.append(outs)
     for (ta, ea), (tb, eb) in zip(*runs, strict=True):
+        pd.testing.assert_frame_equal(ta, tb)
+        pd.testing.assert_frame_equal(ea, eb)
+
+
+def test_a_tracker_per_scan_from_the_last_ones_state_tracks_as_one_tracker_would(
+    make_tracking_config,
+):
+    """Its state is all a tracker carries between scans — even through a
+    checkpoint — whether cells continue, merge, vanish or come back."""
+    two = _box(10, 16, 10, 15, 1, _box(10, 16, 17, 22, 2))
+    merged = _box(10, 16, 10, 22)
+    empty = np.zeros(SHAPE, dtype=np.int32)
+    scans = [(two, None), (merged, two), (two, merged), (empty, two), (two, empty)]
+    straight = _run(CellTracker(make_tracking_config()), scans)
+
+    state, resumed = None, []
+    for k, (labels, proj) in enumerate(scans):
+        tracker = CellTracker(make_tracking_config(), state)
+        resumed.append(tracker.track(*_scan(k, labels, proj), scan_id=f"scan{k:03d}"))
+        state = pickle.loads(pickle.dumps(tracker.state))  # as a checkpoint keeps it
+
+    for (ta, ea), (tb, eb) in zip(straight, resumed, strict=True):
         pd.testing.assert_frame_equal(ta, tb)
         pd.testing.assert_frame_equal(ea, eb)
 

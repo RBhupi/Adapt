@@ -3,7 +3,10 @@
 
 """Tracking stage contracts.
 
-Enforces structural requirements on tracked_cells and cell_events DataFrames.
+Enforces structural requirements on the tracking outputs: the scan-local
+``tracked_cells`` and the three stored tables (``cell_identity``,
+``cell_events``, ``cell_tracks``). Any tracker that meets them can replace the
+built-in one.
 """
 
 from __future__ import annotations
@@ -24,8 +27,21 @@ _REQUIRED_TRACKED_COLS = [
     "core_area",
 ]
 
+_REQUIRED_IDENTITY_COLS = ["cell_label", "cell_uid", "age_seconds"]
+
+_REQUIRED_TRACKS_COLS = [
+    "cell_uid",
+    "first_seen_time",
+    "last_seen_time",
+    "n_scans",
+    "origin_type",
+    "termination_type",
+]
+
 _REQUIRED_EVENTS_COLS = [
-    "time",
+    "event_seq",
+    "source_scan_id",
+    "target_scan_id",
     "event_type",
     "source_cell_uid",
     "target_cell_uid",
@@ -113,3 +129,45 @@ def check_cell_events(df: pd.DataFrame) -> None:
     """Bound contract for cell events DataFrame (skips validation on empty frame)."""
     if not df.empty:
         assert_cell_events(df)
+
+
+def check_cell_identity(df: pd.DataFrame) -> None:
+    """Bound contract for one scan's cell identity: label -> uid, each used once."""
+    require(
+        isinstance(df, pd.DataFrame),
+        f"Cell identity contract violated: output is {type(df)}, expected DataFrame",
+    )
+    for col in _REQUIRED_IDENTITY_COLS:
+        require(
+            col in df.columns, f"Cell identity contract violated: missing required column '{col}'"
+        )
+    if df.empty:
+        return
+    require(
+        (df["cell_label"] > 0).all(),
+        "Cell identity contract violated: cell_label must be > 0 for all rows",
+    )
+    require(
+        df["cell_uid"].notna().all(),
+        "Cell identity contract violated: cell_uid must be non-null for all rows",
+    )
+    require(
+        not df["cell_label"].duplicated().any() and not df["cell_uid"].duplicated().any(),
+        "Cell identity contract violated: a cell_label or cell_uid repeats within the scan",
+    )
+
+
+def check_cell_tracks(df: pd.DataFrame) -> None:
+    """Bound contract for the track lifecycle rows a scan touched."""
+    require(
+        isinstance(df, pd.DataFrame),
+        f"Cell tracks contract violated: output is {type(df)}, expected DataFrame",
+    )
+    for col in _REQUIRED_TRACKS_COLS:
+        require(
+            col in df.columns, f"Cell tracks contract violated: missing required column '{col}'"
+        )
+    require(
+        not df["cell_uid"].duplicated().any(),
+        "Cell tracks contract violated: a cell_uid repeats within the scan",
+    )

@@ -7,7 +7,7 @@ import pytest
 
 from adapt.configuration.pipeline_file import load_pipeline_file
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("isolated_catalog")]
+pytestmark = pytest.mark.unit
 
 
 def test_init_creates_the_store_and_a_pipeline_file_and_reports_the_root(tmp_path, adapt, capsys):
@@ -32,7 +32,7 @@ def test_the_written_pipeline_file_is_the_nexrad_template_and_loads(tmp_path, ad
     adapt("config", "nexrad")
 
     assert (root / "nexrad.yaml").read_text() == (tmp_path / "nexrad.yaml").read_text()
-    assert load_pipeline_file(root / "nexrad.yaml").core
+    assert load_pipeline_file(root / "nexrad.yaml").modules
 
 
 def test_init_defaults_to_the_current_directory(tmp_path, adapt, monkeypatch):

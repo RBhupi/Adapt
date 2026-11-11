@@ -47,7 +47,7 @@ class _FakeRun:
 
 
 def test_timeline_uses_selected_run():
-    """The timeline goes through the client's complete-only scan timeline —
+    """The timeline is the client's timeline of the scans that have cells —
     no directory walk, no filename parsing."""
     calls = []
     refs = [
@@ -56,8 +56,8 @@ def test_timeline_uses_selected_run():
     ]
 
     class FakeClient:
-        def scan_timeline(self, collection, run_id):
-            calls.append({"collection": collection, "run_id": run_id})
+        def scan_timeline(self, collection, run_id, product):
+            calls.append({"collection": collection, "run_id": run_id, "product": product})
             return refs
 
     run = "2026JUL04-1454-KLOT"
@@ -66,7 +66,7 @@ def test_timeline_uses_selected_run():
     ctx._client_repo = ctx.repo()
 
     assert ctx.timeline() == refs
-    assert calls == [{"collection": "KLOT", "run_id": run}]
+    assert calls == [{"collection": "KLOT", "run_id": run, "product": "cells_by_scan"}]
 
 
 def test_timeline_defaults_to_latest_run():
@@ -79,7 +79,7 @@ def test_timeline_defaults_to_latest_run():
             calls.append(("latest_run", collection))
             return _FakeRun("run-new")
 
-        def scan_timeline(self, collection, run_id):
+        def scan_timeline(self, collection, run_id, product):
             calls.append(("timeline", collection, run_id))
             return []
 

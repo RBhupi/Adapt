@@ -71,33 +71,28 @@ class TestRegisterScan:
 
 
 class TestCompleteness:
-    def test_scan_completes_only_when_all_required_products_linked(self, catalog):
+    """A scan is complete once the run's pass over it ended with no module failing."""
+
+    def test_product_links_alone_do_not_complete_a_scan(self, catalog):
         catalog.register_scan(_record())
-        art = {"gridded3d": "a1", "segmentation2d": "a2"}
+        _catalog_artifact(catalog, "a1")
 
-        for product, artifact_id in art.items():
-            _catalog_artifact(catalog, artifact_id)
-            catalog.link_scan_product("run-1", "abc123", product, artifact_id=artifact_id)
-            assert not catalog.scan_is_complete("run-1", "abc123")
-
+        catalog.link_scan_product("run-1", "abc123", "gridded3d", artifact_id="a1")
         catalog.link_scan_product("run-1", "abc123", "cell_stats", table_name="cell_stats")
-        assert catalog.scan_is_complete("run-1", "abc123")
-
-    def test_auxiliary_links_never_complete_a_scan(self, catalog):
-        catalog.register_scan(_record())
-
-        catalog.link_scan_product("run-1", "abc123", "tracking", table_name="cells_by_scan")
-        catalog.link_scan_product("run-1", "abc123", "volume_stats", table_name="cell_volume_stats")
 
         assert not catalog.scan_is_complete("run-1", "abc123")
+
+    def test_a_recorded_pass_completes_the_scan(self, catalog):
+        catalog.register_scan(_record())
+
+        catalog.record_scan_pass("run-1", "abc123", {"ingest": ("done", None)})
+
+        assert catalog.scan_is_complete("run-1", "abc123")
 
     def test_incomplete_scans_excluded_from_complete_scans(self, catalog):
         catalog.register_scan(_record(scan_id="s1", offset_s=0))
         catalog.register_scan(_record(scan_id="s2", offset_s=300))
-        for product in ("gridded3d", "segmentation2d"):
-            _catalog_artifact(catalog, f"{product}-a")
-            catalog.link_scan_product("run-1", "s1", product, artifact_id=f"{product}-a")
-        catalog.link_scan_product("run-1", "s1", "cell_stats", table_name="cell_stats")
+        catalog.record_scan_pass("run-1", "s1", {"ingest": ("done", None)})
 
         complete = catalog.complete_scans("run-1")
 
@@ -106,22 +101,14 @@ class TestCompleteness:
     def test_complete_scans_ordered_by_scan_time(self, catalog):
         for scan_id, offset in (("late", 600), ("early", 0)):
             catalog.register_scan(_record(scan_id=scan_id, offset_s=offset))
-            for product in ("gridded3d", "segmentation2d"):
-                _catalog_artifact(catalog, f"{scan_id}-{product}")
-                catalog.link_scan_product(
-                    "run-1", scan_id, product, artifact_id=f"{scan_id}-{product}"
-                )
-            catalog.link_scan_product("run-1", scan_id, "cell_stats", table_name="cell_stats")
+            catalog.record_scan_pass("run-1", scan_id, {"ingest": ("done", None)})
 
         assert [s["scan_id"] for s in catalog.complete_scans("run-1")] == ["early", "late"]
 
     def test_same_scan_in_two_runs_has_independent_status(self, catalog):
         catalog.register_scan(_record(run_id="run-1"))
         catalog.register_scan(_record(run_id="run-2"))
-        for product in ("gridded3d", "segmentation2d"):
-            _catalog_artifact(catalog, f"{product}-a")
-            catalog.link_scan_product("run-1", "abc123", product, artifact_id=f"{product}-a")
-        catalog.link_scan_product("run-1", "abc123", "cell_stats", table_name="cell_stats")
+        catalog.record_scan_pass("run-1", "abc123", {"ingest": ("done", None)})
 
         assert catalog.scan_is_complete("run-1", "abc123")
         assert not catalog.scan_is_complete("run-2", "abc123")

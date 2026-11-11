@@ -7,16 +7,14 @@ import pytest
 from pydantic import ValidationError
 
 from adapt.execution.nodes.xlma_stat import XlmaStatModule
-from adapt.modules.base import POSTPROCESS_PHASE
 from adapt.modules.xlma_stat.config import XlmaStatConfig
 
 pytestmark = pytest.mark.unit
 
 
-def test_module_declares_postprocess_phase_and_two_tables():
+def test_module_declares_its_two_tables():
     m = XlmaStatModule()
     assert m.name == "xlma_stat"
-    assert m.pipeline_phase == POSTPROCESS_PHASE
     assert {spec.key for spec in m.persistence} == {
         "xlma_stat_minutes_rows",
         "xlma_stat_scan_rows",
@@ -26,8 +24,8 @@ def test_module_declares_postprocess_phase_and_two_tables():
 
 
 def test_module_consumes_geometry_it_never_computes():
-    """The lightning module reads minute masks; it owns no projection inputs."""
-    assert XlmaStatModule.inputs == ["xlma_stat_config", "minute_masks", "radar_origin", "run_id"]
+    """The lightning module reads the scan's analysis dataset; it owns no projection inputs."""
+    assert XlmaStatModule.inputs == ["xlma_stat_config", "analysis_ds", "scan_time"]
 
 
 def test_output_tables_are_keyed_by_run_and_time():

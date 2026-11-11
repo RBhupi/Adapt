@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib import colormaps
 from matplotlib.lines import Line2D
 
-from adapt.consumers.target_selection import TSEConfig, total_score
+from adapt.modules.target_selection import TSEConfig, total_score
 
 logger = logging.getLogger(__name__)
 

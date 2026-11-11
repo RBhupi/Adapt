@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 class ModuleRegistry:
-    """Central registry for Adapt modules (core, extended and post-processing).
+    """Central registry for Adapt modules.
 
     Stores module *classes*. Instantiates them on demand via
     ``create_modules()``. This allows each module to be configured

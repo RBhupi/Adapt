@@ -3,36 +3,38 @@
 
 """Module discovery (the module catalog) and selection for pipeline assembly.
 
-The catalog is two discovery files of dotted import paths:
-``configuration/defaults.yaml`` (the live pipeline) and
-``configuration/postprocess_defaults.yaml`` (post-processing). Importing a path
-triggers its module's ``registry.register()`` call. The live pipeline imports
-only the first file, the PostProcessor only the second; the pipeline-file schema
-reads both through ``catalog_module_names`` to validate module names.
+The catalog is one discovery file of dotted import paths,
+``configuration/defaults.yaml``. Importing a path triggers its module's
+``registry.register()`` call.
 
-``resolve_enabled_modules`` filters the registered set down to a run's
-allowlist, and ``scan_graph`` wires that selection into the one per-scan graph.
+``resolve_enabled_modules`` filters the registered set down to a run's list,
+and ``scan_graph`` wires that selection into the one per-scan graph.
 Everything fails loudly: an unreadable or empty module list, or a
 module that cannot be imported, aborts startup — there is no fallback pipeline.
 """
 
 import importlib
 import logging
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from adapt.contracts import SCAN_SEEDS, config_key
-from adapt.execution.graph.builder import GraphBuilder, data_edges
+from adapt.contracts import (
+    SCAN_SEEDS,
+    STORE_VIEWS,
+    NetcdfArtifact,
+    ProductTableWrite,
+    config_key,
+)
+from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.node import Node
 from adapt.execution.module_registry import registry
-from adapt.modules.base import EXTENDED_PHASE
 
 logger = logging.getLogger(__name__)
 
-_CATALOG_DIR = Path(__file__).parent.parent / "configuration"
-_DEFAULTS_YAML = _CATALOG_DIR / "defaults.yaml"
-_POSTPROCESS_DEFAULTS_YAML = _CATALOG_DIR / "postprocess_defaults.yaml"
+_DEFAULTS_YAML = Path(__file__).parent.parent / "configuration" / "defaults.yaml"
 
 
 def _import_catalog(path: Path, section: str, label: str) -> list[str]:
@@ -57,7 +59,7 @@ def _import_catalog(path: Path, section: str, label: str) -> list[str]:
 
 
 def _ensure_modules_registered() -> None:
-    """Import the live pipeline modules listed in configuration/defaults.yaml.
+    """Import the modules listed in configuration/defaults.yaml.
 
     To add a module: add its dotted import path to defaults.yaml.
 
@@ -71,33 +73,20 @@ def _ensure_modules_registered() -> None:
     _import_catalog(_DEFAULTS_YAML, "pipeline", "pipeline")
 
 
-def _ensure_postprocess_modules_registered() -> None:
-    """Import the post-process modules listed in configuration/postprocess_defaults.yaml.
-
-    Kept separate from ``_ensure_modules_registered`` so the live pipeline never
-    imports post-process modules. Same fail-loud rules.
-    """
-    _import_catalog(_POSTPROCESS_DEFAULTS_YAML, "postprocess", "post-process")
-
-
 def catalog_module_names() -> list[str]:
-    """Names of every catalog module: defaults.yaml first, then postprocess_defaults.yaml.
+    """Names of every catalog module, in the catalog's order.
 
-    Each file keeps its own order. Registers every catalog module as a side
-    effect (importing is how a module registers).
+    Registers every catalog module as a side effect (importing is how a module
+    registers).
 
     Raises
     ------
     RuntimeError
-        If a discovery file is unreadable or empty, or one of its paths
+        If the discovery file is unreadable or empty, or one of its paths
         registers no module.
     """
-    paths = [
-        *_import_catalog(_DEFAULTS_YAML, "pipeline", "pipeline"),
-        *_import_catalog(_POSTPROCESS_DEFAULTS_YAML, "postprocess", "post-process"),
-    ]
     names: list[str] = []
-    for path in paths:
+    for path in _import_catalog(_DEFAULTS_YAML, "pipeline", "pipeline"):
         found = [n for n in registry.list_modules() if registry.get(n).__module__ == path]
         if not found:
             raise RuntimeError(f"Catalog entry '{path}' registers no module")
@@ -106,65 +95,83 @@ def catalog_module_names() -> list[str]:
 
 
 def resolve_enabled_modules(all_modules: list, modules: list[str] | None = None) -> list:
-    """Filter ``all_modules`` to the ``modules`` allowlist, preserving order.
+    """Filter ``all_modules`` to the ``modules`` list, in ``all_modules``' order.
 
     ``None`` enables every module. Every listed name must be a real module.
-    After filtering, validates that no enabled module needs an input produced
-    solely by a module that is not listed — raising a clear error rather than failing
-    opaquely at runtime.
 
     Parameters
     ----------
     all_modules : list
         All registered module instances (each with ``name``/``inputs``/``outputs``).
     modules : list[str], optional
-        The run's module allowlist.
+        The run's module list.
     """
     by_name = {m.name: m for m in all_modules}
     for n in modules or []:
         if n not in by_name:
             raise ValueError(f"Unknown module '{n}' in modules. Available: {', '.join(by_name)}")
-
     enabled = set(by_name) if modules is None else set(modules)
-
-    producer: dict[str, str] = {}
-    for m in all_modules:
-        for out in m.outputs:
-            producer[out] = m.name
-    for m in all_modules:
-        if m.name not in enabled:
-            continue
-        for inp in m.inputs:
-            src = producer.get(inp)
-            if src is not None and src not in enabled:
-                raise ValueError(
-                    f"Module '{m.name}' needs input '{inp}', which module '{src}' "
-                    f"produces — list '{src}' too, or remove '{m.name}'"
-                )
-
     return [m for m in all_modules if m.name in enabled]
 
 
-def scan_graph(modules: list) -> list[Node]:
-    """The one per-scan graph of ``modules`` (core and extended), as the processor runs it.
+def stored_output_keys() -> frozenset[str]:
+    """Output keys of the registered modules that are stored as an artifact or a
+    table, and so can be read back from the store."""
+    return frozenset(
+        spec.key
+        for name in registry.list_modules()
+        for spec in registry.get(name).persistence
+        if isinstance(spec, NetcdfArtifact | ProductTableWrite)
+    )
 
-    The runtime provides ``SCAN_SEEDS`` and one config per module; every other
-    input must be another listed module's output. Extended modules run after
-    the scan's core outputs are stored, so a core module cannot read one's output.
+
+def carried_keys(modules: list) -> frozenset[str]:
+    """The keys the modules carry from one scan to the next: each both read and
+    written by one module, whose last value the runtime hands back to it."""
+    return frozenset(key for module in modules for key in module.inputs if key in module.outputs)
+
+
+def scan_graph(
+    modules: list, configs: Mapping[str, Any] | None = None, *, stored_run: bool = False
+) -> list[Node]:
+    """The one per-scan graph of ``modules``, as the processor runs it.
+
+    The runtime provides ``SCAN_SEEDS``, one config per module, the
+    ``STORE_VIEWS`` and each module's own carried state (``carried_keys``); every
+    other input must be another listed module's output.
+    Over a stored run (``stored_run``) an input may also be any output a
+    registered module stores: the runtime reads it back, scan by scan. With
+    ``configs`` (each module's built config, by ``config_key``), a module reads
+    what its options make it read (``inputs_for``); without, what it declares.
 
     Raises
     ------
     ValueError
-        Two modules declare one output key, an input has no source, or a core
-        module reads an extended module's output.
+        Two modules declare one output key, or an input has no source — naming
+        the module that produces it, when one is registered but not listed.
     """
-    provided = SCAN_SEEDS | {config_key(m.name) for m in modules}
-    nodes = GraphBuilder(modules, provided=provided).build()
-    extended = {m.name for m in modules if m.pipeline_phase >= EXTENDED_PHASE}
-    for producer, consumer, key in data_edges(modules):
-        if producer in extended and consumer not in extended:
-            raise ValueError(
-                f"Core module '{consumer}' needs input '{key}' from extended module "
-                f"'{producer}', which runs only after the scan's core outputs are stored"
-            )
-    return nodes
+    if configs is not None:
+        for module in modules:
+            key = config_key(module.name)
+            if key in configs:
+                module.inputs = type(module).inputs_for(configs[key])
+    provided = SCAN_SEEDS | STORE_VIEWS | {config_key(m.name) for m in modules}
+    provided |= carried_keys(modules)
+    if stored_run:
+        provided |= stored_output_keys()
+    produced = {key for module in modules for key in module.outputs}
+    elsewhere = {
+        key: name
+        for name in registry.list_modules()
+        for key in registry.get(name).outputs
+        if key not in produced
+    }
+    for module in modules:
+        for key in module.inputs:
+            if key not in produced and key not in provided and key in elsewhere:
+                raise ValueError(
+                    f"Module '{module.name}' needs input '{key}', which module "
+                    f"'{elsewhere[key]}' produces — list '{elsewhere[key]}' too, "
+                    f"or remove '{module.name}'"
+                )
+    return GraphBuilder(modules, provided=provided).build()

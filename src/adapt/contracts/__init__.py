@@ -48,17 +48,28 @@ from adapt.contracts.persistence import (
     PersistenceMeta,
     PersistenceSpec,
     ProductTableWrite,
+    ProductView,
     ScanRecord,
-    TrackTablesWrite,
 )
-from adapt.contracts.pipeline import SCAN_SEEDS, ContractViolation, config_key, require
+from adapt.contracts.pipeline import (
+    SCAN_SEEDS,
+    STORE_VIEWS,
+    ContractViolation,
+    config_key,
+    require,
+)
 from adapt.contracts.projection import assert_projected, check_projected_ds
+from adapt.contracts.radar_command import check_radar_commands
 from adapt.contracts.segmentation import assert_segmented, check_seed_carry, check_segmented_ds
+from adapt.contracts.selection import check_selection
+from adapt.contracts.state import check_module_state
 from adapt.contracts.time import assert_time_normalized, check_time_normalized
 from adapt.contracts.tracking import (
     assert_cell_events,
     assert_tracked_cells,
     check_cell_events,
+    check_cell_identity,
+    check_cell_tracks,
     check_tracked_cells,
 )
 from adapt.contracts.xlma_stat import (
@@ -73,6 +84,7 @@ __all__ = [
     "ContractViolation",
     "require",
     "SCAN_SEEDS",
+    "STORE_VIEWS",
     "config_key",
     # canonical naming
     "CELL_LABELS_VAR",
@@ -80,7 +92,7 @@ __all__ = [
     # persistence specs — modules declare these in their ``persistence`` ClassVar
     "ProductTableWrite",
     "NetcdfArtifact",
-    "TrackTablesWrite",
+    "ProductView",
     "DecisionTableWrite",
     "PersistenceSpec",
     "PersistenceMeta",
@@ -113,12 +125,17 @@ __all__ = [
     "check_prior_scans",
     "check_segmented_ds",
     "check_seed_carry",
+    "check_selection",
+    "check_radar_commands",
+    "check_module_state",
     "check_projected_ds",
     "check_cell_stats",
     "check_cell_adjacency",
     "check_cell_volume_stats",
     "check_tracked_cells",
     "check_cell_events",
+    "check_cell_identity",
+    "check_cell_tracks",
     "check_time_normalized",
     "check_xlma_stat_minutes",
     "check_xlma_stat_scan",

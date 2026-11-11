@@ -3,6 +3,7 @@
 
 """Optional visualization package — never imported by core.
 
-Only the plots consumer is used: PlotConsumer and its options PlotsConfig, launched
-by the cli consumer table (adapt.cli._consumers).
+``PlotConsumer`` draws a run's scans from the store. It is a store client like
+the dashboard, not part of the pipeline: ``adapt run`` no longer launches it,
+and it has no launcher of its own yet.
 """

@@ -9,6 +9,7 @@ scans exist, which products each scan has, and where every object came from.
 """
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,13 +19,7 @@ from adapt.persistence.errors import StoreError
 from adapt.persistence.sqlite_store import SqliteStore
 from adapt.utils.time import to_scan_iso
 
-__all__ = ["REQUIRED_SCAN_PRODUCTS", "ArtifactRecord", "Catalog"]
-
-# A scan is complete when exactly these products are linked: the gridded
-# volume object, the segmentation/analysis NC object, and the cell_stats
-# table. Auxiliary links (tracking, volume stats, adjacency, ...) never
-# complete a scan.
-REQUIRED_SCAN_PRODUCTS = ("gridded3d", "segmentation2d", "cell_stats")
+__all__ = ["ArtifactRecord", "Catalog"]
 
 
 @dataclass(frozen=True)
@@ -263,7 +258,7 @@ class Catalog(SqliteStore):
         """Link one product to a scan; re-linking replaces (module re-run semantics).
 
         Exactly one of ``artifact_id``/``table_name`` identifies where the
-        product lives. Completeness is recomputed after every link.
+        product lives.
         """
         if (artifact_id is None) == (table_name is None):
             raise ValueError("link_scan_product takes exactly one of artifact_id or table_name")
@@ -296,23 +291,78 @@ class Catalog(SqliteStore):
                 " table_name=excluded.table_name, created_at=excluded.created_at",
                 (run_id, scan_id, product, kind, artifact_id, table_name, now),
             )
-            linked = {
-                row["product"]
-                for row in conn.execute(
-                    "SELECT product FROM scan_products WHERE run_id = ? AND scan_id = ?",
-                    (run_id, scan_id),
-                ).fetchall()
-            }
-            if set(REQUIRED_SCAN_PRODUCTS) <= linked:
+            conn.commit()
+
+    def record_scan_pass(
+        self,
+        run_id: str,
+        scan_id: str,
+        modules: Mapping[str, tuple[str, str | None]],
+        *,
+        checkpoint: str | None = None,
+    ) -> None:
+        """Record the run's pass over one scan: each module's (status, reason).
+
+        The scan is 'failed' when any module failed, else 'complete'; a later
+        pass over the scan replaces both the modules' rows and the status.
+        ``checkpoint`` (an object name) becomes the run's current checkpoint,
+        taken after this scan, in the same transaction.
+        """
+        now = datetime.now(UTC).isoformat()
+        failed = any(status == "failed" for status, _ in modules.values())
+        conn = self._get_connection()
+        with self._lock:
+            updated = conn.execute(
+                "UPDATE scans SET status = ?, updated_at = ? WHERE run_id = ? AND scan_id = ?",
+                ("failed" if failed else "complete", now, run_id, scan_id),
+            )
+            if updated.rowcount == 0:
+                raise StoreError(
+                    f"Cannot record the pass over scan '{scan_id}': not registered "
+                    f"for run '{run_id}'"
+                )
+            conn.executemany(
+                "INSERT INTO scan_modules (run_id, scan_id, module, status, reason, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(run_id, scan_id, module) DO UPDATE SET "
+                " status=excluded.status, reason=excluded.reason, updated_at=excluded.updated_at",
+                [
+                    (run_id, scan_id, module, status, reason, now)
+                    for module, (status, reason) in modules.items()
+                ],
+            )
+            if checkpoint is not None:
                 conn.execute(
-                    "UPDATE scans SET status = 'complete', updated_at = ? "
-                    "WHERE run_id = ? AND scan_id = ?",
-                    (now, run_id, scan_id),
+                    "INSERT INTO run_checkpoints (run_id, scan_id, scan_time, object_name, "
+                    " updated_at) SELECT ?, scan_id, scan_time, ?, ? FROM scans "
+                    "WHERE run_id = ? AND scan_id = ? "
+                    "ON CONFLICT(run_id) DO UPDATE SET scan_id=excluded.scan_id, "
+                    " scan_time=excluded.scan_time, object_name=excluded.object_name, "
+                    " updated_at=excluded.updated_at",
+                    (run_id, checkpoint, now, run_id, scan_id),
                 )
             conn.commit()
 
+    def run_checkpoint(self, run_id: str) -> dict | None:
+        """The run's current checkpoint row (scan_id, scan_time, object_name); None before any."""
+        conn = self._get_connection()
+        with self._lock:
+            row = conn.execute(
+                "SELECT * FROM run_checkpoints WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def scan_modules(self, run_id: str, scan_id: str) -> dict[str, dict]:
+        """Each module's row of the run's latest pass over one scan, by module name."""
+        conn = self._get_connection()
+        with self._lock:
+            rows = conn.execute(
+                "SELECT * FROM scan_modules WHERE run_id = ? AND scan_id = ?", (run_id, scan_id)
+            ).fetchall()
+        return {row["module"]: dict(row) for row in rows}
+
     def mark_scan_failed(self, run_id: str, scan_id: str) -> None:
-        """Record a scan-processing failure; a later successful re-run re-completes it."""
+        """Record that the pass over a scan broke off before its modules were settled."""
         conn = self._get_connection()
         with self._lock:
             updated = conn.execute(
@@ -359,6 +409,15 @@ class Catalog(SqliteStore):
     def scan_is_complete(self, run_id: str, scan_id: str) -> bool:
         scan = self.get_scan(run_id, scan_id)
         return scan is not None and scan["status"] == "complete"
+
+    def run_scans(self, run_id: str) -> list[dict]:
+        """Every scan of one run, whatever its status, time-ordered."""
+        conn = self._get_connection()
+        with self._lock:
+            rows = conn.execute(
+                "SELECT * FROM scans WHERE run_id = ? ORDER BY scan_time", (run_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def complete_scans(self, run_id: str) -> list[dict]:
         """Complete scans of one run, time-ordered."""

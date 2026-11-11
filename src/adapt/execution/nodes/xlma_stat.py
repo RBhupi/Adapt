@@ -1,34 +1,38 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""xlma_stat — post-process enrichment node (pipeline_phase = POSTPROCESS_PHASE).
+"""xlma_stat — lightning (xLMA) statistics on each scan's minute-resolution cell masks.
 
 Lightning science only: reads xLMA flash-sorted NetCDF files (``*.nc``) from
 ``input_dir`` — raw LYLOUT ASCII must be converted in xLMA/pyxlma first
 (pyxlma is not on conda and not a dependency); non-NetCDF files are ignored.
-Each flash is matched to the minute-resolution cell mask of *its own minute*
-(masks are produced upstream by the projection module and injected by the
-PostProcessor as ``minute_masks``; this node never projects cells, interpolates
-masks, or estimates motion). Two extension tables result:
+Each flash is matched to the cell mask of *its own minute*. The masks are the
+ones the scan owns in its analysis dataset (produced upstream by projection and
+tracking; this node never projects cells, interpolates masks, or estimates
+motion). Two tables result:
 
 - ``xlma_stat_minutes`` — the authoritative association, one row per
   ``(cell_uid, minute)``, with the mask's scan provenance.
 - ``xlma_stat_scan`` — radar-aligned aggregate, one row per
   ``(cell_uid, scan)``, derived only from the minute rows.
 
-Run only by the PostProcessor (the pipeline file's ``postprocessing:`` list)
-against a completed run. Core tables are never modified.
+It runs scan by scan like any module: beside a live run, or later over a stored
+run (``run.source: stored_run``), where it reads each scan's analysis dataset
+back from the store.
 """
 
 import glob
 import logging
 import os
 
+import pandas as pd
+
 from adapt.contracts import ProductTableWrite, check_xlma_stat_minutes, check_xlma_stat_scan
 from adapt.execution.module_registry import registry
-from adapt.modules.base import POSTPROCESS_PHASE, BaseModule
+from adapt.modules.base import BaseModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
-from adapt.modules.xlma_stat.module import MinuteMask, XlmaStatistics
+from adapt.modules.xlma_stat.masks import scan_minute_masks
+from adapt.modules.xlma_stat.module import XlmaStatistics
 from adapt.modules.xlma_stat.reader import read_flash_sorted_frames
 
 logger = logging.getLogger(__name__)
@@ -40,9 +44,8 @@ class XlmaStatModule(BaseModule):
         "Lightning (xLMA) statistics on minute-projected cells; "
         "needs params: xlma_stat: {input_dir: ...}"
     )
-    pipeline_phase = POSTPROCESS_PHASE
     config_class = XlmaStatConfig
-    inputs = ["xlma_stat_config", "minute_masks", "radar_origin", "run_id"]
+    inputs = ["xlma_stat_config", "analysis_ds", "scan_time"]
     outputs = ["xlma_stat_minutes_rows", "xlma_stat_scan_rows"]
     output_contracts = {
         "xlma_stat_minutes_rows": check_xlma_stat_minutes,
@@ -81,27 +84,25 @@ class XlmaStatModule(BaseModule):
             )
         return config
 
+    def __init__(self) -> None:
+        # The folder's flashes, re-read only when its files change: every scan
+        # reads the same files, and a live run sees new ones as they arrive.
+        self._folder: tuple[tuple[str, int, int], ...] | None = None
+        self._flashes: tuple[pd.DataFrame, pd.DataFrame] | None = None
+
     def run(self, context: dict) -> dict:
         config = context["xlma_stat_config"]
-        masks = [MinuteMask(**m) for m in context["minute_masks"]]
-        radar_origin = context["radar_origin"]
-        run_id = context["run_id"]
-
-        files = sorted(glob.glob(os.path.join(config.input_dir, "*")))
-        nc_files = [f for f in files if f.endswith(".nc")]  # build_config saw at least one
-        ignored = len(files) - len(nc_files)
-        if ignored:
-            logger.info(
-                "xlma_stat: ignoring %d non-NetCDF file(s) in %s", ignored, config.input_dir
-            )
-        flashes, sources = read_flash_sorted_frames(nc_files)
-
+        analysis_ds = context["analysis_ds"]
+        masks = scan_minute_masks(analysis_ds, context["scan_time"])
+        flashes, sources = self._read(config.input_dir)
+        radar_origin = (
+            float(analysis_ds.attrs["radar_latitude"]),
+            float(analysis_ds.attrs["radar_longitude"]),
+        )
         minutes_df, scan_df = XlmaStatistics(config).compute(flashes, sources, masks, radar_origin)
-        minutes_df.insert(0, "run_id", run_id)
-        scan_df.insert(0, "run_id", run_id)
         logger.info(
-            "xlma_stat: %d flashes -> %d (cell, minute) rows, %d (cell, scan) rows",
-            len(flashes),
+            "xlma_stat: %d minute masks -> %d (cell, minute) rows, %d (cell, scan) rows",
+            len(masks),
             len(minutes_df),
             len(scan_df),
         )
@@ -109,6 +110,18 @@ class XlmaStatModule(BaseModule):
             "xlma_stat_minutes_rows": minutes_df,
             "xlma_stat_scan_rows": scan_df,
         }
+
+    def _read(self, input_dir: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+        files = sorted(glob.glob(os.path.join(input_dir, "*")))
+        nc_files = [f for f in files if f.endswith(".nc")]
+        folder = tuple((f, os.stat(f).st_mtime_ns, os.stat(f).st_size) for f in nc_files)
+        if self._flashes is None or folder != self._folder:
+            ignored = len(files) - len(nc_files)
+            if ignored:
+                logger.info("xlma_stat: ignoring %d non-NetCDF file(s) in %s", ignored, input_dir)
+            self._flashes = read_flash_sorted_frames(nc_files)
+            self._folder = folder
+        return self._flashes
 
 
 registry.register(XlmaStatModule)

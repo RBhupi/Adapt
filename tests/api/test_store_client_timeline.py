@@ -27,7 +27,7 @@ def client(built):
 
 class TestTimeline:
     def test_ordered_complete_refs(self, client, built):
-        timeline = client.scan_timeline(COLLECTION, RUN_1)
+        timeline = client.scan_timeline(COLLECTION, RUN_1, "cells_by_scan")
 
         assert [type(ref) for ref in timeline] == [ScanRef, ScanRef]
         assert [ref.scan_id for ref in timeline] == built.scan_ids[:2]
@@ -35,16 +35,18 @@ class TestTimeline:
         assert all(ref.run_id == RUN_1 for ref in timeline)
 
     def test_scans_since_watermark(self, client, built):
-        timeline = client.scan_timeline(COLLECTION, RUN_1)
+        timeline = client.scan_timeline(COLLECTION, RUN_1, "cells_by_scan")
 
-        assert client.scans_since(COLLECTION, RUN_1, after=None) == timeline
-        assert client.scans_since(COLLECTION, RUN_1, after=timeline[0]) == [timeline[1]]
-        assert client.scans_since(COLLECTION, RUN_1, after=timeline[-1]) == []
+        assert client.scans_since(COLLECTION, RUN_1, "cells_by_scan", after=None) == timeline
+        assert client.scans_since(COLLECTION, RUN_1, "cells_by_scan", after=timeline[0]) == [
+            timeline[1]
+        ]
+        assert client.scans_since(COLLECTION, RUN_1, "cells_by_scan", after=timeline[-1]) == []
 
 
 class TestRaster:
     def test_open_scan_raster_is_fully_in_memory(self, client, built):
-        (ref, _) = client.scan_timeline(COLLECTION, RUN_1)[:2]
+        (ref, _) = client.scan_timeline(COLLECTION, RUN_1, "cells_by_scan")[:2]
 
         with client.open_scan_raster(COLLECTION, RUN_1, ref.scan_id) as raster:
             assert isinstance(raster, ScanRaster)
@@ -70,7 +72,7 @@ class TestRaster:
                 moved.rename(object_path)
 
     def test_gridded3d_product(self, client, built):
-        ref = client.scan_timeline(COLLECTION, RUN_1)[0]
+        ref = client.scan_timeline(COLLECTION, RUN_1, "cells_by_scan")[0]
 
         with client.open_scan_raster(COLLECTION, RUN_1, ref.scan_id, product="gridded3d") as r:
             assert "reflectivity" in r.dataset.data_vars
@@ -97,8 +99,8 @@ class TestBundle:
         assert bundle.tracks[0].n_scans == 2
         bundle.segmentation.close()
 
-    def test_incomplete_scan_raises(self, client, built):
-        with pytest.raises(StoreError, match="not complete"):
+    def test_a_scan_without_its_segmentation_raises(self, client, built):
+        with pytest.raises(StoreError, match="no segmentation2d artifact"):
             client.scan_bundle(RUN_1, built.scan_ids[2], COLLECTION)
 
     def test_unknown_scan_raises(self, client):

@@ -100,12 +100,11 @@ _HV_KEYS = (
 )
 
 # Plot-group variables with these prefixes come from the cell_volume_stats
-# enrichment table — empty unless that opt-in module ran (see _volume_stats).
+# cell_volume_stats table — empty unless that module ran (see _volume_stats).
 _VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
 
 # Plot-group variables with these prefixes come from the xlma_stat_minutes extension
-# table — empty unless the run's pipeline file listed xlma_stat under
-# `postprocessing:` (see _lightning).
+# table — empty unless xlma_stat ran over the run (see _lightning).
 _LIGHTNING_PREFIXES = ("flash_", "source_", "lightning_")
 
 
@@ -956,7 +955,9 @@ class ScanViewTab:
             # group needs columns that cells_by_scan does not carry.
             if needed_vars - set(track_df.columns) and self._current_run_id:
                 client = self.ctx.client()
-                vol_df = _load_track_volume_stats_fn(client, collection, self._current_run_id, uid)
+                vol_df = _load_track_volume_stats_fn(
+                    client, collection, self._current_run_id, track_df
+                )
                 track_df = _merge_volume_stats_fn(track_df, vol_df)
                 if needs_lightning:
                     try:
@@ -999,7 +1000,7 @@ class ScanViewTab:
             if not ax.get_lines():
                 group_vars = group.get("variables", [])
                 if any(v.startswith(_LIGHTNING_PREFIXES) for v in group_vars):
-                    msg = "no data — list xlma_stat under postprocessing"
+                    msg = "no data — list xlma_stat under modules:"
                 elif any(v.startswith(_VOLUME_STATS_PREFIXES) for v in group_vars):
                     msg = "no data — enable cell_volume_stats"
                 else:

@@ -14,7 +14,7 @@ import pytest
 import xarray as xr
 
 from adapt.runtime.processor import RadarProcessor
-from tests.helpers.fake_graph import fake_core
+from tests.helpers.fake_graph import fake_graph
 from tests.helpers.queue_msg import msg as _msg
 
 # Distinct per-file times: two different scans sharing one nominal second
@@ -68,7 +68,7 @@ def test_processor_accepts_fake_grid(tmp_path, monkeypatch, pipeline_config, sto
         "cell_adjacency": pd.DataFrame(),
     }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi_result)
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: fake_multi_result)
     monkeypatch.setattr(proc._router, "persist", lambda modules, result, meta: None)
 
     ok1 = proc.process_file(_msg(store_env, tmp_path, "file_1", scan_time=_MT1))

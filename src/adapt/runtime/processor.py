@@ -5,20 +5,32 @@
 
 Reads acquired-scan messages from the source queue, resolves the raw object
 through the store, and runs every enabled per-scan module as one graph
-(``scan_graph``). The graph is walked in two passes: the core modules, then —
-after the scan's core outputs are stored — the extended ones. A module that
-needs more prior scans than are usable is skipped, and so is everything
-downstream of it; the processor names no module.
+(``scan_graph``), storing each module's outputs as soon as it finishes. A
+module that needs more prior scans than are usable is skipped, and so is
+everything downstream of it; a module that raises fails the scan, which then
+counts as a scan that never arrived. The processor names no module.
+
+A run over a stored run (``source: stored_run``) walks that run's scans again:
+its listed modules run, and what they read from modules not listed this time
+is read back from the store.
+
+After every complete scan the processor saves a checkpoint — what the modules
+carry to their next scan, and the earlier outputs they read back — so a run
+resumed with its id goes on exactly as if it had never stopped.
 
 Responsibilities of this class (orchestration only):
 - Queue management: pop acquired-scan messages, mark task done
 - Completed-scan skip via the collection catalog (scan_is_complete)
 - Rolling history: provide ``prior_scans``, bounded by the time-gap limit
+- Module state: hand each module what it returned for its next scan
+- Checkpoint: save both after each complete scan; restore them on resume
 - Persistence handoff: route module-declared outputs through the StoreOutputRouter
+- Record what became of every module in each scan (done, skipped, failed)
 - Stop/start lifecycle
 """
 
 import logging
+import pickle
 import queue
 import threading
 import time
@@ -29,18 +41,25 @@ from typing import TYPE_CHECKING
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.contracts import ContractViolation, PersistenceMeta
 from adapt.contracts.observability import Observability
-from adapt.execution.graph.executor import GraphExecutor
+from adapt.execution.graph.executor import GraphExecutor, GraphRun
 from adapt.execution.module_registry import registry as module_registry
 from adapt.execution.pipeline_builder import (
     _ensure_modules_registered,
+    carried_keys,
     resolve_enabled_modules,
     scan_graph,
 )
-from adapt.modules.base import EXTENDED_PHASE, POSTPROCESS_PHASE
+from adapt.persistence.checkpoints import (
+    discard_other_checkpoints,
+    read_checkpoint,
+    write_checkpoint,
+)
 from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.runtime.diagnostics import silence_hdf5_errors
 from adapt.runtime.observability import disabled_observability
+from adapt.runtime.store_inputs import NOT_STORED, ScanAt, read_store_input
+from adapt.utils.time import from_scan_iso
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -62,10 +81,9 @@ class RadarProcessor(threading.Thread):
     """Worker thread that runs each scan through the one per-scan module graph.
 
     For each queued scan it provides the scan identity, every module config and
-    ``prior_scans`` (the usable previous scans), runs the core modules, stores
-    their outputs, then runs the extended modules and stores theirs.
-    ``GraphExecutor`` enforces the contracts at every edge; the processor itself
-    performs no validation.
+    ``prior_scans`` (the usable previous scans), runs the modules and stores
+    each one's outputs when it finishes. ``GraphExecutor`` enforces the
+    contracts at every edge; the processor itself performs no validation.
 
     Example usage (called by PipelineOrchestrator)::
 
@@ -95,6 +113,7 @@ class RadarProcessor(threading.Thread):
         observability: Observability | None = None,
         root_trace_id: str = "",
         reporter=None,
+        skip_failed: bool = False,
     ):
         super().__init__(daemon=True, name=name)
 
@@ -124,36 +143,28 @@ class RadarProcessor(threading.Thread):
         modules = resolve_enabled_modules(module_registry.create_modules(), modules=config.modules)
         logger.info("Enabled modules: [%s]", ", ".join(m.name for m in modules))
 
-        rogue = sorted(m.name for m in modules if m.pipeline_phase >= POSTPROCESS_PHASE)
-        if rogue:
-            raise ValueError(
-                f"Post-process module(s) {', '.join(rogue)} cannot run in the live "
-                "pipeline; list them under 'postprocessing:' in the pipeline file"
-            )
-
+        # A run over a stored run processes every scan again (its listed modules
+        # are what is new) and may read any stored output; a live run reads from
+        # the store only what no module produces.
+        self._stored_run = config.source == "stored_run"
         self._module_configs = resolve_module_configs(config, [m.name for m in modules])
-        nodes = scan_graph(modules)
-        core = [n for n in nodes if n.module.pipeline_phase < EXTENDED_PHASE]
-        extended = [n for n in nodes if n.module.pipeline_phase >= EXTENDED_PHASE]
-        self._core_modules = [n.module for n in core]
-        self._extended_modules = [n.module for n in extended]
-        self._core_executor = GraphExecutor(core, observability=self._obs)
-        # Extended modules run after the scan's core outputs are stored.
-        self._extended_executor: GraphExecutor | None = (
-            GraphExecutor(extended, observability=self._obs) if extended else None
-        )
+        nodes = scan_graph(modules, self._module_configs, stored_run=self._stored_run)
+        self._modules = [n.module for n in nodes]
+        self._executor = GraphExecutor(nodes, observability=self._obs)
         self._router = StoreOutputRouter(collection)
 
-        logger.info("RadarProcessor core: [%s]", ", ".join(m.name for m in self._core_modules))
-        if extended:
-            logger.info(
-                "RadarProcessor post-persistence: [%s]",
-                ", ".join(m.name for m in self._extended_modules),
-            )
-
-        # Rolling history of completed scan contexts, newest last.
+        # Rolling history, newest last: of each complete scan, its identity and
+        # the outputs modules read back from earlier scans (``prior_inputs``).
         self._scan_history: list[dict] = []
         self._max_history = config.processor.max_history
+        self._prior_keys = frozenset(key for m in modules for key in m.prior_inputs)
+        # What each module returned for its next scan (None before it has run).
+        self._carried_keys = carried_keys(modules)
+        self._carried: dict = dict.fromkeys(self._carried_keys)
+        # Resuming: a scan the run failed earlier is tried again unless told not to.
+        self._skip_failed = skip_failed
+        # The scan time of the checkpoint this run goes on from, if it has one.
+        self._resumed_after: datetime | None = None
         # Prior scans the most demanding module needs (none without modules).
         # ``prior_scans`` always reaches back at least one scan: detection's seed
         # carry reads the last one.
@@ -162,11 +173,13 @@ class RadarProcessor(threading.Thread):
         # beyond it no seed is carried, no projection runs and tracking resets.
         self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
         self._last_skipped = False
+        if not self._stored_run:
+            self._restore_checkpoint()
 
     @property
     def module_names(self) -> tuple[str, ...]:
-        """Enabled per-scan modules: core, then extended, each in registration order."""
-        return tuple(m.name for m in (*self._core_modules, *self._extended_modules))
+        """Enabled per-scan modules, in registration order."""
+        return tuple(m.name for m in self._modules)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -262,7 +275,7 @@ class RadarProcessor(threading.Thread):
                 "into the store before queueing"
             )
 
-        if self.collection.catalog.scan_is_complete(self.run_id, scan_id):
+        if not self._stored_run and self._already_settled(scan_id, queued_scan_time):
             self._last_skipped = True
             return True
         self._last_skipped = False
@@ -318,22 +331,56 @@ class RadarProcessor(threading.Thread):
                 # the raw bytes) is the uid-v2 birth input and the join key;
                 # scan_time is normalized once so every consumer (modules,
                 # persistence, history) sees tz-aware UTC.
+                "run_id": self.run_id,
                 "scan_id": scan_id,
                 "scan_time": self._normalize_scan_time(queued_scan_time),
                 **self._module_configs,
             }
 
-            # ── One pass over the core modules. ``prior_scans`` is the usable
-            # history; a module needing more than it holds is skipped by the
-            # executor, with everything downstream of it.
-            prior = self._usable_prior_scans(base_ctx["scan_time"], Path(filepath).name)
-            core = self._core_executor.run({**base_ctx, _PRIOR_SCANS: prior}, history=len(prior))
+            # ── One pass over the modules. ``prior_scans`` is the usable history;
+            # a module needing more than it holds is skipped by the executor,
+            # with everything downstream of it. Every module declared how its
+            # outputs are stored; the router writes them as the module finishes
+            # (no module names in this class).
+            scan_time = base_ctx["scan_time"]
+            prior = self._usable_prior_scans(scan_time, Path(filepath).name)
+            meta = PersistenceMeta(
+                scan_time=scan_time,
+                scan_id=scan_id,
+                run_id=self.run_id,
+                source_file=str(filepath),
+                collection_id=self.config.downloader.radar,
+            )
+            scan = ScanAt(self.collection, self.run_id, scan_id, scan_time)
+            run = self._executor.run(
+                {**base_ctx, **self._carried, _PRIOR_SCANS: prior},
+                history=len(prior),
+                before_node=lambda node, context: _read_from_store(node, context, scan),
+                after_node=lambda node, context: self._router.persist([node.module], context, meta),
+            )
+            elapsed_s = time.perf_counter() - t0
+            statuses = _statuses(self.module_names, run)
+            if run.failed:
+                # A failed scan is a scan that never arrived: it does not join
+                # the history and the modules' state stays as it was, so the
+                # next scan pairs with the last good one.
+                self.collection.catalog.record_scan_pass(self.run_id, scan_id, statuses)
+                for name, exc in run.failed.items():
+                    logger.error(
+                        "Scan failed | scan=%s module=%s elapsed=%.2fs %s: %s",
+                        file_id,
+                        name,
+                        elapsed_s,
+                        type(exc).__name__,
+                        exc,
+                        exc_info=exc,
+                        extra={"elapsed_s": round(elapsed_s, 3), "error_type": type(exc).__name__},
+                    )
+                return False
+
             # ``result`` becomes the next history entry: it must not hold its
             # predecessors, or every scan's grids would be retained.
-            result = {k: v for k, v in core.context.items() if k != _PRIOR_SCANS}
-
-            scan_time = base_ctx["scan_time"]
-            elapsed_s = time.perf_counter() - t0
+            result = {k: v for k, v in run.context.items() if k != _PRIOR_SCANS}
 
             # Record the collection location from the first scan (kept after that)
             grid_ds = result.get("grid_ds") or result.get("grid_ds_2d")
@@ -345,33 +392,14 @@ class RadarProcessor(threading.Thread):
                         self.config.downloader.radar, lat=float(lat), lon=float(lon)
                     )
 
-            # ── Accumulate scan in rolling history ─────────────────────────
-            # base_ctx AFTER result: source-owned keys (scan_time) stay authoritative.
-            self._scan_history.append({**result, **base_ctx})
-            if len(self._scan_history) > self._max_history:
-                self._scan_history.pop(0)
-
-            # ── Persist results: every module declared its specs; the router
-            # writes them mechanically (no module names in this class). The scan
-            # row was registered by the source at acquisition; completeness
-            # follows from the router's product links.
-            meta = PersistenceMeta(
-                scan_time=scan_time,
-                scan_id=scan_id,
-                run_id=self.run_id,
-                source_file=str(filepath),
-                collection_id=self.config.downloader.radar,
-            )
-            self._router.persist(self._core_modules, result, meta)
-
-            # ── Extended modules: the same graph, after the core write. They
-            # follow the core pass's skips; the writer stamps scan identity and
-            # time from ``meta``, modules never carry identity columns.
-            if self._extended_executor is not None:
-                extended = self._extended_executor.run(
-                    {**result, _PRIOR_SCANS: prior}, history=len(prior), skipped=core.skipped
-                )
-                self._router.persist(self._extended_modules, extended.context, meta)
+            # ── The scan is complete: it joins the history and the modules'
+            # state moves on — once both are checkpointed with its completion.
+            entry = {key: result[key] for key in self._prior_keys if key in result}
+            history = [*self._scan_history, {**entry, "scan_id": scan_id, "scan_time": scan_time}]
+            history = history[-self._max_history :]
+            carried = {key: result[key] for key in self._carried_keys}
+            self._complete_scan(scan_id, statuses, history, carried)
+            self._scan_history, self._carried = history, carried
 
             cell_stats = result.get("cell_stats")
             n_cells = len(cell_stats) if cell_stats is not None else 0
@@ -400,9 +428,9 @@ class RadarProcessor(threading.Thread):
             return False
 
         except Exception as e:
-            # One context-rich failure line + exactly one traceback. scan_id rides the
-            # bound context; the failing stage is on the exception's notes (added by
-            # GraphExecutor). elapsed/error_type are structured for the JSON log.
+            # What broke outside a module (the store, the catalog): one
+            # context-rich failure line + exactly one traceback. scan_id rides
+            # the bound context; elapsed/error_type are structured for the JSON log.
             elapsed = time.perf_counter() - t0
             logger.error(
                 "Scan failed | scan=%s elapsed=%.2fs %s: %s",
@@ -415,6 +443,60 @@ class RadarProcessor(threading.Thread):
             )
             self._record_scan_failure(scan_id)
             return False
+
+    # ── Checkpoint and resume ─────────────────────────────────────────────────
+
+    def _complete_scan(self, scan_id: str, statuses: dict, history: list, carried: dict) -> None:
+        """Mark the scan complete and, in the same catalog transaction, make the
+        checkpoint of ``history`` and ``carried`` (as they are after it) the run's
+        current one."""
+        if self._stored_run:  # a pass over a stored run leaves that run's checkpoint alone
+            self.collection.catalog.record_scan_pass(self.run_id, scan_id, statuses)
+            return
+        payload = pickle.dumps(
+            {"history": history[-max(1, self._prior_needed) :], "carried": carried},
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+        name = write_checkpoint(self.collection, self.run_id, scan_id, payload)
+        self.collection.catalog.record_scan_pass(self.run_id, scan_id, statuses, checkpoint=name)
+        discard_other_checkpoints(self.collection, self.run_id, keep=name)
+
+    def _restore_checkpoint(self) -> None:
+        """Go on from the run's checkpoint, if it has one: the history and the
+        modules' state as they were after the last complete scan."""
+        row = self.collection.catalog.run_checkpoint(self.run_id)
+        if row is None:
+            return
+        saved = pickle.loads(read_checkpoint(self.collection, row["object_name"]))  # noqa: S301
+        missing = sorted(self._carried_keys - set(saved["carried"]))
+        if missing:
+            raise StoreError(
+                f"Run '{self.run_id}' cannot go on from its checkpoint: it holds no state "
+                f"for {', '.join(missing)} — the run's modules have changed since"
+            )
+        self._scan_history = list(saved["history"])
+        self._carried = {key: saved["carried"][key] for key in self._carried_keys}
+        self._resumed_after = from_scan_iso(row["scan_time"])
+        logger.info(
+            "Resuming run %s after scan %s (%s)",
+            self.run_id,
+            row["scan_id"],
+            row["scan_time"],
+            extra={"console": True},
+        )
+
+    def _already_settled(self, scan_id: str, scan_time) -> bool:
+        """Whether this run is done with the scan: it is complete, the run went
+        past it before it stopped, or it failed and is not to be tried again."""
+        scan = self.collection.catalog.get_scan(self.run_id, scan_id)
+        if scan is None:
+            raise StoreError(f"Queued scan '{scan_id}' is not registered for run '{self.run_id}'")
+        if scan["status"] == "complete":
+            return True
+        when = self._normalize_scan_time(scan_time)
+        if self._resumed_after is not None and when is not None and when <= self._resumed_after:
+            return True
+        return scan["status"] == "failed" and self._skip_failed
 
     # ── Rolling history helpers ───────────────────────────────────────────────
 
@@ -463,8 +545,31 @@ class RadarProcessor(threading.Thread):
         return scan_time
 
     def _record_scan_failure(self, scan_id: str) -> None:
-        """Mark the scan failed in the catalog; never mask the original error."""
+        """Mark a scan whose pass broke off as failed; never mask the original error."""
         try:
             self.collection.catalog.mark_scan_failed(self.run_id, scan_id)
         except StoreError as exc:
             logger.error("Could not record scan failure for '%s': %s", scan_id, exc)
+
+
+def _read_from_store(node, context: dict, scan: ScanAt) -> str | None:
+    """Add to ``context`` the inputs of ``node`` that no module of this pass
+    produced; say which one the store does not hold for the scan, if any."""
+    for key in node.inputs:
+        if key in context:
+            continue
+        value = read_store_input(key, scan)
+        if value is NOT_STORED:
+            return f"input '{key}' is not stored for this scan"
+        context[key] = value
+    return None
+
+
+def _statuses(modules: tuple[str, ...], run: GraphRun) -> dict[str, tuple[str, str | None]]:
+    """Each module's (status, reason) for the catalog, from one pass over the graph."""
+    statuses: dict[str, tuple[str, str | None]] = dict.fromkeys(modules, ("done", None))
+    statuses.update({name: ("skipped", reason) for name, reason in run.skipped.items()})
+    statuses.update(
+        {name: ("failed", f"{type(exc).__name__}: {exc}") for name, exc in run.failed.items()}
+    )
+    return statuses

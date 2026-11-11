@@ -148,6 +148,7 @@ def test_empty_flashes_returns_empty_frames_with_columns():
         assert col in scan_df.columns
 
 
-def test_raises_without_minute_masks():
-    with pytest.raises(ValueError, match="minute mask"):
-        _compute([_flash(1, "2024-05-18T19:02:00")], _sources([1]), [])
+def test_a_scan_without_minute_masks_has_no_rows():
+    minutes_df, scan_df = _compute([_flash(1, "2024-05-18T19:02:00")], _sources([1]), [])
+
+    assert minutes_df.empty and scan_df.empty

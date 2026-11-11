@@ -61,7 +61,8 @@ class DetectModule(BaseModule):
     summary = "segment cells from the grid"
     param_sections = ("segmenter",)
     required_history = 1
-    pipeline_phase = 0
+    # Seed carry: the previous scan's advected labels, carry ages and cell count.
+    prior_inputs = ("projected_ds", "seed_carry", "num_cells")
     inputs = ["grid_ds_2d", "grid_ds", "prior_scans", "detection_config"]
     # detection_decisions: every seed and carried claim this scan and what
     # became of it — analysis-only, written to decisions.db.
@@ -85,7 +86,7 @@ class DetectModule(BaseModule):
         if seg.seed_carry_frames > 0 and not projection_enabled:
             raise ValueError(
                 "segmenter.seed_carry_frames > 0 needs the projection module (its advected "
-                "labels are the seeds carried forward) — list projection under core: "
+                "labels are the seeds carried forward) — list projection under modules: "
                 "or set params: segmenter: {seed_carry_frames: 0}"
             )
         method_params = getattr(seg, f"{seg.method}_params").model_dump()

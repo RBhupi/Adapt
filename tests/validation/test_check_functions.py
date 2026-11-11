@@ -104,7 +104,9 @@ def _valid_tracked_cells():
 def _valid_cell_events():
     return pd.DataFrame(
         {
-            "time": pd.to_datetime(["2025-01-01"]),
+            "event_seq": [0],
+            "source_scan_id": [None],
+            "target_scan_id": ["scan-1"],
             "event_type": ["INITIATION"],
             "source_cell_uid": [None],
             "target_cell_uid": ["abc-001"],

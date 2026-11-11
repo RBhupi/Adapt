@@ -20,7 +20,8 @@ import xarray as xr
 
 from adapt.runtime.processor import RadarProcessor
 from adapt.utils.time import to_scan_iso
-from tests.helpers.fake_graph import fake_core
+from tests.helpers.fake_graph import fake_graph
+from tests.helpers.tracking_store import one_cell_tables
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -66,18 +67,7 @@ def _fake_multi_result(scan_time: datetime) -> dict:
         "cell_adjacency": pd.DataFrame(
             {"cell_label_a": [], "cell_label_b": [], "touching_boundary_pixels": []}
         ),
-        "tracked_cells": pd.DataFrame(
-            {"cell_label": [1], "cell_uid": ["uid-1"], "area": [10.0], "max_reflectivity": [45.0]}
-        ),
-        "cell_events": pd.DataFrame(
-            {
-                "event_type": ["INITIATION"],
-                "source_cell_uid": [None],
-                "target_cell_uid": ["uid-1"],
-                "cost": [0.0],
-                "event_group_id": [None],
-            }
-        ),
+        **one_cell_tables("uid-1", scan_time),
         "scan_time": scan_time,
     }
 
@@ -96,7 +86,7 @@ def test_queue_scan_time_reaches_module_context(monkeypatch, pipeline_config, st
             "num_cells": 1,
         }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: {})
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: {})
 
     # The file name carries NO parseable stamp: the queued value is the only
     # possible source, so this fails if the processor drops it.
@@ -118,7 +108,7 @@ def test_minted_scan_id_reaches_tracking_rows(monkeypatch, pipeline_config, stor
             "num_cells": 1,
         }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
 
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-a", _T1)) is True
     second = _msg(store_env, tmp_path, "nostamp-b", _T2)
@@ -162,7 +152,7 @@ def test_scan_registration_artifacts_and_attrs_share_identity(
             "num_cells": 1,
         }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(_T2))
 
     first = _msg(store_env, tmp_path, "nostamp-a", scan_times[0])
     second = _msg(store_env, tmp_path, "nostamp-b", scan_times[1])
@@ -215,7 +205,7 @@ def test_message_scan_time_wins_over_module_results(
             "num_cells": 1,
         }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(wrong))
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: _fake_multi_result(wrong))
 
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-a", _T1)) is True
     assert proc.process_file(_msg(store_env, tmp_path, "nostamp-b", _T2)) is True

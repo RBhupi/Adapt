@@ -24,6 +24,7 @@ from adapt.persistence.errors import StoreError
 from adapt.persistence.objects import ArtifactMeta, ObjectStore, raw_object_name
 from adapt.persistence.store import Collection
 from adapt.utils.identity import scan_id_from_bytes
+from adapt.utils.time import from_scan_iso
 
 __all__ = ["StoreAcquirer"]
 
@@ -114,6 +115,27 @@ class StoreAcquirer:
             scan_time,
             existing["original_filename"],
         )
+
+    def stored_scans(self) -> list[dict]:
+        """A queue message for every scan this run already has, in time order."""
+        catalog = self._collection.catalog
+        messages = []
+        for scan in catalog.run_scans(self._run_id):
+            raw = catalog.find_artifact_by_scan(scan["scan_id"], "raw_volume")
+            if raw is None:
+                raise StoreError(
+                    f"Scan '{scan['scan_id']}' of run '{self._run_id}' has no raw volume "
+                    "in the store"
+                )
+            messages.append(
+                {
+                    "artifact_id": raw["artifact_id"],
+                    "scan_id": scan["scan_id"],
+                    "scan_time": from_scan_iso(scan["scan_time"]),
+                    "queued_at": time.time(),
+                }
+            )
+        return messages
 
     def _register(
         self, artifact_id: str, scan_id: str, scan_time: datetime, source_file_name: str

@@ -12,7 +12,6 @@ several components call it during startup.
 
 import importlib
 import inspect
-import sys
 
 import pytest
 import yaml
@@ -21,22 +20,12 @@ from adapt.execution import pipeline_builder
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import (
     _DEFAULTS_YAML,
-    _POSTPROCESS_DEFAULTS_YAML,
     _ensure_modules_registered,
     catalog_module_names,
 )
 from adapt.modules.base import BaseModule
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def isolated_postprocess_catalog():
-    """The catalog imports the post-process node xlma_stat; drop it afterwards so
-    the global registry stays the live-pipeline set the rest of the suite expects."""
-    yield
-    registry.unregister("xlma_stat")
-    sys.modules.pop("adapt.execution.nodes.xlma_stat", None)
 
 
 def _declared_module_paths() -> list[str]:
@@ -110,25 +99,17 @@ def _module_names_of(path: str) -> list[str]:
     ]
 
 
-@pytest.mark.usefixtures("isolated_postprocess_catalog")
-def test_catalog_lists_live_then_postprocess_modules_in_file_order():
-    """The catalog is both discovery files, live first, each in its own order."""
-    with open(_POSTPROCESS_DEFAULTS_YAML, encoding="utf-8") as f:
-        post_paths = yaml.safe_load(f)["postprocess"]["modules"]
-    expected = [
-        name for path in [*_declared_module_paths(), *post_paths] for name in _module_names_of(path)
-    ]
+def test_catalog_lists_its_modules_in_file_order():
+    expected = [name for path in _declared_module_paths() for name in _module_names_of(path)]
 
     assert catalog_module_names() == expected
 
 
-@pytest.mark.usefixtures("isolated_postprocess_catalog")
 def test_catalog_registers_every_module_it_lists():
     for name in catalog_module_names():
         assert name in registry
 
 
-@pytest.mark.usefixtures("isolated_postprocess_catalog")
 def test_catalog_entry_that_registers_no_module_raises(monkeypatch, tmp_path):
     """A discovery path must define a module; a stray path is a catalog typo."""
     stray = tmp_path / "defaults.yaml"
@@ -136,11 +117,4 @@ def test_catalog_entry_that_registers_no_module_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", stray)
 
     with pytest.raises(RuntimeError, match="adapt.execution.graph"):
-        catalog_module_names()
-
-
-def test_unreadable_postprocess_catalog_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(pipeline_builder, "_POSTPROCESS_DEFAULTS_YAML", tmp_path / "missing.yaml")
-
-    with pytest.raises(RuntimeError, match="Cannot read post-process module list"):
         catalog_module_names()

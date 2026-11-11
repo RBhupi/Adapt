@@ -235,7 +235,7 @@ class UserConfig(AdaptBaseModel):
     # modules; a present list runs only the named ones.
     modules: list[str] | None = None
 
-    # Per-module config params, keyed by module name (extended and post-processing modules)
+    # Per-module config params, keyed by module name (the modules that own their options)
     module_params: dict[str, dict[str, Any]] | None = None
 
     # Nested overrides (advanced users)

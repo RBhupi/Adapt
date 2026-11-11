@@ -299,24 +299,18 @@ def test_heavy_dependency_stays_in_its_component(dep: str) -> None:
 # output key would shadow each other; an input nobody produces and nobody seeds
 # is a typo that only fails at runtime. These tests make both fail at CI time.
 
-# The keys the runtime provides before the graph runs (legitimate module inputs
-# that no module produces) are named once, in ``adapt.contracts.SCAN_SEEDS``,
-# plus one ``<name>_config`` per module.
+# The keys the runtime provides (legitimate module inputs that no module
+# produces) are named once, in ``adapt.contracts``: ``SCAN_SEEDS`` and
+# ``STORE_VIEWS``, plus one ``<name>_config`` per module.
 
 
 def _registered_default_modules():
-    """Live pipeline modules only — postprocess modules have their own injector.
-
-    Post-process modules (pipeline_phase == POSTPROCESS_PHASE) receive
-    repository-backed inputs from the PostProcessor on demand, so their inputs
-    are validated by the postprocessor tests, not by this seed-key registry.
-    """
+    """One instance of every catalog module."""
     from adapt.execution.module_registry import registry
     from adapt.execution.pipeline_builder import _ensure_modules_registered
-    from adapt.modules.base import POSTPROCESS_PHASE
 
     _ensure_modules_registered()
-    return [m for m in registry.create_modules() if m.pipeline_phase != POSTPROCESS_PHASE]
+    return registry.create_modules()
 
 
 def test_module_output_keys_are_unique() -> None:
@@ -339,11 +333,11 @@ def test_module_output_keys_are_unique() -> None:
 
 def test_module_inputs_are_produced_or_seeded() -> None:
     """Every declared input is another module's output or a runtime-seeded key."""
-    from adapt.contracts import SCAN_SEEDS, config_key
+    from adapt.contracts import SCAN_SEEDS, STORE_VIEWS, config_key
 
     modules = _registered_default_modules()
     produced = {key for m in modules for key in m.outputs}
-    provided = SCAN_SEEDS | {config_key(m.name) for m in modules}
+    provided = SCAN_SEEDS | STORE_VIEWS | {config_key(m.name) for m in modules}
     orphans: list[str] = []
 
     for module in modules:
@@ -353,8 +347,8 @@ def test_module_inputs_are_produced_or_seeded() -> None:
 
     assert not orphans, (
         "\nInput key is neither produced by any module nor seeded by the runtime — "
-        "either a typo in the declaration or adapt.contracts.SCAN_SEEDS needs the "
-        "new runtime-provided key:\n" + "\n".join(orphans)
+        "either a typo in the declaration or adapt.contracts.SCAN_SEEDS / STORE_VIEWS "
+        "needs the new runtime-provided key:\n" + "\n".join(orphans)
     )
 
 
@@ -449,8 +443,6 @@ def test_layer_stack_covers_the_real_source_tree() -> None:
 _DDL_ALLOWED_PY = {
     # The sanctioned dynamic creator: frozen first-frame product tables.
     "persistence/products.py",
-    # Legacy bespoke DDL — shrink-only; consolidate into schemas/*.sql.
-    "persistence/track_store.py",
 }
 
 # Case-sensitive: SQL here is uppercase by convention; lowercase "Create
@@ -486,12 +478,9 @@ def test_create_table_statements_have_one_home() -> None:
 # ── Field-generic core: reflectivity stat-column literals are quarantined ─────
 # After the tracking_field refactor, stat columns are minted via
 # adapt.contracts.stat_column and read via the configured field. The literal
-# "radar_reflectivity_max" may appear only in files still awaiting phase-3
-# consumer role resolution, plus the fixed cells_by_scan DDL. Shrink-only.
+# "radar_reflectivity_max" appears nowhere in the package. Shrink-only: it stays empty.
 
-_REFL_LITERAL_ALLOWED = {
-    "persistence/track_store.py",  # _CBS_FIXED_COLUMNS (fixed DDL)
-}
+_REFL_LITERAL_ALLOWED: set[str] = set()
 
 
 def test_reflectivity_stat_literal_is_quarantined() -> None:
@@ -609,3 +598,101 @@ def test_consumers_read_only_through_the_store_api() -> None:
     for py_file in sorted(consumers_dir.rglob("*.py")):
         violations.extend(_consumer_violations(py_file))
     assert not violations, "consumers must read via the store API only:\n" + "\n".join(violations)
+
+
+# ── One module graph: the designs it replaced stay gone ───────────────────────
+# Every per-scan step is a module of one graph (ARCHITECTURE.md). These names
+# belonged to what that graph replaced: module kinds and passes (core /
+# extended / post-processing), the store's hand-built track tables, and
+# consumers run as threads handing each other files. A match means a second
+# mechanism is growing back beside the graph.
+_REPLACED_NAMES = (
+    "EXTENDED_PHASE",
+    "POSTPROCESS_PHASE",
+    "pipeline_phase",
+    "post-persistence",
+    "enrichment",
+    "postprocess",
+    "PostProcessor",
+    "REQUIRED_SCAN_PRODUCTS",
+    "TrackStore",
+    "TrackTablesWrite",
+    "RunFollowers",
+    "CONSUMERS",
+    "current_selection",
+    "grid_ds_3d",
+)
+_REPLACED_SECTIONS = re.compile(r"^\s*(core|extended|consumers|postprocessing):", re.MULTILINE)
+
+
+def test_names_of_the_replaced_designs_are_not_in_the_source() -> None:
+    offenders = [
+        f"{_rel(path, _SRC_ADAPT)}: {name}"
+        for path in sorted(_SRC_ADAPT.rglob("*"))
+        if path.suffix in {".py", ".yaml", ".sql"}
+        for name in _REPLACED_NAMES
+        if name in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, (
+        "names of the designs the one module graph replaced are back:\n" + "\n".join(offenders)
+    )
+
+
+def test_packaged_yaml_has_no_section_of_the_old_pipeline_file() -> None:
+    """A pipeline file is ``run / modules / params``; presets and defaults follow it."""
+    offenders = [
+        _rel(path, _SRC_ADAPT)
+        for path in sorted(_SRC_ADAPT.rglob("*.yaml"))
+        if _REPLACED_SECTIONS.search(path.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, f"old pipeline-file sections in: {offenders}"
+
+
+# What a node object may set on itself while running: the algorithm it builds
+# once from its config, and xlma_stat's flash files (inputs read once, not
+# results). Anything a module carries from scan to scan is a key it both reads
+# and writes — the runtime hands it back and checkpoints it — never an attribute.
+_NODE_ATTRIBUTES = {"_analyzer", "_flashes", "_folder", "_loader", "_projector", "_segmenter"}
+
+
+def _attributes_set_while_running(py_file: Path) -> set[str]:
+    """Names of ``self`` attributes assigned outside ``__init__`` in ``py_file``."""
+    found: set[str] = set()
+    for cls in ast.walk(ast.parse(py_file.read_text(encoding="utf-8"))):
+        if not isinstance(cls, ast.ClassDef):
+            continue
+        for method in cls.body:
+            if not isinstance(method, ast.FunctionDef) or method.name == "__init__":
+                continue
+            for node in ast.walk(method):
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+                    targets = [node.target]
+                else:
+                    continue
+                for target in targets:
+                    while isinstance(target, ast.Subscript):
+                        target = target.value
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "self"
+                    ):
+                        found.add(target.attr)
+    return found
+
+
+def test_a_module_node_carries_nothing_between_scans_in_its_attributes() -> None:
+    """A run resumed from its checkpoint must go on as if it had not stopped,
+    which holds only while every module's state is in the keys the runtime carries."""
+    nodes = _SRC_ADAPT / "execution" / "nodes"
+    offenders = {
+        _rel(py_file, _SRC_ADAPT): sorted(extra)
+        for py_file in sorted(nodes.glob("*.py"))
+        if (extra := _attributes_set_while_running(py_file) - _NODE_ATTRIBUTES)
+    }
+    assert not offenders, (
+        "a node sets attributes while running; return carried state under a key the "
+        f"module also reads (see BaseModule), or extend _NODE_ATTRIBUTES: {offenders}"
+    )

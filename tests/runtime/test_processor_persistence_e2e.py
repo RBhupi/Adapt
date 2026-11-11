@@ -17,11 +17,11 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.persistence.products import SchemaLedger
-from adapt.persistence.track_store import TrackStore
+from adapt.modules.tracking.tables import Lifecycle
 from adapt.runtime.processor import RadarProcessor
-from tests.helpers.fake_graph import fake_core
+from tests.helpers.fake_graph import fake_graph
 from tests.helpers.queue_msg import msg as _msg
+from tests.helpers.tracking_store import going_on, no_adjacency, tracking_outputs
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -65,6 +65,17 @@ def test_process_file_persists_all_declared_outputs(
             "num_cells": 1,
         }
 
+    tracked = pd.DataFrame(
+        {"cell_label": [1], "cell_uid": ["uid-1"], "area": [10.0], "max_reflectivity": [45.0]}
+    )
+    tracking_tables, _ = tracking_outputs(
+        tracked,
+        going_on(tracked),
+        no_adjacency(),
+        scan_id="second-scan",
+        scan_time=_T2,
+        lifecycle=Lifecycle(),
+    )
     fake_multi_result = {
         "projected_ds": _fake_ds(),
         "analysis_ds": _fake_ds(),
@@ -72,24 +83,11 @@ def test_process_file_persists_all_declared_outputs(
         "cell_adjacency": pd.DataFrame(
             {"cell_label_a": [], "cell_label_b": [], "touching_boundary_pixels": []}
         ),
-        "tracked_cells": pd.DataFrame(
-            {"cell_label": [1], "cell_uid": ["uid-1"], "area": [10.0], "max_reflectivity": [45.0]}
-        ),
-        "cell_events": pd.DataFrame(
-            {
-                "event_type": ["INITIATION"],
-                "source_cell_uid": [None],
-                "target_cell_uid": ["uid-1"],
-                "cost": [0.0],
-                "event_group_id": [None],
-            }
-        ),
+        **tracking_tables,
         "scan_time": _T2,
     }
 
-    fake_core(proc, monkeypatch, _fake_single, lambda ctx: fake_multi_result)
-    # Enrichment (phase 3) is covered by test_processor_enrich.py; the fake
-    # executors don't carry the module configs it needs.
+    fake_graph(proc, monkeypatch, _fake_single, lambda ctx: fake_multi_result)
 
     first = _msg(store_env, tmp_path, "TEST_20240518_120000", scan_time=_T1)
     second = _msg(store_env, tmp_path, "TEST_20240518_120500", scan_time=_T2)
@@ -116,11 +114,16 @@ def test_process_file_persists_all_declared_outputs(
         conn.close()
     assert stats_rows >= 1
 
-    # Tracking tables from the declared TrackTablesWrite spec.
-    ledger = SchemaLedger(store_env.collection.products_path, store_env.collection.catalog)
-    with TrackStore(store_env.collection.products_path, ledger=ledger) as store:
-        rows = store.get_cells_by_scan(store_env.run_id, second["scan_id"])
-    assert rows["cell_uid"].tolist() == ["uid-1"]
+    # Tracking tables from tracking's declared specs, read through the view.
+    conn = sqlite3.connect(store_env.collection.products_path)
+    try:
+        uids = conn.execute(
+            "SELECT cell_uid FROM cells_by_scan WHERE run_id = ? AND scan_id = ?",
+            (store_env.run_id, second["scan_id"]),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert uids == [("uid-1",)]
 
-    # The second scan is complete: all required products were linked.
+    # The second scan is complete: its pass ended with no module failing.
     assert catalog.scan_is_complete(store_env.run_id, second["scan_id"])

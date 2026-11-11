@@ -1,10 +1,10 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Output contract for the cell_volume_stats enrichment module.
+"""Output contract for the cell_volume_stats module.
 
-Validates the per-cell 3D-statistics DataFrame the module returns. Empty frames
-are tolerated: the no-cells / no-3D-grid path legitimately produces no rows.
+Validates the per-cell 3D-statistics DataFrame the module returns. An empty
+frame is valid: a scan without cells has no rows.
 """
 
 import pandas as pd
@@ -12,7 +12,6 @@ import pandas as pd
 from adapt.contracts.pipeline import require
 
 _REQUIRED_COLS = (
-    "cell_uid",
     "cell_label",
     "cell_area_km2",
     "cell_volume_km3",
@@ -24,7 +23,7 @@ _REQUIRED_COLS = (
 def assert_cell_volume_stats(df) -> None:
     require(isinstance(df, pd.DataFrame), "cell_volume_stats output must be a DataFrame")
     if df.empty:
-        return  # no-cells / no-grid path produces an empty frame — valid
+        return  # a scan without cells has no rows
     for col in _REQUIRED_COLS:
         require(col in df.columns, f"cell_volume_stats missing column '{col}'")
 

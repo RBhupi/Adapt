@@ -36,7 +36,7 @@ class ProjectionModule(BaseModule):
     summary = "optical-flow projection between scans"
     param_sections = ("projector",)
     required_history = 2
-    pipeline_phase = 0
+    prior_inputs = ("segmented_ds",)
     inputs = ["segmented_ds", "prior_scans", "projection_config"]
     outputs = ["projected_ds"]
     input_contracts = {"segmented_ds": check_segmented_ds, "prior_scans": check_prior_scans}

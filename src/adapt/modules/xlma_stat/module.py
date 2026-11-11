@@ -5,7 +5,7 @@
 
 Lightning science only. Each flash is matched to the cell mask of *its own
 minute* (exact 1-minute bin) — the masks themselves are produced upstream by
-the projection module and read through persistence; this module never projects
+the projection module and taken from the scan's analysis dataset; this module never projects
 cells, interpolates masks, or estimates motion. Outputs roll up per
 ``(cell_uid, minute)`` (the authoritative association) and per
 ``(cell_uid, scan)`` (the radar-aligned aggregate, derived only from the
@@ -14,7 +14,6 @@ minute rows).
 
 import logging
 from collections import Counter
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -27,6 +26,7 @@ from adapt.modules.xlma_stat.aggregate import (
 from adapt.modules.xlma_stat.attribution import UNATTRIBUTED, attribute_flashes
 from adapt.modules.xlma_stat.config import XlmaStatConfig
 from adapt.modules.xlma_stat.geo import project_lonlat_to_xy
+from adapt.modules.xlma_stat.masks import MinuteMask
 
 logger = logging.getLogger(__name__)
 
@@ -78,20 +78,6 @@ _SCAN_COLUMNS = [
 ]
 
 
-@dataclass(frozen=True)
-class MinuteMask:
-    """One minute's cell mask + grid, as injected by the PostProcessor."""
-
-    minute_time: pd.Timestamp
-    cell_labels: np.ndarray  # 2D (ny, nx) int
-    x: np.ndarray  # 1D metres
-    y: np.ndarray  # 1D metres
-    cell_uid_lut: np.ndarray  # 1D str, indexed by cell_label
-    source_scan_time: pd.Timestamp  # scan whose labels the mask carries
-    target_scan_time: pd.Timestamp  # scan the mask was advected toward
-    interpolation_fraction: float  # 0.0 = real segmentation, (0, 1] = advected
-
-
 class XlmaStatistics:
     """Match flashes to their minute's mask, then aggregate per minute and scan."""
 
@@ -106,13 +92,7 @@ class XlmaStatistics:
         radar_origin: tuple[float, float],
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return ``(xlma_stat_minutes, xlma_stat_scan)`` frames."""
-        if not minute_masks:
-            raise ValueError(
-                "No minute masks available for xlma_stat association — the run "
-                "has no registration_minutes geometry; reprocess it with the "
-                "current pipeline."
-            )
-        if flashes.empty:
+        if not minute_masks or flashes.empty:
             return self._empty_frames()
 
         masks_by_minute = {pd.Timestamp(m.minute_time): m for m in minute_masks}

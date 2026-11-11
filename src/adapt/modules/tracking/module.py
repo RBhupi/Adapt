@@ -75,7 +75,7 @@ from adapt.modules.tracking.observations import (
 )
 from adapt.utils.time import normalize_time_scalar
 
-__all__ = ["CellTracker", "_cell_uid_from_signature", "track_signature_v2"]
+__all__ = ["CellTracker", "TrackerState", "_cell_uid_from_signature", "track_signature_v2"]
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,22 @@ class _LastScan:
     time_s: float
 
 
+@dataclass(frozen=True)
+class TrackerState:
+    """What tracking one scan needs from the scans before it.
+
+    The live tracks as last observed, the scan they were observed in, the scan
+    interval before it, the latent tracks with their carried footprints, and the
+    accepted motion over the recent intervals (for the crossing test).
+    """
+
+    tracks: tuple[Track, ...] = ()
+    last: _LastScan | None = None
+    prev_dt_s: float | None = None
+    latent: tuple[LatentTrack, ...] = ()
+    intervals: tuple[_Interval, ...] = ()
+
+
 @dataclass
 class _Outcome:
     """What one scan pair decided, cell by cell (indices into prev tracks / labels)."""
@@ -128,16 +144,34 @@ def _distance(fp: Footprint, cell: Cell, grid: Grid) -> float:
 
 
 class CellTracker:
-    """Track cells across scans; one ``track`` call per scan, in time order."""
+    """Track cells across scans; one ``track`` call per scan, in time order.
 
-    def __init__(self, config: TrackingConfig):
+    A tracker starts from ``state`` (None: no scan tracked yet) and ``state``
+    after a ``track`` call is what the next scan's tracker starts from, so a
+    run is the same whether one tracker sees every scan or each scan gets a new
+    one built from the last one's state.
+    """
+
+    def __init__(self, config: TrackingConfig, state: TrackerState | None = None):
         self.cfg = config
-        self._tracks: list[Track] = []
-        self._last: _LastScan | None = None
-        self._prev_dt_s: float | None = None
-        self._latent: list[LatentTrack] = []
-        self._intervals: list[_Interval] = []
+        state = TrackerState() if state is None else state
+        self._tracks: list[Track] = list(state.tracks)
+        self._last: _LastScan | None = state.last
+        self._prev_dt_s: float | None = state.prev_dt_s
+        self._latent: list[LatentTrack] = list(state.latent)
+        self._intervals: list[_Interval] = list(state.intervals)
         self._decisions: TrackingDecisions | None = None
+
+    @property
+    def state(self) -> TrackerState:
+        """What the tracker of the next scan starts from."""
+        return TrackerState(
+            tracks=tuple(self._tracks),
+            last=self._last,
+            prev_dt_s=self._prev_dt_s,
+            latent=tuple(self._latent),
+            intervals=tuple(self._intervals),
+        )
 
     # ── public API ─────────────────────────────────────────────────────────
 

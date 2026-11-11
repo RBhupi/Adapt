@@ -1,0 +1,448 @@
+# Copyright © 2026, UChicago Argonne, LLC
+# See LICENSE for terms and disclaimer.
+
+"""``adapt run NAME``: the pipeline file's modules over its scans, end to end.
+
+Each run is real — orchestrator, processor, store — over a local folder of
+synthetic scans (historical mode). The science upstream of target selection is
+one fake module that hands on each scan's cells as the real modules do; target
+selection and radar_command are the real ones.
+"""
+
+import logging
+import signal
+import subprocess
+import sys
+
+import pandas as pd
+import pytest
+from pydantic import BaseModel, ConfigDict, Field
+from tests.helpers import radar_store
+from tests.helpers.pipeline_files import API, RADAR_COMMAND, TARGET_SELECTION, write_pipeline
+from tests.helpers.tracking_store import TRACKING_TABLES, tracking_outputs
+
+from adapt.api import StoreClient
+from adapt.contracts import ProductTableWrite
+from adapt.execution.module_registry import registry
+from adapt.execution.nodes.analysis import AnalysisModule
+from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
+from adapt.execution.nodes.ingest import LoadModule
+from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.base import BaseModule
+from adapt.modules.tracking.tables import Lifecycle
+
+pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
+
+PROBE = "cli_probe"
+ECHO = "cli_echo"
+CELLS = "cli_cells"
+RUN_ID = "2024MAY18-1200-KTST"
+RADAR = [CELLS, "target_selection", "radar_command"]
+RULE = {"target_selection": TARGET_SELECTION}
+RADAR_PARAMS = {**RULE, "radar_command": RADAR_COMMAND}
+STORED = {"source": "stored_run", "radar": "KTST", "mode": "historical"}
+
+
+@pytest.fixture(autouse=True)
+def _restore_root_logger():
+    """A run configures and shuts down root logging; give pytest its handlers back."""
+    root = logging.getLogger()
+    saved, level = root.handlers[:], root.level
+    yield
+    root.handlers[:] = saved
+    root.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def probe():
+    """Module ``cli_probe``: runs each hook in the list, then passes the scan."""
+    hooks: list = []
+
+    class _Probe(BaseModule):
+        name = PROBE
+        inputs = ["scan_id"]
+        outputs = ["cli_probe_out"]
+
+        def run(self, context: dict) -> dict:
+            for hook in hooks:
+                hook()
+            return {"cli_probe_out": context["scan_id"]}
+
+    registry.register(_Probe)
+    yield hooks
+    registry.unregister(PROBE)
+
+
+class _EchoConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tag: str = Field("untagged", description="What the row records")
+
+
+@pytest.fixture(autouse=True)
+def _echo():
+    """Module ``cli_echo``, which owns its options: one row per scan with the tag it was given."""
+
+    class _Echo(BaseModule):
+        name = ECHO
+        config_class = _EchoConfig
+        inputs = [f"{ECHO}_config"]
+        outputs = ["cli_echo_rows"]
+        persistence = (
+            ProductTableWrite(
+                key="cli_echo_rows", table="cli_echo", primary_key=("run_id", "scan_id")
+            ),
+        )
+
+        @classmethod
+        def build_config(cls, internal_config) -> dict:
+            return _EchoConfig(**internal_config.module_params.get(cls.name, {})).model_dump()
+
+        def run(self, context: dict) -> dict:
+            return {"cli_echo_rows": pd.DataFrame([context[f"{ECHO}_config"]])}
+
+    registry.register(_Echo)
+    yield
+    registry.unregister(ECHO)
+
+
+@pytest.fixture(autouse=True)
+def _cells():
+    """Module ``cli_cells``: everything up to tracking and cell_volume_stats in one
+    step — each scan's two cells (see ``radar_store``), stored as the real modules
+    store them. The first scan has no projection, as in a real run."""
+
+    class _Cells(BaseModule):
+        name = CELLS
+        inputs = ["scan_time", "scan_id"]
+        outputs = [
+            "grid_ds",
+            "cell_stats",
+            "cell_adjacency",
+            "analysis_ds",
+            "cell_identity",
+            "cell_events",
+            "cell_tracks",
+            "cell_volume_stats_rows",
+        ]
+        persistence = (
+            *LoadModule.persistence[:1],
+            *AnalysisModule.persistence,
+            *TrackingModule.persistence[:1],
+            *TRACKING_TABLES,
+            *CellVolumeStatsModule.persistence,
+        )
+
+        def __init__(self) -> None:
+            self._lifecycle = Lifecycle()
+
+        def run(self, context: dict) -> dict:
+            index = context["scan_time"].minute // 5  # the scans are 5 minutes apart
+            result = radar_store.scan_outputs(index)
+            tables, self._lifecycle = tracking_outputs(
+                result["tracked_cells"],
+                result["cell_events"],
+                result["cell_adjacency"],
+                scan_id=context["scan_id"],
+                scan_time=context["scan_time"],
+                lifecycle=self._lifecycle,
+            )
+            return {key: {**result, **tables}[key] for key in self.outputs}
+
+    registry.register(_Cells)
+    yield
+    registry.unregister(CELLS)
+
+
+@pytest.fixture
+def ctrl_c():
+    """Ctrl-C raises KeyboardInterrupt, as in a foreground shell: a background job
+    inherits SIGINT ignored, and Python then installs no handler for it."""
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    yield
+    signal.signal(signal.SIGINT, previous)
+
+
+@pytest.fixture
+def case(tmp_path, adapt, monkeypatch, capsys):
+    """A store as the current folder, and a folder holding one scan of radar KTST."""
+    root = tmp_path / "case"
+    adapt("init", str(root))
+    monkeypatch.chdir(root)
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    (scans / "KTST20240518_120000_V06").write_bytes(b"x" * 6000)
+    capsys.readouterr()
+    return root, scans
+
+
+def _live(case, modules=(PROBE,), **sections):
+    """Write ``case.yaml``: the scan folder through ``modules``, plus ``sections``."""
+    root, scans = case
+    run = {
+        "source": "local_directory",
+        "radar": "KTST",
+        "mode": "historical",
+        "start_time": "2024-05-18T12:00:00Z",
+        "end_time": "2024-05-18T13:00:00Z",
+        "source_dir": str(scans),
+    }
+    return write_pipeline(root, "case", run=run, modules=list(modules), **sections)
+
+
+def _more_scans(case, count: int) -> None:
+    _, scans = case
+    for n in range(1, count + 1):
+        # Other bytes than the first: a scan's identity is the hash of its file.
+        (scans / f"KTST20240518_12{5 * n:02d}00_V06").write_bytes(bytes([n]) * 6000)
+
+
+def _run(root, run_id=None):
+    with StoreClient(root) as client:
+        return client.run(run_id) if run_id else client.latest_run("KTST")
+
+
+def _table(root, name, run_id=RUN_ID) -> pd.DataFrame:
+    with StoreClient(root) as client:
+        return client.table(name, "KTST", run_id=run_id).sort_values("scan_time")
+
+
+def test_a_completed_run_exits_zero(case, adapt):
+    root, _ = case
+    _live(case)
+
+    assert adapt("run", "case") == 0
+
+    assert _run(root).status == "completed"
+
+
+def test_the_run_records_its_pipeline_file(case, adapt):
+    root, _ = case
+    path = _live(case, modules=[PROBE, ECHO], params={ECHO: {"tag": "recorded"}})
+
+    adapt("run", "case")
+
+    run_id = _run(root).run_id
+    with StoreClient(root) as client:
+        pipeline = client.run_config(run_id)["pipeline"]
+    assert (pipeline["name"], pipeline["file"]) == ("case", str(path))
+    assert pipeline["content"]["modules"] == [PROBE, ECHO]
+    assert pipeline["content"]["params"] == {ECHO: {"tag": "recorded"}}
+    assert f"config {path}" in (root / "logs" / "pipeline_KTST.log").read_text()
+
+
+def test_verbose_runs_with_debug_logging(case, adapt):
+    root, _ = case
+    _live(case)
+
+    adapt("run", "case", "-v")
+
+    with StoreClient(root) as client:
+        assert client.run_config(_run(root).run_id)["logging"]["level"] == "DEBUG"
+
+
+def test_verbose_shows_debug_output_on_the_console(case, adapt, capsys):
+    _live(case)
+
+    assert adapt("run", "case", "-v") == 0
+
+    assert "Pipeline running in HISTORICAL mode" in capsys.readouterr().err
+
+
+def test_a_module_that_owns_its_options_gets_the_files(case, adapt):
+    root, _ = case
+    _live(case, modules=[PROBE, ECHO], params={ECHO: {"tag": "live"}})
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+
+    assert _table(root, "cli_echo")["tag"].tolist() == ["live"]
+
+
+def test_target_selection_and_radar_command_act_on_every_scan_in_order(case, adapt, capsys):
+    """Three scans; the first has no projection. uid-a (50 dBZ) is the one cell
+    with a 45 dBZ core: selected at the first scan and kept."""
+    root, _ = case
+    _more_scans(case, 2)
+    _live(case, modules=RADAR, params=RADAR_PARAMS)
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+
+    selection = _table(root, "target_selection")
+    assert selection["cell_uid"].tolist() == [radar_store.UID_A] * 3
+    assert selection["reason"].tolist() == ["NEW_TARGET", "CONTINUATION", "CONTINUATION"]
+    commands = _table(root, "radar_commands")
+    # The first scan has no projected footprint to aim at; the next two do.
+    assert commands["outcome"].tolist() == ["TARGET_UNAVAILABLE", "PUBLISHED", "PUBLISHED"]
+    assert commands["scan_id"].tolist() == selection["scan_id"].tolist()
+    assert commands["selection_config_hash"].tolist() == selection["config_hash"].tolist()
+    assert commands["plan_id"].iloc[1] != commands["plan_id"].iloc[2]
+    assert '"scan_pattern": "ppi_sector"' in commands["command_json"].iloc[2]
+    # What the radar was asked to do is on the console, one line per scan.
+    console = capsys.readouterr().err
+    assert console.count("radar_command: command") == 2
+    assert f"written for cell {radar_store.UID_A}" in console
+
+
+def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
+    case, adapt, monkeypatch
+):
+    root, _ = case
+    _more_scans(case, 1)
+    monkeypatch.setenv("ADAPT_TEST_KEY", "a-test-key")
+    unreachable = {**API, "base_url": "http://127.0.0.1:9", "timeout_seconds": 1}
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": unreachable}}
+    _live(case, modules=RADAR, params=params)
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+
+    commands = _table(root, "radar_commands")
+    assert commands["outcome"].tolist() == ["TARGET_UNAVAILABLE", "SEND_FAILED"]
+    assert "unreachable" in commands["detail"].iloc[1]
+    assert "a-test-key" not in commands.to_json()  # the key is never stored
+
+
+@pytest.mark.usefixtures("ctrl_c")
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM], ids=["ctrl-c", "sigterm"])
+def test_a_stop_signal_cancels_the_run(case, adapt, probe, capsys, signum):
+    root, _ = case
+    _live(case)
+    probe.append(lambda: signal.raise_signal(signum))
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 1
+
+    assert _run(root, RUN_ID).status == "cancelled"
+
+
+def test_a_run_with_failed_scans_exits_1_and_does_not_claim_success(case, adapt, probe, capsys):
+    root, _ = case
+    _live(case)
+    probe.append(lambda: 1 / 0)  # every scan fails inside the module
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 1
+
+    out = capsys.readouterr()
+    assert "SUCCESS" not in out.out + out.err
+    assert "Scans that failed: 1" in out.out
+    assert _run(root, RUN_ID).status == "completed"
+
+
+def test_continuing_a_run_needs_the_files_radar(case, adapt, capsys):
+    root, _ = case
+    _live(case)
+    adapt("run", "case", "--run-id", RUN_ID)
+    run = {"source": "aws_nexrad", "radar": "KOTH", "mode": "realtime"}
+    write_pipeline(root, "other", run=run, modules=[PROBE])
+    capsys.readouterr()
+
+    assert adapt("run", "other", "--run-id", RUN_ID) == 2
+
+    err = capsys.readouterr().err
+    assert "KOTH" in err
+    assert "KTST" in err
+
+
+def test_a_pid_file_left_by_a_pipeline_that_has_exited_is_ignored(case, adapt, home):
+    exited = subprocess.Popen([sys.executable, "-c", "pass"])
+    exited.wait()
+    (home / ".adapt").mkdir()
+    (home / ".adapt" / "pipeline.pid").write_text(str(exited.pid))
+    _live(case)
+
+    assert adapt("run", "case") == 0
+
+
+def test_the_pid_file_is_removed_after_the_run(case, adapt, home):
+    _live(case)
+
+    assert adapt("run", "case") == 0
+
+    assert not (home / ".adapt" / "pipeline.pid").exists()
+
+
+# ---------------------------------------------------------------------------
+# Over a stored run (run.source: stored_run)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stored(case, adapt, capsys):
+    """Run ``RUN_ID``: three scans through ``cli_cells`` only, completed."""
+    root, _ = case
+    _more_scans(case, 2)
+    _live(case, modules=[CELLS])
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+    capsys.readouterr()
+    return root
+
+
+def test_modules_added_later_run_over_the_stored_run_reading_the_store(stored, adapt, capsys):
+    write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=RADAR_PARAMS)
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert _table(stored, "target_selection")["cell_uid"].tolist() == [radar_store.UID_A] * 3
+    outcomes = _table(stored, "radar_commands")["outcome"].tolist()
+    assert outcomes == ["TARGET_UNAVAILABLE", "PUBLISHED", "PUBLISHED"]
+    assert _run(stored, RUN_ID).status == "completed"  # the stored run ends as it was
+    assert f"over stored run {RUN_ID}" in capsys.readouterr().out
+
+
+def test_the_stored_runs_own_tables_are_left_as_they_were(stored, adapt):
+    before = _table(stored, "cells_by_scan").to_json()
+    write_pipeline(stored, "later", run=STORED, modules=["target_selection"], params=RULE)
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert _table(stored, "cells_by_scan").to_json() == before
+
+
+def test_another_rule_over_the_same_run_is_kept_beside_the_first(stored, adapt):
+    """Decisions under different rules are different facts: neither replaces the other."""
+    write_pipeline(stored, "later", run=STORED, modules=["target_selection"], params=RULE)
+    adapt("run", "later", "--run-id", RUN_ID)
+    stricter = {
+        **TARGET_SELECTION,
+        "entry": {"gates": [{"field": "radar_reflectivity_max", "op": "ge", "value": 55.0}]},
+    }
+    write_pipeline(
+        stored,
+        "stricter",
+        run=STORED,
+        modules=["target_selection"],
+        params={"target_selection": stricter},
+    )
+
+    assert adapt("run", "stricter", "--run-id", RUN_ID) == 0
+
+    selection = _table(stored, "target_selection")
+    assert len(selection) == 6
+    by_rule = selection.groupby("config_hash")["cell_uid"].apply(lambda uids: uids.notna().sum())
+    assert sorted(by_rule) == [0, 3]  # no cell reaches 55 dBZ; uid-a is chosen at 45
+
+
+def test_running_the_same_modules_over_it_again_changes_nothing(stored, adapt):
+    write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=RADAR_PARAMS)
+    adapt("run", "later", "--run-id", RUN_ID)
+    first = (
+        _table(stored, "target_selection").to_json(),
+        _table(stored, "radar_commands").to_json(),
+    )
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    again = (
+        _table(stored, "target_selection").to_json(),
+        _table(stored, "radar_commands").to_json(),
+    )
+    assert again == first
+
+
+def test_radar_command_never_sends_over_a_stored_run(stored, adapt, monkeypatch):
+    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)  # no key needed: nothing is sent
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=params)
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    outcomes = _table(stored, "radar_commands")["outcome"].tolist()
+    assert outcomes == ["TARGET_UNAVAILABLE", "PUBLISHED", "PUBLISHED"]

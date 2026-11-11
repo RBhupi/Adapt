@@ -11,8 +11,6 @@ the span and re-raised (never swallowed). A graph with no provider still runs.
 import random
 from datetime import UTC, datetime
 
-import pytest
-
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.modules.base import BaseModule
@@ -86,38 +84,20 @@ def test_node_runs_inside_its_own_stage_context() -> None:
     assert seen["stage"] == "ingest"
 
 
-def test_node_failure_records_error_on_span_and_propagates() -> None:
+def test_node_failure_records_error_on_span() -> None:
     obs = _obs()
 
     def boom(ctx):
         raise ValueError("kaboom")
 
     nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)], provided=frozenset()).build()
-    with pytest.raises(ValueError, match="kaboom"):
-        GraphExecutor(nodes, observability=obs).run({}, history=0)
+    run = GraphExecutor(nodes, observability=obs).run({}, history=0)
+
+    assert str(run.failed["detection"]) == "kaboom"
     span = obs.drain_spans()[0]
     assert span.name == "detection"
     assert "ValueError: kaboom" in span.error
     assert obs.metrics.counter_total("errors_total") == 1.0
-
-
-def test_node_failure_annotates_failing_stage() -> None:
-    """A propagating module exception must name the failing stage.
-
-    The scan-level handler logs one failure line; without this annotation it cannot
-    say *which* stage broke. Works with or without a provider (it identifies the
-    stage, independent of telemetry), so assert it on the no-provider path too.
-    """
-
-    def boom(ctx):
-        raise ValueError("kaboom")
-
-    nodes = GraphBuilder([_Stub("detection", [], ["c"], boom)], provided=frozenset()).build()
-    with pytest.raises(ValueError) as excinfo:
-        GraphExecutor(nodes).run({}, history=0)
-
-    notes = getattr(excinfo.value, "__notes__", [])
-    assert any("detection" in note for note in notes)
 
 
 def test_graph_runs_without_a_provider() -> None:

@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS artifact_lineage (
 );
 
 -- One row per scan per run; keys verbatim from the scan-identity change.
--- A scan is 'complete' only when all REQUIRED_SCAN_PRODUCTS are linked.
+-- A scan is 'complete' once the run's pass over it ended with no module failing
+-- (modules skipped for want of earlier scans do not hold it back).
 CREATE TABLE IF NOT EXISTS scans (
     run_id           TEXT NOT NULL,
     scan_id          TEXT NOT NULL,   -- content-derived scan identity (join key)
@@ -67,8 +68,8 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS idx_scans_time ON scans(run_id, scan_time DESC);
 
 -- Which products a scan has, and where each lives (object or products.db
--- table). Completeness = all REQUIRED_SCAN_PRODUCTS linked; auxiliary links
--- (tracking, volume stats, ...) never complete a scan.
+-- table). A reader waits for the product it reads: a scan has a product once
+-- its link is here.
 CREATE TABLE IF NOT EXISTS scan_products (
     run_id      TEXT NOT NULL,
     scan_id     TEXT NOT NULL,
@@ -80,6 +81,33 @@ CREATE TABLE IF NOT EXISTS scan_products (
 
     PRIMARY KEY (run_id, scan_id, product),
     FOREIGN KEY (run_id, scan_id) REFERENCES scans(run_id, scan_id)
+);
+
+-- What became of each module in the run's pass over a scan: it ran ('done'),
+-- could not run ('skipped': too few earlier scans, or a module it needs did
+-- not run) or raised ('failed'). ``reason`` says why for the last two.
+CREATE TABLE IF NOT EXISTS scan_modules (
+    run_id     TEXT NOT NULL,
+    scan_id    TEXT NOT NULL,
+    module     TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('done', 'skipped', 'failed')),
+    reason     TEXT,
+    updated_at TEXT NOT NULL,
+
+    PRIMARY KEY (run_id, scan_id, module),
+    FOREIGN KEY (run_id, scan_id) REFERENCES scans(run_id, scan_id)
+);
+
+-- A run's latest checkpoint: the scan it was taken after and the object that
+-- holds it (see persistence/checkpoints.py). Written in the same transaction
+-- that completes that scan, so the two never disagree; a resumed run starts
+-- from it.
+CREATE TABLE IF NOT EXISTS run_checkpoints (
+    run_id      TEXT PRIMARY KEY,
+    scan_id     TEXT NOT NULL,
+    scan_time   TEXT NOT NULL,   -- ISO8601 UTC of that scan
+    object_name TEXT NOT NULL,   -- path under objects/
+    updated_at  TEXT NOT NULL
 );
 
 -- Frozen first-frame schema per module table; mirrored in products.db and

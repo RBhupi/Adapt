@@ -18,9 +18,11 @@ if TYPE_CHECKING:
 
 
 def data_edges(modules: list["BaseModule"]) -> list[tuple[str, str, str]]:
-    """``(producer, consumer, key)`` for every input matched to a module's output.
+    """``(producer, consumer, key)`` for every input matched to another module's output.
 
-    Ordered by consumer (list order), then by that consumer's input order.
+    Ordered by consumer (list order), then by that consumer's input order. A key
+    a module both reads and writes is its own state carried from its previous
+    scan, not an edge.
 
     Raises
     ------
@@ -41,7 +43,7 @@ def data_edges(modules: list["BaseModule"]) -> list[tuple[str, str, str]]:
         (producers[key], module.name, key)
         for module in modules
         for key in module.inputs
-        if key in producers
+        if key in producers and producers[key] != module.name
     ]
 
 
@@ -85,12 +87,14 @@ class GraphBuilder:
         """
         edges = data_edges(self.modules)
 
-        produced = {key for module in self.modules for key in module.outputs}
+        # What a module itself writes is no source for it: its carried state
+        # comes from the caller.
         unbound = [
             f"Module '{module.name}' needs input '{key}'"
             for module in self.modules
             for key in module.inputs
-            if key not in produced and key not in self.provided
+            if key not in self.provided
+            and not any(key in other.outputs for other in self.modules if other is not module)
         ]
         if unbound:
             raise ValueError(
