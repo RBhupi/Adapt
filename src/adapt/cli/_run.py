@@ -5,8 +5,8 @@
 
 The whole file is checked first — the run section, every listed module
 (configured as it will run, with every input it reads accounted for), the
-source, and the radar API key when radar_command is to send — and nothing
-starts if any check fails.
+source, and the radar API settings in the environment (base URL, key, CA file)
+when radar_command is to send — and nothing starts if any check fails.
 
 The orchestrator then runs on its own thread until the source is exhausted
 (historical), the time is up, or Ctrl-C / SIGTERM stops it.

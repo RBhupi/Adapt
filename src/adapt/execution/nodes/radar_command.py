@@ -5,9 +5,9 @@
 
 It boxes the selected cell's projected footprints (from the scan's analysis
 dataset) with the cell's vertical extent, records the command in the
-``radar_commands`` table and, when ``api`` is configured, sends it to the radar
-API. It is the one module that talks to the outside world. A run over a stored
-run never sends.
+``radar_commands`` table and, when ``api`` is configured, publishes it to the
+radar API's command queue. It is the one module that talks to the outside world.
+A run over a stored run never sends.
 """
 
 import logging
@@ -36,14 +36,22 @@ from adapt.modules.radar_command.record import (
     summary,
 )
 from adapt.modules.radar_command.target import SelectionRef, TargetUnavailable, target_geometry
-from adapt.modules.radar_command.transport import SendError, api_key, send
+from adapt.modules.radar_command.transport import (
+    EndpointError,
+    NotSent,
+    SendError,
+    endpoint,
+    send,
+)
 
 logger = logging.getLogger(__name__)
 
 _PACKAGE, _PRESET = "adapt.modules.radar_command", "sandbox"
 # The outcomes after which a plan counts as published (a refused send is not
 # repeated: the next scan plans afresh).
-_NEWLY_PUBLISHED = frozenset({Outcome.PUBLISHED, Outcome.SENT, Outcome.SEND_FAILED})
+_NEWLY_PUBLISHED = frozenset(
+    {Outcome.PUBLISHED, Outcome.SENT, Outcome.NOT_ACKNOWLEDGED, Outcome.SEND_FAILED}
+)
 _VOLUME_STATS = "cell_volume_stats_rows"
 # Carried from scan to scan: the ids of the plans this run has published.
 _STATE = "radar_command_state"
@@ -88,15 +96,15 @@ class RadarCommandModule(BaseModule):
 
     @classmethod
     def build_config(cls, cfg) -> RadarCommandConfig:
-        """The run's config. A run over a stored run never sends; a live run that
-        sends must have its API key in the environment now."""
+        """The run's config. A run over a stored run never sends; a run that sends
+        must have its API address, key and CA file in the environment now."""
         given = cfg.module_params.get(cls.name, {})
         config = RadarCommandConfig.model_validate(laid_over(cls.default_params(), given))
         if config.api is None:
             return config
         if cfg.source == "stored_run":
             return config.model_copy(update={"api": None})
-        api_key(config.api)  # raises naming the variable when it is unset
+        endpoint(config.api)  # raises naming the variable that is unset or unusable
         return config
 
     @classmethod
@@ -114,9 +122,7 @@ class RadarCommandModule(BaseModule):
             published = published | {record.plan_id}
         level = logging.WARNING if record.outcome in FAILED else logging.INFO
         # On the console too: what the radar was asked to do is what an operator watches.
-        logger.log(
-            level, summary(record, context["run_id"], context["scan_id"]), extra={"console": True}
-        )
+        logger.log(level, summary(record), extra={"console": True})
         return {"radar_commands": command_frame(record), _STATE: published}
 
     def _decide(
@@ -164,10 +170,12 @@ class RadarCommandModule(BaseModule):
         if config.api is None:
             return replace(record, outcome=Outcome.PUBLISHED)
         try:
-            response = send(command_json, config.api, api_key(config.api))
-        except SendError as exc:
+            acknowledged = send(command_json, endpoint(config.api))
+        except (NotSent, EndpointError) as exc:  # settings can be lost while a run goes on
             return replace(record, outcome=Outcome.SEND_FAILED, detail=str(exc))
-        return replace(record, outcome=Outcome.SENT, detail=response)
+        except SendError as exc:  # it went out; the answer was an error, something else, or lost
+            return replace(record, outcome=Outcome.NOT_ACKNOWLEDGED, detail=str(exc))
+        return replace(record, outcome=Outcome.SENT, detail=acknowledged)
 
 
 registry.register(RadarCommandModule)

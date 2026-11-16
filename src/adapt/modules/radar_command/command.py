@@ -3,13 +3,15 @@
 
 """Radar command model and its JSON wire format.
 
-The wire format lives only here: the sandbox API takes one flat target box,
-so every planned minute is merged into the single box that covers them all.
-The command carries no API key: the sender adds it as a request header, so
-command files never hold a credential.
+The wire format lives only here, as ``AutoTargetCommand``: the radar API takes
+one target box under the key ``AutoTarget``, so every planned minute is merged
+into the single box that covers them all. ``to_json`` writes it and
+``from_json`` reads it back, both through that one model, so no other text is
+a command. The command carries no API key: the sender adds it as a request
+header, so a stored command never holds a credential.
 
 Units of the extents (metres, full width) are an assumption until the radar
-side confirms them; ``_payload`` is the one place to change.
+side confirms them; ``_box`` is the one place to change.
 """
 
 import json
@@ -17,8 +19,13 @@ import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from adapt.modules.radar_command.extent import EARTH_RADIUS_KM, GeoExtent
+
+_WIRE = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
 
 _M_PER_DEG = EARTH_RADIUS_KM * 1000 * math.pi / 180
 
@@ -41,8 +48,34 @@ class RadarCommand:
     entries: tuple[TargetEntry, ...]
 
 
+class AutoTarget(BaseModel):
+    """The target box as the radar API takes it. Every field is required, no
+    other is allowed, and a number is a finite JSON number (never a boolean
+    or a string)."""
+
+    model_config = _WIRE
+
+    lat: float = Field(ge=-90.0, le=90.0, description="Box centre latitude (deg)")
+    lon: float = Field(ge=-180.0, le=180.0, description="Box centre longitude (deg)")
+    alt: float = Field(description="Box centre altitude (m above mean sea level)")
+    lat_extent: float = Field(gt=0.0, description="Full north-south extent (m)")
+    lon_extent: float = Field(gt=0.0, description="Full east-west extent (m)")
+    alt_extent: float = Field(gt=0.0, description="Full vertical extent (m)")
+    user_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    scan_pattern: str = Field(min_length=1)
+
+
+class AutoTargetCommand(BaseModel):
+    """The whole body of one command: ``{"AutoTarget": {...}}`` and nothing else."""
+
+    model_config = _WIRE
+
+    auto_target: AutoTarget = Field(alias="AutoTarget")
+
+
 class CommandValidationError(ValueError):
-    """A RadarCommand that must not be sent to the radar."""
+    """A command that must not be sent to the radar."""
 
 
 def validate(cmd: RadarCommand) -> None:
@@ -109,12 +142,49 @@ def _check_extent(i: int, extent: GeoExtent) -> None:
 
 
 def to_json(cmd: RadarCommand) -> str:
-    """Validate, then serialise as the flat payload: the box covering every entry."""
+    """Validate, then serialise as the wire body: the box covering every entry."""
     validate(cmd)
-    return json.dumps(_payload(cmd), indent=2) + "\n"
+    try:
+        wire = AutoTargetCommand.model_validate({"AutoTarget": _box(cmd)})
+    except ValidationError as exc:
+        raise CommandValidationError(f"RadarCommand: {_broken_rules(exc)}") from exc
+    return json.dumps(wire.model_dump(by_alias=True), indent=2) + "\n"
 
 
-def _payload(cmd: RadarCommand) -> dict[str, float | str]:
+def from_json(text: str) -> AutoTargetCommand:
+    """The command ``text`` holds.
+
+    Raises CommandValidationError unless ``text`` is exactly one wire body:
+    malformed JSON, a non-finite number, a repeated, missing or extra field, and
+    a value of the wrong type or outside its range are all refused.
+    """
+    try:
+        body = json.loads(text, object_pairs_hook=_no_repeats)
+    except (ValueError, RecursionError) as exc:
+        raise CommandValidationError(f"Not a radar command: {exc}") from exc
+    try:
+        return AutoTargetCommand.model_validate(body)
+    except ValidationError as exc:
+        raise CommandValidationError(f"Not a radar command: {_broken_rules(exc)}") from exc
+
+
+def _no_repeats(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    names = [name for name, _ in pairs]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(f"field(s) given more than once: {', '.join(repeated)}")
+    return dict(pairs)
+
+
+def _broken_rules(exc: ValidationError) -> str:
+    """Each broken rule as ``<field>: <rule>``, without the values."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or 'body'}: {error['msg']}"
+        for error in exc.errors()
+    )
+
+
+def _box(cmd: RadarCommand) -> dict[str, float | str]:
     """Box centre (deg, m AMSL) and full extents (m) over all entries."""
     boxes = [entry.extent for entry in cmd.entries]
     south = min(b.lat_center_deg - b.lat_width_deg / 2 for b in boxes)

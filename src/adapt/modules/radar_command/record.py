@@ -5,7 +5,8 @@
 
 One row per scan and config in ``radar_commands``: the selected cell, the
 outcome, and — when a command was planned — its id and its JSON as sent on the
-wire. ``detail`` carries what the radar API answered, or why there is no command.
+wire. ``detail`` says how the send went (the acknowledgment, or the status, the
+start of the answer and the address) or why there is no command.
 """
 
 from dataclasses import dataclass
@@ -24,11 +25,21 @@ class Outcome(StrEnum):
     VALIDATION_FAILED = "VALIDATION_FAILED"  # the planned command is not a valid one
     DUPLICATE = "DUPLICATE"  # this plan was already published by this run
     PUBLISHED = "PUBLISHED"  # the command is the scan's command (recorded, not sent)
-    SENT = "SENT"  # ... and the radar API accepted it
-    SEND_FAILED = "SEND_FAILED"  # ... but the radar API did not
+    SENT = "SENT"  # ... and the radar API acknowledged it as queued (not as run by the radar)
+    NOT_ACKNOWLEDGED = (
+        "NOT_ACKNOWLEDGED"  # ... it went to the radar API, which did not acknowledge it
+    )
+    SEND_FAILED = "SEND_FAILED"  # ... but it did not go out to the radar API
 
 
-FAILED = frozenset({Outcome.TARGET_UNAVAILABLE, Outcome.VALIDATION_FAILED, Outcome.SEND_FAILED})
+FAILED = frozenset(
+    {
+        Outcome.TARGET_UNAVAILABLE,
+        Outcome.VALIDATION_FAILED,
+        Outcome.NOT_ACKNOWLEDGED,
+        Outcome.SEND_FAILED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -70,16 +81,35 @@ def command_frame(record: CommandRecord) -> pd.DataFrame:
     return typed_frame([row], _COLUMNS)
 
 
-_COMMAND_FATES = {Outcome.PUBLISHED: "written", Outcome.SENT: "sent"}
+_CONSOLE_CHARS = 90  # how much of a reason the console line shows; the table holds it all
+# A send at a glance, as two marks: did the command go out to the radar API, and
+# did the API acknowledge it as queued (no second mark when nothing went out).
+_MARKS = {Outcome.SENT: "✓✓ ", Outcome.NOT_ACKNOWLEDGED: "✓✗ ", Outcome.SEND_FAILED: "✗– "}
+_FATES = {
+    Outcome.PUBLISHED: "written",
+    Outcome.SENT: "sent",
+    Outcome.NOT_ACKNOWLEDGED: "not acknowledged",
+    Outcome.SEND_FAILED: "not sent",
+}
 
 
-def summary(record: CommandRecord, run_id: str, scan_id: str) -> str:
-    """One human-readable line: what happened, to which plan, cell and scan, and any detail."""
+def summary(record: CommandRecord) -> str:
+    """One short console line: what happened to which plan and cell, and why."""
     plan = f" {record.plan_id}" if record.plan_id is not None else ""
-    if record.outcome in _COMMAND_FATES:
-        what = f"command{plan} {_COMMAND_FATES[record.outcome]}"
+    if record.outcome in _FATES:
+        what = f"command{plan} {_FATES[record.outcome]}"
     else:
         what = record.outcome.value.lower().replace("_", " ") + plan
     cell = f" for cell {record.cell_uid}" if record.cell_uid is not None else ""
-    detail = f": {record.detail}" if record.detail is not None else ""
-    return f"radar_command: {what}{cell} at scan {scan_id} of run {run_id}{detail}"
+    return f"{_MARKS.get(record.outcome, '')}radar_command: {what}{cell}{_note(record)}"
+
+
+def _note(record: CommandRecord) -> str:
+    if record.outcome is Outcome.PUBLISHED:
+        return " (dry run, nothing sent)"
+    if record.outcome is Outcome.SENT:
+        return " (queued by the radar API)"
+    if record.detail is None:
+        return ""
+    cut = len(record.detail) > _CONSOLE_CHARS
+    return f": {record.detail[:_CONSOLE_CHARS]}{'…' if cut else ''}"

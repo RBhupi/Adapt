@@ -13,7 +13,7 @@ import os
 
 import pytest
 from tests.helpers import radar_store
-from tests.helpers.pipeline_files import API, MODULES, RADAR_COMMAND, write_pipeline
+from tests.helpers.pipeline_files import API, MODULES, RADAR_COMMAND, export_api, write_pipeline
 
 from adapt.api import StoreClient
 
@@ -125,15 +125,17 @@ def test_a_wrong_option_of_a_module_is_named(store, live, adapt, capsys):
     assert _no_runs(store)
 
 
-def test_a_run_that_sends_needs_the_radar_api_key_before_it_starts(
-    store, live, adapt, monkeypatch, capsys
+@pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
+def test_a_run_that_sends_needs_its_radar_api_settings_before_it_starts(
+    store, live, adapt, monkeypatch, capsys, variable
 ):
-    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)
+    export_api(monkeypatch)
+    monkeypatch.delenv(variable)
     live(modules=RADAR, params={"radar_command": {**RADAR_COMMAND, "api": API}})
 
     assert adapt("run", "case") == 2
 
-    assert "ADAPT_TEST_KEY" in capsys.readouterr().err
+    assert variable in capsys.readouterr().err
     assert _no_runs(store)
 
 

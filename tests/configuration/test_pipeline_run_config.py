@@ -24,6 +24,7 @@ from adapt.execution.module_registry import registry
 from adapt.persistence.errors import StoreError
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
+from tests.helpers.pipeline_files import API, export_api
 
 pytestmark = pytest.mark.unit
 
@@ -236,20 +237,23 @@ class TestChecks:
         )
         assert config.modules == list(without_volume_stats)
 
-    def test_a_radar_command_that_sends_needs_its_api_key_now(self, path, monkeypatch):
-        api = {"base_url": "https://radar.example.test", "api_key_env": "ADAPT_TEST_KEY"}
-        api["timeout_seconds"] = 5
+    @pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
+    def test_a_radar_command_that_sends_needs_its_api_settings_now(
+        self, path, monkeypatch, variable
+    ):
         pipeline = _pipeline(
             modules=(*_MODULES, "target_selection", "radar_command"),
-            params={"radar_command": {"api": api}},
+            params={"radar_command": {"api": API}},
         )
-        monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)
+        export_api(monkeypatch)
+        monkeypatch.delenv(variable)
 
-        with pytest.raises(ConfigError, match="ADAPT_TEST_KEY"):
+        with pytest.raises(ConfigError, match=variable):
             run_config(pipeline, path)
 
-        monkeypatch.setenv("ADAPT_TEST_KEY", "a-test-key")
-        assert run_config(pipeline, path).module_params["radar_command"]["api"] == api
+        export_api(monkeypatch)
+        recorded = run_config(pipeline, path).module_params["radar_command"]["api"]
+        assert recorded == API  # the names of the variables, never what they hold
 
     def test_the_target_selection_rule_is_its_packaged_one_with_the_files_parts_laid_over(
         self, path
@@ -505,13 +509,12 @@ class TestStoredRun:
 
     def test_radar_command_never_sends_over_a_stored_run(self, path, store_root, monkeypatch):
         self._stored(store_root, path)
-        monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)  # not needed: nothing is sent
-        api = {"base_url": "https://radar.example.test", "api_key_env": "ADAPT_TEST_KEY"}
-        api["timeout_seconds"] = 5
+        for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
+            monkeypatch.delenv(variable, raising=False)  # not needed: nothing is sent
         later = _pipeline(
             run=self._STORED,
             modules=("target_selection", "radar_command"),
-            params={"radar_command": {"api": api}},
+            params={"radar_command": {"api": API}},
         )
 
         config = run_config(later, path, run_id=_RUN_ID)

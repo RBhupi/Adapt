@@ -220,8 +220,9 @@ def test_config_hash_is_16_hex_chars():
 
 API_BLOCK = """\
 api:
-  base_url: https://radar.example.test/sandbox
+  base_url_env: ADAPT_TEST_RADAR_URL
   api_key_env: ADAPT_TEST_RADAR_KEY
+  ca_file_env: ADAPT_TEST_RADAR_CA
   timeout_seconds: 30
 """
 
@@ -230,11 +231,32 @@ def test_without_an_api_section_commands_are_only_written_to_files():
     assert _load(VALID_YAML).api is None
 
 
-def test_api_section_names_the_endpoint_and_the_key_variable():
+def test_api_section_names_the_variables_that_hold_its_settings():
     cfg = _load(VALID_YAML + API_BLOCK)
-    assert cfg.api.base_url == "https://radar.example.test/sandbox"
+    assert cfg.api.base_url_env == "ADAPT_TEST_RADAR_URL"
     assert cfg.api.api_key_env == "ADAPT_TEST_RADAR_KEY"
+    assert cfg.api.ca_file_env == "ADAPT_TEST_RADAR_CA"
     assert cfg.api.timeout_seconds == 30
+
+
+@pytest.mark.parametrize(
+    "option", ["base_url_env", "api_key_env", "ca_file_env", "timeout_seconds"]
+)
+def test_every_api_option_is_required(option):
+    lines = [line for line in API_BLOCK.splitlines() if not line.strip().startswith(option)]
+    with pytest.raises(ValidationError, match=option):
+        _load(VALID_YAML + "\n".join(lines) + "\n")
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["base_url: https://radar.example.test", "ca_file: /etc/ssl/ca.cer"],
+    ids=["address", "ca-path"],
+)
+def test_the_address_and_the_ca_path_are_refused_in_the_config(line):
+    # One source each: the environment variable the section names.
+    with pytest.raises(ValidationError, match=line.split(":")[0]):
+        _load(VALID_YAML + API_BLOCK + f"  {line}\n")
 
 
 def test_api_key_itself_is_refused_in_the_config():
@@ -243,10 +265,10 @@ def test_api_key_itself_is_refused_in_the_config():
         _load(text)
 
 
-@pytest.mark.parametrize("url", ["ftp://radar.example.test", "radar.example.test", ""])
-def test_api_base_url_must_be_http_or_https(url):
-    text = VALID_YAML + API_BLOCK.replace("https://radar.example.test/sandbox", url)
-    with pytest.raises(ValidationError, match="base_url"):
+@pytest.mark.parametrize("option", ["base_url_env", "api_key_env", "ca_file_env"])
+def test_a_variable_name_must_not_be_empty(option):
+    text = re.sub(rf"{option}: \w+", f"{option}: ''", VALID_YAML + API_BLOCK)
+    with pytest.raises(ValidationError, match=option):
         _load(text)
 
 

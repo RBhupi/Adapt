@@ -5,6 +5,7 @@
 
 from pathlib import Path
 
+import certifi
 import yaml
 
 MODULES = ["ingest", "detection", "projection", "analysis", "tracking", "cell_volume_stats"]
@@ -26,11 +27,27 @@ RADAR_COMMAND = {
     "radar": {"scan_pattern": "ppi_sector", "user_id": "operator"},
     "extent": {"horizontal_buffer_km": 1.0},
 }
+# The api: part names the environment variables; ``export_api`` sets them.
 API = {
-    "base_url": "https://radar.example.test",
+    "base_url_env": "ADAPT_TEST_URL",
     "api_key_env": "ADAPT_TEST_KEY",
+    "ca_file_env": "ADAPT_TEST_CA",
     "timeout_seconds": 5,
 }
+API_URL = "https://radar.example.test/site"
+API_KEY = "a-test-key"
+
+
+def export_api(monkeypatch, **values: str) -> None:
+    """Set the variables ``API`` names: ``API_URL``, ``API_KEY`` and a CA file
+    (the installed certifi bundle, a real PEM file on every platform)."""
+    exported = {
+        "ADAPT_TEST_URL": API_URL,
+        "ADAPT_TEST_KEY": API_KEY,
+        "ADAPT_TEST_CA": certifi.where(),
+    }
+    for name, value in (exported | values).items():
+        monkeypatch.setenv(name, value)
 
 
 def write_pipeline(root: Path, name: str, **sections) -> Path:

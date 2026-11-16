@@ -299,7 +299,7 @@ class TestParams:
     def test_a_part_of_a_packaged_rule_may_be_given_alone(self, tmp_path):
         params = {
             "target_selection": {"duration": {"max_minutes": 15}},
-            "radar_command": {"api": {"base_url": "https://radar.example.test"}},
+            "radar_command": {"api": {"base_url_env": "ADAPT_TEST_URL"}},
         }
         modules = [*_MODULES, "target_selection", "radar_command"]
 

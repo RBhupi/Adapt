@@ -177,8 +177,11 @@ The whole file is checked before anything starts: every listed module is
 configured with its options as it will run and wired into the graph, so a
 module missing an input (`projection` for `analysis`,
 `params.xlma_stat.input_dir` for `xlma_stat`) is refused now, not mid-run — and
-so are the source and, when `radar_command` has an `api:` part, a missing API
-key in the environment.
+so are the source and, when `radar_command` has an `api:` part, its settings in
+the environment: the base URL (`https://`), the key and a readable CA
+certificate file, each in the variable the part names (`base_url_env`,
+`api_key_env`, `ca_file_env`). The environment is their only source; the file
+never holds them.
 
 ### What a run does
 
@@ -194,11 +197,12 @@ finishes:
 | `tracking` | the segmented and projected 2D fields with their cell labels (NetCDF, one file per scan); tables `cell_identity` (cell label → `cell_uid` per scan), `cell_events`, `cell_tracks`; the view `cells_by_scan`, which joins identity and statistics; its decision log |
 | `cell_volume_stats` | table `cell_volume_stats`, keyed by scan and cell label |
 | `target_selection` | table `target_selection`: one decision per scan (the selected `cell_uid`, or none) |
-| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `SENT` / `SEND_FAILED` (the radar API, only when `api:` is set) — and the command as sent |
+| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `SENT` / `NOT_ACKNOWLEDGED` / `SEND_FAILED` (the radar API, only when `api:` is set: sent and acknowledged as queued — not as run by the radar; sent but not acknowledged; not sent) — and the command as sent, `{"AutoTarget": {...}}` |
 | `xlma_stat` | tables `xlma_stat_minutes`, `xlma_stat_scan` |
 
 `radar_command` also prints one line per scan on the console (the command it
-wrote or sent, or why there is none). Read the tables through
+wrote or sent, or why there is none). A send starts with two marks: `✓✓` sent and
+acknowledged, `✓✗` sent but not acknowledged, `✗–` not sent. Read the tables through
 `adapt.api.StoreClient` or the dashboard.
 
 A module that needs the scan before (projection, and everything that reads from

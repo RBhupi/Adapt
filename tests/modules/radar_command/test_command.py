@@ -13,6 +13,7 @@ from adapt.modules.radar_command.command import (
     CommandValidationError,
     RadarCommand,
     TargetEntry,
+    from_json,
     to_json,
     validate,
 )
@@ -39,17 +40,37 @@ def _extent(**overrides):
 def _command(entries=None, **overrides):
     if entries is None:
         entries = (TargetEntry(time=_T1, extent=_extent()),)
-    fields = {"scan_pattern": "3rhi_7ppi", "user_id": "operator", "target_id": "plan-1"}
+    fields = {"scan_pattern": "rhi3_ppi7", "user_id": "operator", "target_id": "plan-1"}
     return RadarCommand(**(fields | overrides), entries=tuple(entries))
 
 
 _M_PER_DEG = 6371000.0 * math.pi / 180
 
 
-def test_one_entry_command_serialises_to_the_flat_sandbox_payload():
-    payload = json.loads(to_json(_command()))
+_FIELDS = [
+    "lat",
+    "lon",
+    "alt",
+    "lat_extent",
+    "lon_extent",
+    "alt_extent",
+    "user_id",
+    "target_id",
+    "scan_pattern",
+]
 
-    assert payload == {
+
+def _target(text: str) -> dict:
+    """The target of a command, checked to be the one thing its JSON holds."""
+    body = json.loads(text)
+    assert list(body) == ["AutoTarget"]
+    return body["AutoTarget"]
+
+
+def test_one_entry_command_serialises_to_one_wrapped_auto_target():
+    target = _target(to_json(_command()))
+
+    assert target == {
         "lat": pytest.approx(36.6),
         "lon": pytest.approx(-97.5),
         "alt": 5000.0,
@@ -58,19 +79,9 @@ def test_one_entry_command_serialises_to_the_flat_sandbox_payload():
         "alt_extent": 8000.0,
         "user_id": "operator",
         "target_id": "plan-1",
-        "scan_pattern": "3rhi_7ppi",
+        "scan_pattern": "rhi3_ppi7",
     }
-    assert list(payload) == [
-        "lat",
-        "lon",
-        "alt",
-        "lat_extent",
-        "lon_extent",
-        "alt_extent",
-        "user_id",
-        "target_id",
-        "scan_pattern",
-    ]
+    assert list(target) == _FIELDS
 
 
 def test_the_single_box_covers_every_planned_minute():
@@ -81,7 +92,7 @@ def test_the_single_box_covers_every_planned_minute():
     )
     cmd = _command(entries=(TargetEntry(_T1, _extent()), TargetEntry(_T2, later)))
 
-    payload = json.loads(to_json(cmd))
+    payload = _target(to_json(cmd))
 
     assert payload["lat"] == pytest.approx(36.7)
     assert payload["lon"] == pytest.approx(-97.375)
@@ -207,3 +218,140 @@ def test_validate_rejects_alt_top_not_above_bottom(top_m):
 def test_to_json_refuses_invalid_command(cmd):
     with pytest.raises(CommandValidationError):
         to_json(cmd)
+
+
+def test_to_json_refuses_a_command_the_wire_cannot_carry():
+    # validate() takes any non-empty identity; on the wire it must be a string.
+    with pytest.raises(CommandValidationError, match="user_id"):
+        to_json(_command(user_id=7))
+
+
+# --- the wire format, read back -------------------------------------------------
+
+_WIRE = {
+    "lat": 34.642,
+    "lon": -87.25,
+    "alt": 1000.0,
+    "lat_extent": 320.0,
+    "lon_extent": 1000.0,
+    "alt_extent": 250.0,
+    "user_id": "user-123",
+    "target_id": "target-456",
+    "scan_pattern": "rhi3_ppi7",
+}
+
+
+def _text(**changes) -> str:
+    return json.dumps({"AutoTarget": _WIRE | changes})
+
+
+def test_a_generated_command_reads_back_as_what_it_says():
+    text = to_json(_command())
+
+    assert from_json(text).auto_target.model_dump() == _target(text)
+
+
+def test_the_confirmed_example_is_a_valid_command():
+    assert from_json(_text()).auto_target.model_dump() == _WIRE
+
+
+def test_whole_numbers_are_numbers():
+    assert from_json(_text(alt=1000, lat_extent=320)).auto_target.alt == 1000.0
+
+
+@pytest.mark.parametrize("field", _FIELDS)
+def test_a_command_missing_a_field_is_refused(field):
+    target = {name: value for name, value in _WIRE.items() if name != field}
+
+    with pytest.raises(CommandValidationError, match=field):
+        from_json(json.dumps({"AutoTarget": target}))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _WIRE,
+        {"autotarget": _WIRE},
+        {"Target": _WIRE},
+        {"AutoTarget": [_WIRE]},
+        {"AutoTarget": None},
+        [{"AutoTarget": _WIRE}],
+    ],
+    ids=["no-wrapper", "lower-case", "other-name", "a-list", "null", "list-of-commands"],
+)
+def test_a_command_not_wrapped_as_one_auto_target_is_refused(body):
+    with pytest.raises(CommandValidationError):
+        from_json(json.dumps(body))
+
+
+def test_a_field_the_radar_does_not_take_is_refused():
+    with pytest.raises(CommandValidationError, match="api_key"):
+        from_json(_text(api_key="s3cret"))
+
+
+def test_a_second_part_beside_the_target_is_refused():
+    with pytest.raises(CommandValidationError, match="priority"):
+        from_json(json.dumps({"AutoTarget": _WIRE, "priority": 1}))
+
+
+@pytest.mark.parametrize("field", _FIELDS[:6])
+@pytest.mark.parametrize("value", [True, "12.5", None, [1.0]], ids=["bool", "text", "null", "list"])
+def test_a_number_field_takes_only_a_number(field, value):
+    with pytest.raises(CommandValidationError, match=field):
+        from_json(_text(**{field: value}))
+
+
+@pytest.mark.parametrize("field", _FIELDS[:6])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_a_number_that_is_not_finite_is_refused(field, literal):
+    text = _text(**{field: 12345.5}).replace("12345.5", literal)
+
+    with pytest.raises(CommandValidationError):
+        from_json(text)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("lat", 90.5), ("lat", -90.5), ("lon", 180.5), ("lon", -180.5)],
+)
+def test_a_centre_off_the_globe_is_refused(field, value):
+    with pytest.raises(CommandValidationError, match=field):
+        from_json(_text(**{field: value}))
+
+
+@pytest.mark.parametrize("field", ["lat_extent", "lon_extent", "alt_extent"])
+@pytest.mark.parametrize("value", [0.0, -5.0], ids=["zero", "negative"])
+def test_an_extent_must_be_positive(field, value):
+    with pytest.raises(CommandValidationError, match=field):
+        from_json(_text(**{field: value}))
+
+
+@pytest.mark.parametrize("field", _FIELDS[6:])
+@pytest.mark.parametrize("value", ["", 7, None], ids=["empty", "number", "null"])
+def test_an_identity_or_pattern_must_be_a_non_empty_string(field, value):
+    with pytest.raises(CommandValidationError, match=field):
+        from_json(_text(**{field: value}))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "not json", '{"AutoTarget": {"lat": 34.6', "{'AutoTarget': {}}"],
+    ids=["empty", "words", "cut-short", "single-quotes"],
+)
+def test_text_that_is_not_json_is_refused(text):
+    with pytest.raises(CommandValidationError):
+        from_json(text)
+
+
+def test_a_refusal_names_the_field_but_not_what_it_held():
+    with pytest.raises(CommandValidationError, match="api_key.*user_id|user_id.*api_key") as info:
+        from_json(_text(api_key="s3cret-value", user_id=5150))
+
+    assert "s3cret-value" not in str(info.value) and "5150" not in str(info.value)
+
+
+def test_a_field_given_twice_is_refused():
+    text = _text().replace('"lat": 34.642', '"lat": 34.642, "lat": 35.0')
+
+    with pytest.raises(CommandValidationError, match="lat"):
+        from_json(text)

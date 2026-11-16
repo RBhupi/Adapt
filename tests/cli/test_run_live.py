@@ -9,6 +9,7 @@ one fake module that hands on each scan's cells as the real modules do; target
 selection and radar_command are the real ones.
 """
 
+import http.client
 import logging
 import signal
 import subprocess
@@ -18,7 +19,14 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from tests.helpers import radar_store
-from tests.helpers.pipeline_files import API, RADAR_COMMAND, TARGET_SELECTION, write_pipeline
+from tests.helpers.pipeline_files import (
+    API,
+    API_KEY,
+    RADAR_COMMAND,
+    TARGET_SELECTION,
+    export_api,
+    write_pipeline,
+)
 from tests.helpers.tracking_store import TRACKING_TABLES, tracking_outputs
 
 from adapt.api import StoreClient
@@ -284,13 +292,17 @@ def test_target_selection_and_radar_command_act_on_every_scan_in_order(case, ada
 
 
 def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
-    case, adapt, monkeypatch
+    case, adapt, monkeypatch, capsys
 ):
     root, _ = case
     _more_scans(case, 1)
-    monkeypatch.setenv("ADAPT_TEST_KEY", "a-test-key")
-    unreachable = {**API, "base_url": "http://127.0.0.1:9", "timeout_seconds": 1}
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": unreachable}}
+    export_api(monkeypatch)
+
+    def refused(connection):  # no socket is opened: the test reaches no network or proxy
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setattr(http.client.HTTPSConnection, "connect", refused)
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
     _live(case, modules=RADAR, params=params)
 
     assert adapt("run", "case", "--run-id", RUN_ID) == 0
@@ -298,7 +310,8 @@ def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
     commands = _table(root, "radar_commands")
     assert commands["outcome"].tolist() == ["TARGET_UNAVAILABLE", "SEND_FAILED"]
     assert "unreachable" in commands["detail"].iloc[1]
-    assert "a-test-key" not in commands.to_json()  # the key is never stored
+    assert "✗– radar_command: command" in capsys.readouterr().err
+    assert API_KEY not in commands.to_json()  # the key is never stored
 
 
 @pytest.mark.usefixtures("ctrl_c")
@@ -438,7 +451,8 @@ def test_running_the_same_modules_over_it_again_changes_nothing(stored, adapt):
 
 
 def test_radar_command_never_sends_over_a_stored_run(stored, adapt, monkeypatch):
-    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)  # no key needed: nothing is sent
+    for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
+        monkeypatch.delenv(variable, raising=False)  # none is needed: nothing is sent
     params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
     write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=params)
 

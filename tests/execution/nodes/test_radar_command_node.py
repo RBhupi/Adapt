@@ -4,6 +4,7 @@
 """RadarCommandModule: one scan's selection -> the command recorded (and sent)."""
 
 import json
+import logging
 from types import SimpleNamespace
 
 import pandas as pd
@@ -13,9 +14,9 @@ from adapt.contracts import check_radar_commands
 from adapt.execution.nodes import radar_command as node
 from adapt.execution.nodes.radar_command import RadarCommandModule
 from adapt.modules.radar_command import RadarCommandConfig
-from adapt.modules.radar_command.transport import SendError
+from adapt.modules.radar_command.transport import NotSent, SendError
 from tests.helpers import radar_store
-from tests.helpers.pipeline_files import API, RADAR_COMMAND
+from tests.helpers.pipeline_files import API, API_KEY, API_URL, RADAR_COMMAND, export_api
 
 pytestmark = pytest.mark.unit
 
@@ -58,7 +59,7 @@ def test_a_selected_cell_gets_a_published_command():
     assert row["selection_config_hash"] == "0123456789abcdef"
     assert row["vertical_source"] == "cell_volume_stats"
     assert row["n_entries"] == 12
-    payload = json.loads(row["command_json"])
+    (payload,) = json.loads(row["command_json"]).values()
     assert payload["target_id"] == row["plan_id"]
     assert (payload["scan_pattern"], payload["user_id"]) == ("ppi_sector", "operator")
 
@@ -112,37 +113,138 @@ def test_a_fixed_band_needs_no_measured_extent():
 
 def test_a_configured_api_is_sent_the_command_with_the_key(monkeypatch):
     sent = []
-    monkeypatch.setenv("ADAPT_TEST_KEY", "a-test-key")
+    export_api(monkeypatch)
     monkeypatch.setattr(
-        node,
-        "send",
-        lambda command_json, api, key: (
-            sent.append((command_json, api.base_url, key)) or "HTTP 200: ok"
-        ),
+        node, "send", lambda command_json, target: sent.append((command_json, target)) or "queued"
     )
 
     row = _row(RadarCommandModule().run(_context(_config(api=API))))
 
-    assert (row["outcome"], row["detail"]) == ("SENT", "HTTP 200: ok")
-    ((command_json, base_url, key),) = sent
+    assert (row["outcome"], row["detail"]) == ("SENT", "queued")
+    ((command_json, target),) = sent
     assert command_json == row["command_json"]
-    assert base_url == API["base_url"]
-    assert key.get_secret_value() == "a-test-key"
-    assert "a-test-key" not in row.to_json()
+    assert target.url == f"{API_URL}/publish/command"
+    assert target.key.get_secret_value() == API_KEY
+    assert API_KEY not in row.to_json()
+
+
+def test_the_command_sent_is_one_wrapped_auto_target(monkeypatch):
+    sent = []
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", lambda command_json, target: sent.append(command_json) or "")
+
+    RadarCommandModule().run(_context(_config(api=API)))
+
+    assert list(json.loads(sent[0])) == ["AutoTarget"]
 
 
 def test_an_api_that_refuses_is_recorded_and_does_not_raise(monkeypatch):
-    def refuse(command_json, api, key):
+    def refuse(command_json, target):
         raise SendError("https://radar.example.test/publish/command answered HTTP 503: down")
 
-    monkeypatch.setenv("ADAPT_TEST_KEY", "a-test-key")
+    export_api(monkeypatch)
     monkeypatch.setattr(node, "send", refuse)
 
     row = _row(RadarCommandModule().run(_context(_config(api=API))))
 
-    assert row["outcome"] == "SEND_FAILED"
+    assert row["outcome"] == "NOT_ACKNOWLEDGED"
     assert "HTTP 503" in row["detail"]
     assert row["command_json"] is not None  # what would have been sent is kept
+
+
+def _console_line(caplog) -> str:
+    (record,) = [r for r in caplog.records if "radar_command:" in r.getMessage()]
+    assert record.console is True
+    return record.getMessage()
+
+
+def test_a_dry_run_says_on_the_console_that_nothing_was_sent(caplog):
+    caplog.set_level(logging.INFO)
+
+    row = _row(RadarCommandModule().run(_context(_config())))
+
+    line = _console_line(caplog)
+    assert line == (
+        f"radar_command: command {row['plan_id']} written for cell {radar_store.UID_A} "
+        "(dry run, nothing sent)"
+    )
+
+
+def test_a_command_sent_and_acknowledged_gets_two_ticks_on_the_console(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", lambda command_json, target: "HTTP 200: published, and more")
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+
+    assert _console_line(caplog) == (
+        f"✓✓ radar_command: command {row['plan_id']} sent for cell {radar_store.UID_A} "
+        "(queued by the radar API)"
+    )
+
+
+def test_a_command_sent_but_not_acknowledged_gets_a_tick_then_a_cross(monkeypatch, caplog):
+    def refuse(command_json, target):
+        raise SendError("HTTP 401: " + "no such key " * 40)
+
+    caplog.set_level(logging.INFO)
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", refuse)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+
+    line = _console_line(caplog)
+    assert row["outcome"] == "NOT_ACKNOWLEDGED"
+    assert line.startswith(f"✓✗ radar_command: command {row['plan_id']} not acknowledged for cell")
+    assert "HTTP 401: no such key" in line
+    assert len(line) < 200 < len(row["detail"])  # the whole answer is in the table
+
+
+def test_a_command_that_did_not_go_out_gets_a_cross_and_no_second_mark(monkeypatch, caplog):
+    def unreachable(command_json, target):
+        raise NotSent("unreachable: connection refused")
+
+    caplog.set_level(logging.INFO)
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", unreachable)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+
+    assert row["outcome"] == "SEND_FAILED"
+    assert _console_line(caplog) == (
+        f"✗– radar_command: command {row['plan_id']} not sent for cell {radar_store.UID_A}"
+        ": unreachable: connection refused"
+    )
+
+
+@pytest.mark.parametrize("failure", [NotSent("unreachable"), SendError("HTTP 500: down")])
+def test_a_command_that_failed_is_not_sent_again_at_the_next_scan(monkeypatch, failure):
+    def fail(command_json, target):
+        raise failure
+
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", fail)
+    first = RadarCommandModule().run(_context(_config(api=API)))
+
+    again = _row(
+        RadarCommandModule().run(
+            _context(_config(api=API), radar_command_state=first["radar_command_state"])
+        )
+    )
+
+    assert again["outcome"] == "DUPLICATE"
+
+
+def test_api_settings_lost_during_the_run_are_recorded_and_do_not_raise(monkeypatch):
+    export_api(monkeypatch)
+    config = RadarCommandModule.build_config(_internal("aws_nexrad", {**RADAR_COMMAND, "api": API}))
+    monkeypatch.delenv("ADAPT_TEST_CA")
+
+    row = _row(RadarCommandModule().run(_context(config)))
+
+    assert row["outcome"] == "SEND_FAILED"
+    assert "ADAPT_TEST_CA" in row["detail"]
+    assert row["command_json"] is not None
 
 
 def _internal(source: str, params: dict):
@@ -150,15 +252,34 @@ def _internal(source: str, params: dict):
     return SimpleNamespace(source=source, module_params={"radar_command": params})
 
 
-def test_a_run_that_sends_needs_its_key_when_it_is_configured(monkeypatch):
-    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)
+@pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
+def test_a_run_that_sends_needs_its_api_settings_when_it_is_configured(monkeypatch, variable):
+    export_api(monkeypatch)
+    monkeypatch.delenv(variable)
 
-    with pytest.raises(ValueError, match="ADAPT_TEST_KEY"):
+    with pytest.raises(ValueError, match=variable):
         RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
 
 
+def test_a_run_that_sends_needs_a_ca_file_it_can_read(monkeypatch, tmp_path):
+    export_api(monkeypatch, ADAPT_TEST_CA=str(tmp_path / "gone.cer"))
+
+    with pytest.raises(ValueError, match="ADAPT_TEST_CA"):
+        RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
+
+
+def test_a_run_with_its_api_settings_exported_is_configured_to_send(monkeypatch):
+    export_api(monkeypatch)
+
+    config = RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
+
+    assert config.api is not None
+    assert API_KEY not in config.model_dump_json()
+
+
 def test_over_a_stored_run_nothing_is_sent(monkeypatch):
-    monkeypatch.delenv("ADAPT_TEST_KEY", raising=False)
+    for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
+        monkeypatch.delenv(variable, raising=False)  # none is needed: nothing is sent
 
     config = RadarCommandModule.build_config(_internal("stored_run", {"api": API}))
 

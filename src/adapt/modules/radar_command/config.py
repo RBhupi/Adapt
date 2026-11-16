@@ -13,8 +13,10 @@ A missing key raises too, except these:
   cell's measured base and top (the ``cell_volume_stats`` module must run);
 - ``api``: none, so commands are only recorded (a dry run).
 
-The API key never appears here: ``api.api_key_env`` names the environment
-variable that holds it.
+The ``api`` part holds no address, credential or machine path: it names the
+environment variables that hold the API's base URL, its key and the CA
+certificate file. The environment is their only source, so no value in the file
+competes with it.
 """
 
 import hashlib
@@ -61,17 +63,26 @@ class RadarConfig(BaseModel):
 
 
 class ApiConfig(BaseModel):
-    """Where published commands are POSTed (``{base_url}/publish/command``)."""
+    """The radar API commands are published to (``POST {base URL}/publish/command``).
+
+    Each ``*_env`` option names an environment variable; ``transport.endpoint``
+    reads them when the run's config is built and again for each command."""
 
     model_config = _FROZEN
 
-    base_url: str = Field(
-        pattern=r"^https?://\S+$",
-        description="Base URL of the radar API; commands are POSTed to {base_url}/publish/command",
+    base_url_env: str = Field(
+        min_length=1,
+        description="Environment variable that holds the API base URL (https://...); "
+        "commands are POSTed to {base URL}/publish/command",
     )
     api_key_env: str = Field(
         min_length=1,
         description="Environment variable that holds the API key; the key is never in the file",
+    )
+    ca_file_env: str = Field(
+        min_length=1,
+        description="Environment variable that holds the path of the CA certificate file "
+        "(PEM) the API's TLS certificate is verified against",
     )
     timeout_seconds: float = Field(gt=0, description="Timeout (seconds) of each publish request")
 

@@ -91,7 +91,7 @@ then prints one line per scan with the time each module took:
 
 ```
 scan KHGX20261110_153521_V06  │  ingest 18.7s  detection 19ms  cell_volume_stats 1.2s  │  0 cells  19.9s
-radar_command: command 1ba038bbaaf258f7 written for cell R0D4RLVKBZ at scan 861d02fd2064ba58 of run 2026NOV10-1530-KHGX
+radar_command: command 1ba038bbaaf258f7 written for cell R0D4RLVKBZ (dry run, nothing sent)
 scan KHGX20261110_154224_V06  │  ingest 18.5s  detection 19ms  projection 1.1s  analysis 29ms  tracking 11ms  cell_volume_stats 881ms  target_selection 12ms  radar_command 3ms  │  15 cells  20.5s
 ```
 
@@ -112,9 +112,29 @@ dashboard:
 **Nothing is sent to a radar unless you ask for it.** As packaged, `radar_command`
 is a dry run: commands are recorded in that table only (outcome `PUBLISHED`). To
 send them, add an `api:` part under `params: radar_command:`
-(`adapt config --show radar_command` prints it) and export the key in the
-environment variable it names before `adapt run`; the outcome is then `SENT` or
-`SEND_FAILED`.
+(`adapt config --show radar_command` prints it). The part holds no address, key
+or path: it names three environment variables, and the environment is the only
+source of what they hold. Export them before `adapt run`:
+
+```bash
+export BNF_API_URL=https://apigw.vsn.arm.gov/bnf   # commands are POSTed to $BNF_API_URL/publish/command
+export ARM_API_CERT=/path/to/arm-ca.cer            # CA certificate (PEM) the API's certificate is checked against
+read -rs BNF_RADAR_API_KEY && export BNF_RADAR_API_KEY   # type or paste the key; it is not shown or saved in history
+```
+
+A run whose file has `api:` refuses to start when one of them is unset, the URL
+is not `https://`, or the CA file cannot be read. Each command is one request of
+the form `{"AutoTarget": {...}}`, never repeated. Its console line starts with two
+marks — did the command go out, and did the API acknowledge it:
+
+| Marks | Outcome | Meaning |
+|-------|---------|---------|
+| `✓✓` | `SENT` | sent, and the API answered HTTP 200 with `status: published` on queue `scan_commands` and the submitted target back |
+| `✓✗` | `NOT_ACKNOWLEDGED` | sent, but the API answered an error, something other than that acknowledgment, or nothing readable |
+| `✗–` | `SEND_FAILED` | not sent: the API could not be reached, or its settings were lost |
+
+The reason follows the marks; the whole of it is in the table's `detail` column.
+`SENT` means the command is in the radar's queue, not that the radar ran it.
 
 If the run stops — `Ctrl-C`, a crash, a reboot — start it again with its id and
 it goes on from the last complete scan, with the same result as an unbroken run:
