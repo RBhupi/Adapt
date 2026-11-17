@@ -104,7 +104,7 @@ def test_a_wrong_option_of_a_module_is_refused_as_the_run_would(graph):
 def test_what_the_runtime_provides_is_drawn_and_module_configs_are_not(graph):
     lines = graph(modules=RADAR)[1].splitlines()
 
-    assert '  scan(["nexrad_file, run_id, scan_id, scan_time"])' in lines
+    assert '  scan(["nexrad_file, run_id, scan_id, scan_time, wall_time"])' in lines
     assert '  prior_scans(["prior_scans"])' in lines
     assert "  prior_scans --> projection" in lines
     assert "  scan -->|nexrad_file, scan_time| ingest" in lines
@@ -136,7 +136,7 @@ def test_the_whole_graph_is_printed_in_a_fixed_order(graph):
 
     assert out == (
         "flowchart TB\n"
-        '  scan(["nexrad_file, run_id, scan_id, scan_time"])\n'
+        '  scan(["nexrad_file, run_id, scan_id, scan_time, wall_time"])\n'
         '  prior_scans(["prior_scans"])\n'
         "  subgraph modules\n"
         "    ingest\n"
@@ -196,6 +196,18 @@ def test_a_module_input_nobody_produces_or_provides_fails_as_the_run_would(graph
     assert out == ""
     assert "Module 'unbound_probe' needs input 'no_such_key'" in err
     assert "the runtime does not provide it" in err
+
+
+def test_the_pipeline_file_may_be_named_with_its_extension(adapt, tmp_path, monkeypatch, capsys):
+    run = {"source": "aws_nexrad", "radar": "KTST", "mode": "realtime"}
+    write_pipeline(tmp_path, "nexrad", run=run)
+    monkeypatch.chdir(tmp_path)
+    assert adapt("graph", "nexrad") == 0
+    by_name = capsys.readouterr().out
+
+    assert adapt("graph", "nexrad.yaml") == 0
+
+    assert capsys.readouterr().out == by_name != ""
 
 
 def test_a_missing_pipeline_file_says_how_to_make_it(adapt, tmp_path, monkeypatch, capsys):

@@ -75,6 +75,8 @@ logger = logging.getLogger(__name__)
 # (and hence the rolling history), or each entry would retain its predecessor
 # and every scan's grids would stay alive for the whole run.
 _PRIOR_SCANS = "prior_scans"
+# The machine's time, read anew for each module that asks for it, as it starts.
+_WALL_TIME = "wall_time"
 
 
 class RadarProcessor(threading.Thread):
@@ -355,7 +357,7 @@ class RadarProcessor(threading.Thread):
             run = self._executor.run(
                 {**base_ctx, **self._carried, _PRIOR_SCANS: prior},
                 history=len(prior),
-                before_node=lambda node, context: _read_from_store(node, context, scan),
+                before_node=lambda node, context: _provide(node, context, scan),
                 after_node=lambda node, context: self._router.persist([node.module], context, meta),
             )
             elapsed_s = time.perf_counter() - t0
@@ -550,6 +552,14 @@ class RadarProcessor(threading.Thread):
             self.collection.catalog.mark_scan_failed(self.run_id, scan_id)
         except StoreError as exc:
             logger.error("Could not record scan failure for '%s': %s", scan_id, exc)
+
+
+def _provide(node, context: dict, scan: ScanAt) -> str | None:
+    """Give ``node`` what only the runtime has, as it is about to run: the
+    machine's time now (modules never read a clock) and its inputs from the store."""
+    if _WALL_TIME in node.inputs:
+        context[_WALL_TIME] = datetime.now(UTC)
+    return _read_from_store(node, context, scan)
 
 
 def _read_from_store(node, context: dict, scan: ScanAt) -> str | None:

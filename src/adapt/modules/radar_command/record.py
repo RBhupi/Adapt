@@ -25,6 +25,7 @@ class Outcome(StrEnum):
     VALIDATION_FAILED = "VALIDATION_FAILED"  # the planned command is not a valid one
     DUPLICATE = "DUPLICATE"  # this plan was already published by this run
     PUBLISHED = "PUBLISHED"  # the command is the scan's command (recorded, not sent)
+    STALE = "STALE"  # ... and was held back: the scan was older than the limit for sending
     SENT = "SENT"  # ... and the radar API acknowledged it as queued (not as run by the radar)
     NOT_ACKNOWLEDGED = (
         "NOT_ACKNOWLEDGED"  # ... it went to the radar API, which did not acknowledge it
@@ -87,6 +88,7 @@ _CONSOLE_CHARS = 90  # how much of a reason the console line shows; the table ho
 _MARKS = {Outcome.SENT: "✓✓ ", Outcome.NOT_ACKNOWLEDGED: "✓✗ ", Outcome.SEND_FAILED: "✗– "}
 _FATES = {
     Outcome.PUBLISHED: "written",
+    Outcome.STALE: "held back",
     Outcome.SENT: "sent",
     Outcome.NOT_ACKNOWLEDGED: "not acknowledged",
     Outcome.SEND_FAILED: "not sent",

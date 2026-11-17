@@ -14,6 +14,8 @@ adapt dashboard            # open the GUI dashboard
 The project folder **is** the store. A pipeline is the file `NAME.yaml` in that
 folder, and `adapt run NAME` reads `./NAME.yaml` from the current directory,
 which must be a store created by `adapt init`. There are no paths to pass.
+`adapt run` and `adapt graph` take the file with or without its extension:
+`adapt run nexrad.yaml` is `adapt run nexrad`.
 
 `adapt --version` prints the installed version and the path Adapt was installed
 to. `adapt --help` and `adapt <command> --help` describe each command from the
@@ -161,6 +163,7 @@ edit it, and run `adapt run kdix`.
 
 ```bash
 adapt run nexrad                              # run ./nexrad.yaml
+adapt run nexrad.yaml                         # the same
 adapt run nexrad -v                           # with DEBUG logging
 adapt run nexrad --run-id 2026OCT21-1052-KFSX # resume that run, or start one with this id
 adapt run nexrad --run-id 2026OCT21-1052-KFSX --skip-failed
@@ -168,7 +171,7 @@ adapt run nexrad --run-id 2026OCT21-1052-KFSX --skip-failed
 
 | Argument | Description |
 |----------|-------------|
-| `NAME` | Pipeline name: the file `./NAME.yaml` in the current folder (a store). |
+| `NAME` | The pipeline file `./NAME.yaml` in the current folder (a store), given as `NAME` or `NAME.yaml`. A path is refused, `./nexrad.yaml` included. |
 | `--run-id ID` | A run already in the store is resumed from its last checkpoint with its recorded modules and params — of the file only `run.max_runtime_minutes` applies, and `run.radar` must be the run's. An unknown id (format `YYYYMONDD-HHMM-RADAR`, ending with `-` and the file's `run.radar`) starts a new run with that id. Without `--run-id` a new run's id is the minute it starts; a second run started within that minute is refused (wait a minute, or name it with `--run-id`), never joined to the first. With `run.source: stored_run`: the run to run over (required). |
 | `--skip-failed` | Resuming `--run-id`: leave the scans that failed before as failed instead of processing them again. |
 | `-v`, `--verbose` | DEBUG-level logging in the run's log and on the console. |
@@ -197,7 +200,7 @@ finishes:
 | `tracking` | the segmented and projected 2D fields with their cell labels (NetCDF, one file per scan); tables `cell_identity` (cell label → `cell_uid` per scan), `cell_events`, `cell_tracks`; the view `cells_by_scan`, which joins identity and statistics; its decision log |
 | `cell_volume_stats` | table `cell_volume_stats`, keyed by scan and cell label |
 | `target_selection` | table `target_selection`: one decision per scan (the selected `cell_uid`, or none) |
-| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `SENT` / `NOT_ACKNOWLEDGED` / `SEND_FAILED` (the radar API, only when `api:` is set: sent and acknowledged as queued — not as run by the radar; sent but not acknowledged; not sent) — and the command as sent, `{"AutoTarget": {...}}` |
+| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `STALE` (`api:` is set but the scan was older than `api.max_scan_age_seconds`: held back), `SENT` / `NOT_ACKNOWLEDGED` / `SEND_FAILED` (the radar API, only when `api:` is set: sent and acknowledged as queued — not as run by the radar; sent but not acknowledged; not sent) — and the command as sent, `{"AutoTarget": {...}}` |
 | `xlma_stat` | tables `xlma_stat_minutes`, `xlma_stat_scan` |
 
 `radar_command` also prints one line per scan on the console (the command it
@@ -314,8 +317,11 @@ declared inputs and outputs and the file's options:
 
 - `modules` — the listed modules. Each arrow is labelled with the data one
   module hands the next, e.g. `ingest -->|grid_ds_2d, grid_ds| detection`.
-- `scan` and `prior_scans` — what Adapt provides to every scan: the file and its
-  identity, and what modules read back from the scans before. A module that
+- `scan` and `prior_scans` — what Adapt provides to every scan: the file, its
+  identity and the machine's time as the module that reads it starts
+  (`wall_time`, which `radar_command` compares with the scan's time before it
+  sends), and what
+  modules read back from the scans before. A module that
   needs a prior scan is skipped on the first scan and after a too-long gap, and
   so is every module downstream of it.
 - `store` — what is read from the store: the cells and tracks so far (for

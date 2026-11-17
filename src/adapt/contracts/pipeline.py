@@ -9,7 +9,12 @@ can be imported from anywhere without creating import cycles.
 """
 
 # Keys the processor provides to every per-scan module; not produced by any module.
-SCAN_SEEDS = frozenset({"nexrad_file", "run_id", "scan_id", "scan_time", "prior_scans"})
+# ``wall_time`` is the machine's UTC time as the module that reads it starts: for
+# a module that acts on the outside world (is this scan still fresh enough to
+# act on?), never for a scientific output.
+SCAN_SEEDS = frozenset(
+    {"nexrad_file", "run_id", "scan_id", "scan_time", "wall_time", "prior_scans"}
+)
 
 # Inputs the runtime builds from the run's tables up to the scan, for a module
 # that reads the run's history; no module produces them.

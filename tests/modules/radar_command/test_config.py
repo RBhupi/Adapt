@@ -224,6 +224,7 @@ api:
   api_key_env: ADAPT_TEST_RADAR_KEY
   ca_file_env: ADAPT_TEST_RADAR_CA
   timeout_seconds: 30
+  max_scan_age_seconds: 480
 """
 
 
@@ -237,10 +238,12 @@ def test_api_section_names_the_variables_that_hold_its_settings():
     assert cfg.api.api_key_env == "ADAPT_TEST_RADAR_KEY"
     assert cfg.api.ca_file_env == "ADAPT_TEST_RADAR_CA"
     assert cfg.api.timeout_seconds == 30
+    assert cfg.api.max_scan_age_seconds == 480
 
 
 @pytest.mark.parametrize(
-    "option", ["base_url_env", "api_key_env", "ca_file_env", "timeout_seconds"]
+    "option",
+    ["base_url_env", "api_key_env", "ca_file_env", "timeout_seconds", "max_scan_age_seconds"],
 )
 def test_every_api_option_is_required(option):
     lines = [line for line in API_BLOCK.splitlines() if not line.strip().startswith(option)]
@@ -269,6 +272,15 @@ def test_api_key_itself_is_refused_in_the_config():
 def test_a_variable_name_must_not_be_empty(option):
     text = re.sub(rf"{option}: \w+", f"{option}: ''", VALID_YAML + API_BLOCK)
     with pytest.raises(ValidationError, match=option):
+        _load(text)
+
+
+@pytest.mark.parametrize("seconds", [0, -1, ".inf"])
+def test_the_scan_age_limit_must_be_a_positive_number(seconds):
+    text = VALID_YAML + API_BLOCK.replace(
+        "max_scan_age_seconds: 480", f"max_scan_age_seconds: {seconds}"
+    )
+    with pytest.raises(ValidationError, match="max_scan_age_seconds"):
         _load(text)
 
 

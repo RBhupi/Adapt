@@ -29,6 +29,7 @@ _API = ApiConfig(
     api_key_env="ADAPT_TEST_KEY",
     ca_file_env="ADAPT_TEST_CA",
     timeout_seconds=30,
+    max_scan_age_seconds=300,
 )
 _URL = "https://radar.example.test/site/publish/command"
 _KEY = "k-123"

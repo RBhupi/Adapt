@@ -52,7 +52,7 @@ PIPELINE_TEMPLATES: Mapping[str, PipelineTemplate] = MappingProxyType(
 )
 
 _HEADER = """\
-# Adapt pipeline file. Run it with:  adapt run <this file's name without .yaml>
+# Adapt pipeline file. Run it with:  adapt run <this file's name>
 # Turn a module on by uncommenting its line; Adapt orders the modules by what each reads.
 # Everything not set here keeps its default. To see a module's options:
 #   adapt config --show NAME

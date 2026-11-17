@@ -3,6 +3,9 @@
 
 """``adapt run NAME``: run the pipeline file ``./NAME.yaml``; the current folder is the store.
 
+The file is named with or without its extension: ``adapt run nexrad.yaml`` is
+``adapt run nexrad``.
+
 The whole file is checked first — the run section, every listed module
 (configured as it will run, with every input it reads accounted for), the
 source, and the radar API settings in the environment (base URL, key, CA file)
@@ -89,18 +92,14 @@ def run(name: str, run_id: str | None, *, verbose: bool, skip_failed: bool = Fal
 
 
 def pipeline_path(root: Path, name: str, command: str) -> Path:
-    """``root/NAME.yaml`` for ``adapt <command> NAME``; it must exist, and the error
-    says how to make it."""
+    """``root/NAME.yaml`` for ``adapt <command> NAME`` or ``adapt <command> NAME.yaml``;
+    it must exist, and the error says how to make it."""
     if Path(name).name != name:
         raise ConfigError(
-            f"adapt {command} takes a pipeline name, the stem of NAME.yaml in the current "
-            f"folder (e.g. 'adapt {command} nexrad'); got '{name}'"
+            f"adapt {command} takes the name of a pipeline file in the current folder, NAME "
+            f"or NAME.yaml, not a path (e.g. 'adapt {command} nexrad.yaml'); got '{name}'"
         )
-    if name.endswith(".yaml"):
-        raise ConfigError(
-            f"adapt {command} takes the pipeline's name without '.yaml': "
-            f"adapt {command} {Path(name).stem}"
-        )
+    name = name.removesuffix(".yaml")
     path = root / f"{name}.yaml"
     if path.is_file():
         return path

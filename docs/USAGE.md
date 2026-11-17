@@ -136,6 +136,20 @@ marks — did the command go out, and did the API acknowledge it:
 The reason follows the marks; the whole of it is in the table's `detail` column.
 `SENT` means the command is in the radar's queue, not that the radar ran it.
 
+Only a fresh scan is sent. `api.max_scan_age_seconds` is how long ago, by this
+machine's clock, a scan may have started when its command is ready to go out; an
+older scan's command is recorded with outcome `STALE` and held back (no marks on
+its line). This keeps the backlog a run starts with, and every scan of a
+historical run, away from the radar.
+
+A scan's time is the start of its volume, and its file exists only when the
+volume ends, 4 to 7 minutes later. So the limit has to cover one volume, the
+polling interval (`params: downloader: poll_interval_sec`, 300 s unless you set
+it) and about 30 s of processing. A limit below one volume sends nothing; one
+that covers the volume but not the polling interval sends only some scans. With
+`poll_interval_sec: 30` a limit of 480 covers both radars measured so far
+(commands ready 300 to 410 s after the scan's start).
+
 If the run stops — `Ctrl-C`, a crash, a reboot — start it again with its id and
 it goes on from the last complete scan, with the same result as an unbroken run:
 
@@ -178,7 +192,8 @@ adapt config --show global      # settings shared by several modules
 
 `adapt config nexrad` rewrites `nexrad.yaml` from the template (it asks before
 overwriting). A store can hold several pipelines: copy `nexrad.yaml` to, say,
-`kdix.yaml`, edit it, and run `adapt run kdix`.
+`kdix.yaml`, edit it, and run `adapt run kdix` (or `adapt run kdix.yaml`: the
+file may be named with its extension).
 
 ### Adding a module to a run you already have
 

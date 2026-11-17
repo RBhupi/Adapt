@@ -7,11 +7,15 @@ It boxes the selected cell's projected footprints (from the scan's analysis
 dataset) with the cell's vertical extent, records the command in the
 ``radar_commands`` table and, when ``api`` is configured, publishes it to the
 radar API's command queue. It is the one module that talks to the outside world.
-A run over a stored run never sends.
+A run over a stored run never sends, and a scan older than ``api.max_scan_age_seconds`` as this
+module starts (``wall_time``, the machine's time the runtime provides) is never
+sent either: its command is recorded and held back.
 """
 
 import logging
+import math
 from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 import pandas as pd
@@ -26,7 +30,7 @@ from adapt.execution.module_registry import registry
 from adapt.execution.nodes._options import laid_over, preset_options, preset_text
 from adapt.modules.base import BaseModule
 from adapt.modules.radar_command.command import CommandValidationError, to_json
-from adapt.modules.radar_command.config import RadarCommandConfig, config_hash
+from adapt.modules.radar_command.config import ApiConfig, RadarCommandConfig, config_hash
 from adapt.modules.radar_command.plan import build_plan
 from adapt.modules.radar_command.record import (
     FAILED,
@@ -70,6 +74,7 @@ class RadarCommandModule(BaseModule):
         "run_id",
         "scan_id",
         "scan_time",
+        "wall_time",
         _STATE,
     ]
     outputs = ["radar_commands", _STATE]
@@ -169,6 +174,9 @@ class RadarCommandModule(BaseModule):
             return replace(record, outcome=Outcome.DUPLICATE)
         if config.api is None:
             return replace(record, outcome=Outcome.PUBLISHED)
+        held_back = _too_old(context["wall_time"] - context["scan_time"], config.api)
+        if held_back is not None:
+            return replace(record, outcome=Outcome.STALE, detail=held_back)
         try:
             acknowledged = send(command_json, endpoint(config.api))
         except (NotSent, EndpointError) as exc:  # settings can be lost while a run goes on
@@ -176,6 +184,19 @@ class RadarCommandModule(BaseModule):
         except SendError as exc:  # it went out; the answer was an error, something else, or lost
             return replace(record, outcome=Outcome.NOT_ACKNOWLEDGED, detail=str(exc))
         return replace(record, outcome=Outcome.SENT, detail=acknowledged)
+
+
+def _too_old(age: timedelta, api: ApiConfig) -> str | None:
+    """Why a scan of this age is not sent; None when it is fresh enough."""
+    seconds = age.total_seconds()
+    if seconds < 0:  # a clock is wrong (this machine's or the radar's): freshness is unknown
+        return f"scan time is {math.ceil(-seconds)} s ahead of this machine's clock"
+    if seconds > api.max_scan_age_seconds:
+        return (
+            f"scan is {math.ceil(seconds)} s old; the limit is {api.max_scan_age_seconds:g} s "
+            "(radar_command.api.max_scan_age_seconds)"
+        )
+    return None
 
 
 registry.register(RadarCommandModule)

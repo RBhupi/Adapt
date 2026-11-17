@@ -7,7 +7,7 @@ The graph is the one a new run of the file would build: each module reads what
 the file's options make it read, and a file a run would refuse (an unknown
 module, a wrong option, an input with no source) is refused here with the same
 message. Nothing runs and no store is read: the current folder only has to
-hold the file.
+hold the file, named with or without its extension (``adapt graph nexrad.yaml``).
 """
 
 from pathlib import Path

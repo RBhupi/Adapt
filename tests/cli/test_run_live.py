@@ -224,6 +224,19 @@ def test_a_completed_run_exits_zero(case, adapt):
     assert _run(root).status == "completed"
 
 
+def test_the_pipeline_file_may_be_named_with_its_extension(case, adapt):
+    root, _ = case
+    path = _live(case)
+
+    assert adapt("run", "case.yaml") == 0
+
+    run = _run(root)
+    with StoreClient(root) as client:
+        pipeline = client.run_config(run.run_id)["pipeline"]
+    assert run.status == "completed"
+    assert (pipeline["name"], pipeline["file"]) == ("case", str(path))
+
+
 def test_the_run_records_its_pipeline_file(case, adapt):
     root, _ = case
     path = _live(case, modules=[PROBE, ECHO], params={ECHO: {"tag": "recorded"}})
@@ -302,7 +315,8 @@ def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
         raise ConnectionRefusedError(61, "Connection refused")
 
     monkeypatch.setattr(http.client.HTTPSConnection, "connect", refused)
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    any_age = {**API, "max_scan_age_seconds": 1.0e12}  # the case's scans are years old
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": any_age}}
     _live(case, modules=RADAR, params=params)
 
     assert adapt("run", "case", "--run-id", RUN_ID) == 0
@@ -312,6 +326,29 @@ def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
     assert "unreachable" in commands["detail"].iloc[1]
     assert "✗– radar_command: command" in capsys.readouterr().err
     assert API_KEY not in commands.to_json()  # the key is never stored
+
+
+def test_a_run_over_old_scans_sends_none_of_them(case, adapt, monkeypatch, capsys):
+    """Historical scans with ``api:`` set: every command is held back, none goes out."""
+    root, _ = case
+    _more_scans(case, 2)
+    export_api(monkeypatch)
+    attempts = []
+
+    def attempted(connection):  # records an attempt, then fails as a closed port does
+        attempts.append(connection)
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setattr(http.client.HTTPSConnection, "connect", attempted)
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    _live(case, modules=RADAR, params=params)
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+
+    commands = _table(root, "radar_commands")
+    assert commands["outcome"].tolist() == ["TARGET_UNAVAILABLE", "STALE", "STALE"]
+    assert attempts == []
+    assert capsys.readouterr().err.count("held back for cell") == 2
 
 
 @pytest.mark.usefixtures("ctrl_c")

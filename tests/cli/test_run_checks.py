@@ -95,16 +95,22 @@ def test_a_missing_template_file_names_the_command_writing_it(store, adapt, caps
     assert "adapt config nexrad" in capsys.readouterr().err
 
 
-def test_a_name_given_with_its_suffix_points_at_the_bare_name(store, adapt, capsys):
-    assert adapt("run", "nexrad.yaml") == 2
+def test_a_missing_file_named_with_its_extension_is_looked_for_under_that_name(
+    store, adapt, capsys
+):
+    assert adapt("run", "kdix.yaml") == 2
 
-    assert "adapt run nexrad" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"No pipeline file {store / 'kdix.yaml'}." in err
+    assert "cp nexrad.yaml kdix.yaml " in err
 
 
-def test_a_pipeline_name_is_a_bare_file_stem(store, adapt, capsys):
-    assert adapt("run", "sub/case") == 2
+def test_a_path_is_refused_even_to_the_stores_own_file(store, adapt, capsys):
+    assert adapt("run", "./nexrad.yaml") == 2
 
-    assert "sub/case" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "not a path" in err
+    assert "'./nexrad.yaml'" in err
 
 
 def test_radar_command_needs_target_selection_in_the_same_file(store, live, adapt, capsys):

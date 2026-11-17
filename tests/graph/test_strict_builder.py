@@ -74,7 +74,8 @@ def test_data_edges_refuse_two_producers_of_one_key():
 
 
 def test_scan_seeds_are_the_keys_the_processor_provides():
-    assert {"nexrad_file", "run_id", "scan_id", "scan_time", "prior_scans"} == SCAN_SEEDS
+    seeds = {"nexrad_file", "run_id", "scan_id", "scan_time", "wall_time", "prior_scans"}
+    assert seeds == SCAN_SEEDS
 
 
 def test_a_key_a_module_both_reads_and_writes_is_its_own_state_not_an_edge():

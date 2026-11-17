@@ -5,6 +5,7 @@
 
 import json
 import logging
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -41,9 +42,15 @@ def _context(config, cell_uid=radar_store.UID_A, scan=1, **overrides) -> dict:
         "run_id": "run-1",
         "scan_id": f"scan-{scan}",
         "scan_time": radar_store.SCAN_TIMES[scan],
+        "wall_time": radar_store.SCAN_TIMES[scan] + timedelta(seconds=120),  # a fresh scan
         "radar_command_state": None,  # nothing published yet
         **overrides,
     }
+
+
+def _at(age_seconds: float):
+    """The machine's time when scan 1 (the one ``_context`` hands on) is that old."""
+    return radar_store.SCAN_TIMES[1] + timedelta(seconds=age_seconds)
 
 
 def _row(result: dict) -> pd.Series:
@@ -150,6 +157,112 @@ def test_an_api_that_refuses_is_recorded_and_does_not_raise(monkeypatch):
     assert row["outcome"] == "NOT_ACKNOWLEDGED"
     assert "HTTP 503" in row["detail"]
     assert row["command_json"] is not None  # what would have been sent is kept
+
+
+# --- only a fresh scan is sent ---------------------------------------------------
+
+
+def _sends(monkeypatch) -> list:
+    sent: list = []
+    export_api(monkeypatch)
+    monkeypatch.setattr(node, "send", lambda command_json, target: sent.append(target) or "ok")
+    return sent
+
+
+@pytest.mark.parametrize("age", [0.0, 299.0, 300.0])
+def test_a_scan_within_the_age_limit_is_sent(monkeypatch, age):
+    sent = _sends(monkeypatch)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(age))))
+
+    assert row["outcome"] == "SENT"
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("age", [301.0, 811.0, 86400.0])
+def test_a_scan_older_than_the_limit_is_recorded_and_not_sent(monkeypatch, age):
+    sent = _sends(monkeypatch)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(age))))
+
+    assert sent == []
+    assert row["outcome"] == "STALE"
+    assert f"{age:.0f} s old" in row["detail"] and "300 s" in row["detail"]
+    assert "max_scan_age_seconds" in row["detail"]
+    assert row["command_json"] is not None  # what would have been sent is kept
+
+
+def test_an_age_just_over_the_limit_is_not_reported_as_the_limit(monkeypatch):
+    _sends(monkeypatch)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(300.4))))
+
+    assert row["outcome"] == "STALE"
+    assert "301 s old; the limit is 300 s" in row["detail"]
+
+
+def test_a_scan_ahead_of_the_machines_clock_is_held_back(monkeypatch):
+    # The limit cannot be trusted when the clock (the machine's or the radar's) is off.
+    sent = _sends(monkeypatch)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(-400.0))))
+
+    assert (row["outcome"], sent) == ("STALE", [])
+    assert "400 s ahead of this machine's clock" in row["detail"]
+
+
+def test_an_old_scan_whose_command_already_went_out_stays_a_duplicate(monkeypatch):
+    _sends(monkeypatch)
+    first = RadarCommandModule().run(_context(_config(api=API)))
+
+    again = _row(
+        RadarCommandModule().run(
+            _context(
+                _config(api=API),
+                wall_time=_at(811.0),
+                radar_command_state=first["radar_command_state"],
+            )
+        )
+    )
+
+    assert again["outcome"] == "DUPLICATE"
+
+
+def test_the_age_limit_is_the_one_the_options_give(monkeypatch):
+    sent = _sends(monkeypatch)
+    patient = _config(api={**API, "max_scan_age_seconds": 900})
+
+    row = _row(RadarCommandModule().run(_context(patient, wall_time=_at(811.0))))
+
+    assert (row["outcome"], len(sent)) == ("SENT", 1)
+
+
+def test_a_scan_too_old_to_send_is_not_marked_as_published(monkeypatch):
+    _sends(monkeypatch)
+
+    result = RadarCommandModule().run(_context(_config(api=API), wall_time=_at(811.0)))
+
+    assert not result["radar_command_state"]
+
+
+def test_a_dry_run_records_the_command_of_an_old_scan_all_the_same():
+    row = _row(RadarCommandModule().run(_context(_config(), wall_time=_at(86400.0))))
+
+    assert row["outcome"] == "PUBLISHED"
+
+
+def test_a_scan_too_old_to_send_says_so_on_the_console_without_marks(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    _sends(monkeypatch)
+
+    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(811.0))))
+
+    assert _console_line(caplog) == (
+        f"radar_command: command {row['plan_id']} held back for cell {radar_store.UID_A}"
+        ": scan is 811 s old; the limit is 300 s (radar_command.api.max_scan_age_seconds)"
+    )
+    (record,) = [r for r in caplog.records if "radar_command:" in r.getMessage()]
+    assert record.levelno == logging.INFO  # held back on purpose: not a failure
 
 
 def _console_line(caplog) -> str:

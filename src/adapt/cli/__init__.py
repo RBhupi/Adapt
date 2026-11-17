@@ -11,6 +11,7 @@ file ``NAME.yaml`` in it::
     adapt config nexrad         # (re)write ./nexrad.yaml from the template
     adapt config --show NAME    # NAME's options with their defaults, ready to paste
     adapt run nexrad            # run ./nexrad.yaml: its modules, scan by scan
+    adapt run nexrad.yaml       # the same: the file may be named with its extension
     adapt graph nexrad          # print ./nexrad.yaml's module graph (Mermaid text)
     adapt dashboard             # browse the store
 
@@ -205,7 +206,7 @@ def _parser() -> argparse.ArgumentParser:
         "store: its modules over the scans its source provides. With run.source: "
         "stored_run they run over the stored run --run-id instead. Ctrl-C stops it.",
     )
-    run.add_argument("name", help="Pipeline name: the file ./NAME.yaml.")
+    run.add_argument("name", help="Pipeline file ./NAME.yaml, given as NAME or NAME.yaml.")
     run.add_argument(
         "--run-id",
         dest="run_id",
@@ -230,7 +231,7 @@ def _parser() -> argparse.ArgumentParser:
         "and the data each hands the next. Nothing runs and no store is needed. Save it "
         "with 'adapt graph NAME > NAME.mmd'.",
     )
-    graph.add_argument("name", help="Pipeline name: the file ./NAME.yaml.")
+    graph.add_argument("name", help="Pipeline file ./NAME.yaml, given as NAME or NAME.yaml.")
     graph.set_defaults(func=_graph_cmd)
 
     dashboard = commands.add_parser(

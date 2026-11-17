@@ -26,7 +26,7 @@ from adapt.persistence.store import init_store
 pytestmark = pytest.mark.unit
 
 _NEXRAD = """\
-# Adapt pipeline file. Run it with:  adapt run <this file's name without .yaml>
+# Adapt pipeline file. Run it with:  adapt run <this file's name>
 # Turn a module on by uncommenting its line; Adapt orders the modules by what each reads.
 # Everything not set here keeps its default. To see a module's options:
 #   adapt config --show NAME

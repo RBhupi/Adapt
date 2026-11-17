@@ -85,6 +85,14 @@ class ApiConfig(BaseModel):
         "(PEM) the API's TLS certificate is verified against",
     )
     timeout_seconds: float = Field(gt=0, description="Timeout (seconds) of each publish request")
+    max_scan_age_seconds: float = Field(
+        gt=0,
+        description="A command is sent only when its scan started no longer ago than this "
+        "(seconds), by this machine's clock, when the command is ready; an older scan's "
+        "command is recorded and held back. A scan's time is the start of its volume and "
+        "its file exists only when the volume ends, so the limit must cover one volume, "
+        "the polling interval and the processing",
+    )
 
 
 class AltitudeBand(BaseModel):

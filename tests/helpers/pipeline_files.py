@@ -33,6 +33,7 @@ API = {
     "api_key_env": "ADAPT_TEST_KEY",
     "ca_file_env": "ADAPT_TEST_CA",
     "timeout_seconds": 5,
+    "max_scan_age_seconds": 300,
 }
 API_URL = "https://radar.example.test/site"
 API_KEY = "a-test-key"
