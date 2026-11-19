@@ -37,14 +37,15 @@ A `Path` object pointing to a downloaded NEXRAD Level-II file (`.gz` or uncompre
 
 ### Input: `config`
 
-The resolved `InternalConfig`. Ingest reads:
-- `config.regridder.*` — grid shape, spatial extent, interpolation parameters
-- `config.reader.field_map` — source-to-canonical variable renames applied once here
-- `config.reader.fields` — explicit canonical keep-list (empty = keep all)
+Ingest's own options, set in the pipeline file under `params.ingest` (`adapt config --show ingest` prints them). Ingest reads:
+- `params.ingest.grid_shape`, `grid_limits`, `roi_func`, `min_radius`, `weighting_function` — grid shape, spatial extent, interpolation parameters
+- `params.ingest.field_map` — source-to-canonical variable renames applied once here
+- `params.ingest.fields` — explicit canonical keep-list (empty = keep all)
+- `params.global.z_level` — the analysis altitude of the 2D slice, a setting of the whole run
 
 ### Output: `grid_ds`
 
-A 3-dimensional `xarray.Dataset` on a regular Cartesian grid `(z, y, x)`. All coordinates are in metres from the radar origin. Source variable names are renamed to canonical names via `config.reader.field_map`, and only `config.reader.fields` are kept (empty list = keep all) — inside `RadarDataLoader`, the single canonicalization point. The applied mapping is recorded in `attrs["source_fields_json"]`.
+A 3-dimensional `xarray.Dataset` on a regular Cartesian grid `(z, y, x)`. All coordinates are in metres from the radar origin. Source variable names are renamed to canonical names via `params.ingest.field_map`, and only `params.ingest.fields` are kept (empty list = keep all) — inside `RadarDataLoader`, the single canonicalization point. The applied mapping is recorded in `attrs["source_fields_json"]`.
 
 ```
 grid_ds
@@ -84,10 +85,10 @@ Polar Radar object
     ▼ Cressman regridder (via adapters/)
 3D Cartesian grid
     │
-    ▼ Field renaming + selection (via config.reader.field_map / fields)
+    ▼ Field renaming + selection (via params.ingest.field_map / fields)
 Canonical grid_ds
     │
-    ▼ z-slice at config.regridder.analysis_level
+    ▼ z-slice at params.global.z_level
 grid_ds_2d
 ```
 

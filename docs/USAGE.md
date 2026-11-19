@@ -179,16 +179,88 @@ processing the scans again, run the two modules over the stored run: see
 The pipeline file lists only names, and a name alone runs with its defaults
 (`target_selection` and `radar_command` with their packaged rule and command
 setup). Set only what you change, under `params:` (e.g. `target_selection:` then
-`  duration: {max_minutes: 15}`). Print a module's or section's options with their
+`  duration: {max_minutes: 15}`). Every module's options sit under the module's
+own name; the settings of the whole run sit under `global`, and `downloader`
+and `logging` have their own entries. Print a module's options with their
 defaults and meanings, then paste what it prints under the file's `params:`
 line, as its first line says (`params:` is the template's last line, so
 `adapt config --show detection >> nexrad.yaml` does it too; an entry given twice
 is refused):
 
 ```bash
-adapt config --show detection   # the segmenter options detection uses
+adapt config --show detection   # the options of the detection module
 adapt config --show global      # settings shared by several modules
 ```
+
+```yaml
+params:
+  global:
+    max_scan_gap_minutes: 12
+  detection:
+    threshold_params: {threshold: 40}   # one key of a nested part, given alone
+  tracking:
+    max_speed_ms: 35
+```
+
+`adapt run` and `adapt graph` check every option before anything starts. An
+unknown option, a value out of its bounds, or `null` for an option that does
+not allow it is refused, named by its full path with the reason
+(`params.detection.h_maxima — value -1 is out of range — ...`). All such
+options of the file are reported together, in one message. What a module
+refuses itself (the two rules on `global.tracking_field`, the `xlma_stat`
+folder), a module missing an input, and a missing time window are reported
+once those are right. A number must be
+finite (`.inf` and `.nan` are refused), and a name written with spaces around
+it (`" velocity "`) is read without them in the options of `ingest`,
+`detection`, `projection`, `analysis` and `tracking` and in `global`.
+
+#### Keys of earlier versions
+
+Earlier versions kept the options of five modules in sections with other
+names. Those keys are now unknown and are refused with the list of valid keys.
+Move the options under the module that uses them:
+
+| Old key under `params:` | Now |
+|---|---|
+| `reader`, `regridder` | `ingest` |
+| `segmenter` | `detection` |
+| `projector` | `projection` |
+| `analyzer` | `analysis` |
+| `tracker` | `tracking` |
+| `tracker.cell_uid.width` | `tracking.uid_width` |
+| `tracker.cell_uid.alphabet`, `downloader.output_dir` | removed (they had no effect); each is refused as an unknown option, like any other |
+| `visualization`, `output` | removed (they had no effect on a run) |
+| `global.coord_names` | removed: the grid coordinate names are fixed (`x`, `y`, `z`, `time`) |
+| `analyzer.exclude_fields` (defaults plus your entries) | `analysis.exclude_fields` lists only your additions. Five internal variables are always excluded (`ROI`, `labels`, `cell_labels`, `cell_projections`, `clutter_filter_power_removed`); `exclude_fields: []` no longer clears them |
+
+The option names inside a section are otherwise unchanged
+(`segmenter.h_maxima` is `detection.h_maxima`). `global`, `downloader` and
+`logging` keep their names. A value that was refused before (out of its
+bounds, of the wrong type, `null` where the option does not allow it) is
+refused as before, under the new key.
+
+What else is different from earlier versions:
+
+- **Options of a module the file does not list** are refused
+  (`params.tracking` in a file whose `modules:` has no `tracking`). Earlier
+  versions accepted the old sections of a module that was not listed, and
+  ignored them. List the module, or remove its options.
+- **The two rules on `global.tracking_field`** (it must be in
+  `analysis.radar_variables`, and in `ingest.fields` when that list is not
+  empty) are each checked by the module they concern, so they apply only in a
+  file that lists `analysis`, respectively `ingest`. Earlier versions applied
+  them to every file.
+- **On a resume** (`--run-id` of a run in the store) the file's options are not
+  read, so a wrong one is not reported. Earlier versions refused the file.
+- **`.inf` and `.nan`** are refused for every module option and for
+  `global.z_level` and `global.max_scan_gap_minutes`. Earlier versions
+  accepted them wherever the option's bounds did. Give a finite number, or
+  `null` where the option allows it (for `target_selection`,
+  `duration: {max_minutes: null}` is no cap).
+- **`projection.method`** must be written exactly `adapt_default`. Earlier
+  versions also took other letter case and surrounding spaces.
+- **A run recorded with the old keys** cannot be resumed or used for a
+  stored-run pass; start a new run.
 
 `adapt config nexrad` rewrites `nexrad.yaml` from the template (it asks before
 overwriting). A store can hold several pipelines: copy `nexrad.yaml` to, say,

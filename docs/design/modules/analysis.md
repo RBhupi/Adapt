@@ -49,10 +49,10 @@ A `datetime` used to timestamp each row in the output DataFrame.
 
 ### Input: `config`
 
-Analysis reads:
-- `config.analyzer.radar_variables` — which radar fields to compute statistics on
-- `config.analyzer.exclude_fields` — fields to skip
-- `config.analyzer.adjacency_threshold` — minimum overlap fraction to record adjacency
+Analysis's own options, set in the pipeline file under `params.analysis` (`adapt config --show analysis` prints them). Analysis reads:
+- `params.analysis.radar_variables` — which radar fields to compute statistics on
+- `params.analysis.exclude_fields` — fields to skip, added to the ones analysis always skips
+- `params.analysis.adjacency_min_touching_boundary_pixels` — minimum number of touching boundary pixels to record two cells as adjacent
 
 ### Output: `cell_stats`
 

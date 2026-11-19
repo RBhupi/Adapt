@@ -2,16 +2,14 @@ Configuration
 =============
 
 The pipeline file (one YAML file per pipeline in the store folder), its
-templates, and the pydantic schemas it resolves through: user-facing defaults
-(``ParamConfig``), user overrides (``UserConfig``), and the fully-resolved
-immutable runtime config (``InternalConfig``).
+templates, and what turns a file into a run's config: the generic resolver that
+lays the file's ``params.<module>`` over each listed module's own defaults and
+validates the result with the module's options model, and the frozen run config
+(``InternalConfig``) that records every listed module's options. The options
+themselves are defined in the modules (``adapt.modules.<name>.config``), not
+here.
 
 .. automodule:: adapt.configuration.pipeline_file
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: adapt.configuration.param_sections
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,22 +24,7 @@ immutable runtime config (``InternalConfig``).
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: adapt.configuration.schemas.param
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: adapt.configuration.schemas.user
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: adapt.configuration.schemas.internal
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: adapt.configuration.schemas.resolve
    :members:
    :undoc-members:
    :show-inheritance:

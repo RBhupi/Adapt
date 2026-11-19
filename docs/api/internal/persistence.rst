@@ -30,11 +30,6 @@ read through :class:`~adapt.api.StoreClient`.
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: adapt.persistence.track_store
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: adapt.persistence.output_router
    :members:
    :undoc-members:

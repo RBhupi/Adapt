@@ -41,10 +41,10 @@ The immediately preceding scan's segmented dataset. This is the "reference frame
 
 ### Input: `config`
 
-Projection reads:
-- `config.projector.method` — flow estimation method (default: Farneback)
-- `config.projector.max_projection_steps` — how many future steps to extrapolate (capped at 10)
-- `config.projector.flow_params` — algorithm-specific parameters for the optical flow solver
+Projection's own options, set in the pipeline file under `params.projection` (`adapt config --show projection` prints them). Projection reads:
+- `params.projection.method` — flow estimation method (`adapt_default`, Farneback optical flow, is the only one)
+- `params.projection.max_projection_steps` — how many future steps to extrapolate (capped at 10)
+- `params.projection.flow_params` — algorithm-specific parameters for the optical flow solver
 
 ### Output: `projected_ds`
 

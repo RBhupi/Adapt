@@ -37,11 +37,11 @@ The 2D Cartesian grid from the ingest module. Detection reads the canonical refl
 
 ### Input: `config`
 
-Detection reads:
-- `config.segmenter.threshold` — minimum reflectivity to consider (dBZ)
-- `config.segmenter.min_cellsize` — minimum cell area in grid points
-- `config.segmenter.max_cellsize` — maximum cell area in grid points
-- `config.segmenter.closing_kernel` — morphological closing radius (pixels)
+Detection's own options, set in the pipeline file under `params.detection` (`adapt config --show detection` prints them). Detection reads:
+- `params.detection.threshold_params.threshold` — minimum reflectivity to consider (dBZ), with the default `method: threshold`
+- `params.detection.min_cellsize_gridpoint` — minimum cell area in grid points
+- `params.detection.max_cellsize_gridpoint` — maximum cell area in grid points
+- `params.detection.closing_radius` — morphological closing radius (pixels)
 
 ### Output: `segmented_ds`
 
@@ -65,16 +65,16 @@ Labels are ordered by decreasing cell area: label 1 is the largest cell, label N
 ```
 reflectivity field (float32, dBZ)
         │
-        ▼ binary threshold at config.segmenter.threshold
+        ▼ binary threshold at params.detection.threshold_params.threshold
 binary mask (bool)
         │
-        ▼ morphological closing (disk kernel, radius = closing_kernel)
+        ▼ morphological closing (disk kernel, radius = closing_radius)
 closed mask (fills small holes and gaps)
         │
         ▼ connected component labelling
 raw integer labels
         │
-        ▼ size filter (remove < min_cellsize, > max_cellsize grid points)
+        ▼ size filter (remove < min_cellsize_gridpoint, > max_cellsize_gridpoint grid points)
 filtered labels
         │
         ▼ relabel by decreasing area

@@ -6,152 +6,153 @@
 
 ## Responsibility
 
-The configuration system resolves settings from three sources — expert scientific defaults, user overrides, and command-line flags — into a single, frozen, fully validated configuration object that the rest of the system uses without further resolution logic.
+The configuration system turns a pipeline file into a single, frozen, fully validated run config (`InternalConfig`) and one frozen config per listed module. The rest of the system uses these without further resolution logic.
 
-Once `InternalConfig` is produced, configuration is done. No component reads YAML files, inspects environment variables, or applies default values at runtime.
+It knows no module option. Every module defines its own options (one pydantic model in `modules/<name>/config.py`); the configuration system finds the listed modules in the registry, lays the file's values over each module's defaults, validates the result with the module's model, and hands it to the module.
+
+Once the run config and the module configs are built, configuration is done. No component reads the pipeline file or applies a default value at runtime.
 
 ---
 
 ## What It Is Not Responsible For
 
-- Initialising runtime resources (directories, databases) — that is `init_runtime_config`'s job
-- Validating scientific correctness of parameter values — it validates types and ranges, not physical sense
-- Persisting user configuration files — the user is responsible for their config.yaml
+- Defining module options, their defaults or their bounds — each module does, in its own options model
+- Creating the store — that is `adapt init`'s job; a run in a folder that is not a store is refused
+- Validating scientific correctness of parameter values — it validates names, types and ranges, not physical sense
+- Keeping the user's pipeline file — the file is the user's; a run records a copy of it with its config
 - Providing dynamic configuration that can change at runtime — the frozen config is immutable
 
 ---
 
-## The Three-Tier Hierarchy
+## The Layers
 
 ```
-CLI flags          ← Highest precedence (direct user intent)
+--set path=value   ← planned for the next stage; not implemented
     ↓ overrides
-User config.yaml   ← User overrides of expert defaults
+Pipeline file      ← params.<module>, params.global, params.downloader, params.logging
     ↓ overrides
-defaults.yaml      ← Expert scientific defaults (ParamConfig)
+Module defaults    ← each module's options model, or its packaged preset
     ↓
-InternalConfig     ← Single frozen result
+InternalConfig     ← single frozen result, with every listed module's options
 ```
 
-A value set via CLI flag always wins. A value set in the user's config.yaml wins over the expert default. If neither CLI nor user sets a value, the expert default from `defaults.yaml` is used.
+A value set in the pipeline file wins over the module's default. If the file does not set a value, the default from the module's options model is used (for `target_selection` and `radar_command`, the default is the packaged preset).
 
-This means a user can share a config.yaml that contains only the fields they actually care about (e.g., `radar: KDIX`, `mode: realtime`). Everything else comes from the expert defaults.
+This means a pipeline file holds only what its author changes. A module listed under `modules:` with no `params:` entry runs with its defaults.
+
+A command-line layer, one generic `--set path=value` on `adapt run` and `adapt graph`, is planned as the next stage. It will be one more layer laid over the file's values before validation. It does not exist yet.
 
 ---
 
 ## Components
 
-### ParamConfig (`schemas/param.py`)
+### The pipeline file (`pipeline_file.py`)
 
-The **expert default configuration**. Every tunable parameter in the system has a value here. This is the canonical scientific baseline — the values an expert would choose if the user specified nothing.
+One YAML file per pipeline, in the store folder. Three sections, all required:
 
-Sections:
 ```
-downloader:
-    radar              # NEXRAD site code
+run:       # where scans come from
+    source             # aws_nexrad | local_directory | stored_run
+    radar              # radar / collection id
     mode               # realtime | historical
-    poll_interval      # seconds between S3 polls (realtime)
-    latest_files       # number of files to keep in rolling window
-    latest_minutes     # time window for rolling window
+    start_time         # historical only
+    end_time           # historical only
+    source_dir         # local_directory only
+    max_runtime_minutes  # realtime only
 
-regridder:
-    grid_shape         # (nz, ny, nx) — number of grid points
-    grid_limits        # spatial extent (km) from radar origin
-    roi_func           # radius-of-influence function
-    min_radius         # minimum interpolation radius (km)
-    weighting_function # Cressman | Barnes
+modules:   # the per-scan modules to run, by name, in any order
 
-segmenter:
-    threshold          # minimum reflectivity (dBZ)
-    closing_kernel     # morphological closing radius (pixels)
-    min_cellsize       # minimum cell area (grid points)
-    max_cellsize       # maximum cell area (grid points)
-
-analyzer:
-    radar_variables    # list of fields to compute statistics on
-    exclude_fields     # fields always excluded from statistics
-
-projector:
-    method             # optical flow algorithm
-    max_projection_steps  # forecast steps (capped at 10)
-    max_time_interval_minutes  # maximum gap between frames
-    flow_params        # algorithm-specific parameters
-
-global_:
-    var_names          # canonical field name mappings
-
-visualization:
-    dpi, figsize, basemap, colors, ...
-
-logging:
-    level              # DEBUG | INFO | WARNING
+params:    # options; every key is optional
+    global:            # the settings of the whole run
+        tracking_field       # canonical field detection, projection and tracking use
+        z_level              # analysis altitude (m)
+        max_scan_gap_minutes # largest gap between two scans any module pairs across
+    downloader:        # polling and queue settings of the scan source
+    logging:           # log levels and telemetry switches
+    <module>:          # the options of a listed module, under its own name
 ```
 
-### UserConfig (`schemas/user.py`)
+`load_pipeline_file` reads and validates the structure: the three sections, the run section's rules, known and listed module names, and the `params:` keys (`global`, `downloader`, `logging`, or a listed module). Unknown keys and keys given twice raise a `ConfigError` immediately — no silent ignoring of typos.
 
-The same structure as `ParamConfig` but with all fields optional. The user's `config.yaml` is validated against this schema. Unknown fields raise a `ValidationError` immediately — no silent ignoring of typos.
+### Module options (`modules/<name>/config.py`)
 
-### CLIConfig (`schemas/cli.py`)
+Not part of this package, but the other half of the contract. Each module's options are one pydantic model: frozen, unknown keys refused, every option with its default, bounds and description. The node declares it as `options_class`. The Module Developer Guide (`docs/module-developer-guide.md`) describes the contract.
 
-Settings that can only be meaningfully set via the command line:
-```
---radar            → radar_id
---mode             → mode
---start-time       → start_time
---end-time         → end_time
---base-dir         → base_dir
---rerun            → rerun (bool flag)
---no-plot          → no_plot (bool flag)
---verbose          → verbose (bool flag)
-```
+### The module resolver (`schemas/module_resolver.py`)
+
+The **single generic path** from a file's values to a module's config. It never names a module; it finds them in the registry.
+
+- `module_options(name, given, source=...)`: the module's defaults (its options model, or its packaged preset) with `given` laid over, validated with the module's `options_class`.
+- `resolve_module_configs(run_config, modules)`: for each module about to run, `module_options` from the run's recorded options, then the module's `configure(options, shared)`, which returns the frozen config `run()` receives.
+
+`shared` is `adapt.contracts.SharedConfig`: the values of the whole run (`tracking_field`, `z_level`, `max_scan_gap_minutes`, `source`). A module that needs one takes it there, in `configure`; it never reads another module's options.
+
+**Merge rules** (the file's values laid over the defaults, by the model's schema):
+- A part that is itself a model of options: merged key by key, so one key deep inside can be given alone. A part that is off (`null`) in the defaults has nothing to merge into: all of its required keys must be given
+- Lists, and options that are mappings of free keys: replaced entirely (the given value replaces the default, not extends it)
+- Scalar values: replaced
+- An explicit `null`: taken as the value, then validated — refused for an option that does not allow it, never read as "use the default"
+
+There are no special merge rules outside the modules. A rule that concerns one module lives in that module's `configure`: for example, `analysis` always excludes a fixed set of internal variables and adds the user's `exclude_fields` to them, and refuses a run whose `tracking_field` is not in its `radar_variables`.
 
 ### InternalConfig (`schemas/internal.py`)
 
-The final, frozen, fully resolved configuration. This is a Pydantic model with `frozen=True`. Once created, no component can modify it.
+The final, frozen run config. This is a pydantic model with `frozen=True`. Once created, no component can modify it.
 
-Additional fields not in user configs:
 ```
-run_id             # Generated at init time (e.g., "20260226-1530-KDIX")
+mode, source, source_dir   # from the file's run section
+base_dir                   # the store root: the folder that holds the file
+run_id                     # e.g. "2026OCT21-1052-KFSX"
+global_                    # tracking_field, z_level, max_scan_gap_minutes
+downloader                 # with radar, mode and the time window from the run section
+logging
+modules                    # the listed modules
+module_params              # every listed module's validated options, defaults included
+pipeline                   # provenance: the pipeline file's name, path and content
 ```
 
-### resolve_config (`schemas/resolve.py`)
+It holds no section per module: a module's options are only in `module_params`, under the module's name, as its own model validated them.
 
-The **single authoritative merge function**. Takes `ParamConfig`, `UserConfig`, and `CLIConfig`, applies the three-tier precedence, and returns a merged dict ready for `InternalConfig` construction.
+### run_config (`pipeline_run.py`)
 
-**Merge rules**:
-- Nested dicts: recursively merged (user fills in only what it overrides)
-- Lists: replaced entirely (a user list replaces the default list, not extends it)
-- Scalar values: replaced (higher precedence wins)
+The **one entrypoint** from a loaded pipeline file to a run's `InternalConfig`. `adapt run` calls it; `adapt graph` calls its store-free counterpart `configured_modules`.
 
-**Special merge rules** (documented exceptions to the above):
-- `analyzer.exclude_fields`: user list is **unioned** with default list, never replaces it. Rationale: the default exclusions exist for a reason (coordinate fields, internal labels); the user should add to them, not accidentally remove them.
-- `projector.max_projection_steps`: capped at 10 regardless of user input. Rationale: beyond 10 steps, projection accuracy degrades below a physically meaningful threshold.
-- Mode inference: if `start_time` or `end_time` is set via CLI, mode is automatically set to `historical` if not explicitly provided.
+- **New run**: a new run id (the minute it starts, or `--run-id`), every listed module's options validated and recorded.
+- **Resumed run** (`--run-id` of a run in the store): the recorded config, with only `base_dir` set to where the store is now. The run is configured from its recorded options, not from the file: the file's options are not read, so they are not checked.
+- **Stored-run pass** (`run.source: stored_run`): the stored run's recorded config, with the file's module list. A listed module starts from its own defaults, then the file. `params.global`, `params.downloader` and `params.logging` are refused. If the stored run already ran a listed module with other options, the pass is refused, unless the module's rows are keyed by its options (`rows_keyed_by_options`: `target_selection`, `radar_command`).
 
-### init_runtime_config (`schemas/initialization.py`)
+In every case all listed modules are then configured and wired into the graph, so a wrong option or a module missing an input is refused before anything starts.
 
-The **complete runtime setup entrypoint**. This is the only function the CLI calls to go from raw CLI arguments to a ready-to-use `InternalConfig`.
+A recorded config that this version cannot read (for example, of a run recorded before each module's options moved under the module's name) is a `ConfigError` that names the run and the keys; such a run cannot be resumed or used for a stored-run pass.
 
-**Steps**:
-1. Load user config from YAML or Python file (or use empty defaults if none provided)
-2. Call `resolve_config(param, user, cli)` to merge
-3. Create output directories on disk
-4. Handle `--rerun`: delete existing radar output and reset file tracker
-5. Generate or reuse `run_id`
-6. Open the store and begin the run (config recorded in registry.runs.config_json)
-7. Persist the final resolved config to `{run_dir}/config.json` (for reproducibility audit)
-8. Return `InternalConfig`
+### Errors (`schemas/errors.py`)
 
-After this function returns, the system is fully initialised. No component downstream does any further resource setup.
+`validated()` turns a pydantic `ValidationError` into a `ConfigError` (`OptionsRefused`) with one line per option: its full path and the reason. For a module option, `module_options` adds a last line that names the command that prints the module's options.
+
+```
+Invalid configuration (pipeline file /data/kilx/nexrad.yaml):
+  • params.detection.h_maxima — value -1 is out of range — Input should be greater than 0
+The options of detection: adapt config --show detection
+```
+
+The options of a file that fail validation are reported together (`together()`): one message holds those of every listed module and of `global`, `downloader` and `logging`, then one such last line per module that has one. What a module's `configure` refuses, a module missing an input, and a missing time window are reported once the options validate.
+
+The options are recorded with the run as JSON and the run is configured from that record, so a value the record would not give back is refused when the run is configured: an infinite or NaN number, for a module option and for `global.z_level` and `global.max_scan_gap_minutes`.
+
+### Templates and the module catalog (`pipeline_template.py`, `defaults.yaml`)
+
+`pipeline_template.py` writes the short, commented pipeline file a new pipeline starts from (`adapt init`, `adapt config NAME`). `defaults.yaml` is the module catalog: the node modules a pipeline file may list. It holds no option values.
 
 ---
 
 ## Configuration Persistence
 
-The final resolved config is written to `{run_dir}/config.json` at startup. This means:
-- Every pipeline run has a complete record of the exact settings used
-- You can reproduce any historical run exactly by pointing to its config.json
+The run config is recorded with the run, in the store: `registry.db`, table `runs`, column `config_json` (read it with `StoreClient.run_config(run_id)`). This means:
+- Every pipeline run has a complete record of the exact settings used, defaults included
+- A resumed run is configured from that record, so it runs with the same options as before the stop
 - Debugging anomalous outputs always starts with "what were the parameters?"
+
+There is no separate config file per run.
 
 ---
 
@@ -161,10 +162,10 @@ The final resolved config is written to `{run_dir}/config.json` at startup. This
 
 A mutable configuration object in a multi-threaded system is a race condition waiting to happen. Immutability makes it safe to pass the config object to every thread without synchronisation. It also makes the system easier to reason about: parameters do not change during a run.
 
-**Why validate user config strictly (no unknown fields)?**
+**Why validate strictly (no unknown fields)?**
 
-Silent acceptance of unknown fields masks typos. If a user writes `threshhold: 30` (double h), strict validation raises an error immediately at startup rather than silently ignoring the override and running with the expert default all day.
+Silent acceptance of unknown fields masks typos. If a user writes `threshhold: 30` (double h), strict validation raises an error immediately at startup rather than silently ignoring the override and running with the default all day.
 
-**Why are expert defaults in a YAML file rather than hardcoded in Python?**
+**Why are a module's options defined in the module?**
 
-YAML is human-readable, version-controlled, and editable without touching Python. Scientists can propose a new default by editing `defaults.yaml` and opening a pull request. They do not need to navigate the Python schema code.
+An option written in one place cannot disagree with itself. Earlier, an option of an older module was defined three times (a defaults schema, a run-config schema, the module's own config) and translated between them, and its `params:` key had another name than the module. Now adding or changing an option edits one model in one module, and nothing in `configuration/` changes.

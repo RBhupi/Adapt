@@ -37,10 +37,10 @@ The per-cell statistics DataFrame from the analysis module. Tracking reads centr
 
 ### Input: `config`
 
-Tracking reads:
-- `config.tracker.overlap_threshold` — minimum projected mask overlap fraction to consider a match
-- `config.tracker.assignment_method` — cost minimisation strategy (default: linear sum assignment)
-- `config.tracker.max_search_radius` — maximum distance between projected and observed centroids
+Tracking's own options, set in the pipeline file under `params.tracking` (`adapt config --show tracking` prints all 17; `src/adapt/modules/tracking/README.md` explains them). Among them:
+- `params.tracking.max_overlap_mismatch` — the overlap gate: two cells are a candidate link when the mismatch of their grown shapes is at most this
+- `params.tracking.max_link_cost` — the cost ceiling: a link is accepted only if its cost is at most this
+- `params.tracking.max_speed_ms` — hard speed cap (m/s) of any link
 
 ### Output: `tracked_cells`
 

@@ -13,7 +13,7 @@ Each document covers a layer or component: its single responsibility, what it ex
 | 01 | [Execution Graph](01_execution_graph.md) | DAG construction, topological execution, module registry, context dict protocol |
 | 02 | [Runtime Orchestration](02_runtime_orchestration.md) | Thread coordination, frame pairing, scan completeness, graceful shutdown |
 | 03 | [Persistence Layer](03_persistence.md) | The data store: layout, catalogs, frozen tables, objects, lineage |
-| 04 | [Configuration System](04_configuration.md) | Three-tier resolution, expert defaults, frozen InternalConfig |
+| 04 | [Configuration System](04_configuration.md) | The pipeline file, module-owned options, frozen InternalConfig |
 | 05 | [Consumer API](05_consumer_api.md) | StoreClient — scans, rasters, tracks, typed filters, read-only SQL |
 | 06 | [Contracts and Boundaries](06_contracts_and_boundaries.md) | What contracts are, how they are enforced, what they do not validate |
 | 07 | [Vision and Extensibility](07_vision_and_extensibility.md) | Multi-sensor roadmap, cloud deployment, invariants that must be preserved |
