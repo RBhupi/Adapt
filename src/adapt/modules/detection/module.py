@@ -37,6 +37,7 @@ from skimage.morphology import h_maxima
 from skimage.segmentation import watershed
 
 from adapt.contracts import (
+    CELL_LABELS_VAR,
     ContractViolation,
     SegmentationComponent,
     SegmentationDecisions,
@@ -215,8 +216,8 @@ class RadarCellSegmenter:
         Resolved parameters for the selected method. For ``threshold`` this is
         ``{"threshold": <dBZ>}``; for the pyart methods it is the algorithm's
         keyword arguments (splatted into the pyart call, recorded in the output).
-    - `closing_radius` : int, default 2 (disk radius for mask closing; 0 = off)
-        Morphological closing footprint. (1, 1) means no closing.
+    - `closing_radius` : int, default 2
+        Radius (grid points) of the disk that closes the mask; 0 means no closing.
     - `filter_by_size` : bool, default True
         Whether to apply cell size filtering.
     - `min_cellsize_gridpoint` : int, default 5
@@ -258,7 +259,6 @@ class RadarCellSegmenter:
         self.seed_carry_min_separation = config.seed_carry_min_separation
         self.carried_exempt_size_filter = config.carried_exempt_size_filter
         self.refl_name = config.reflectivity_var
-        self.labels_name = config.labels_var
         self.z_level = config.z_level
         self._decisions: SegmentationDecisions | None = None
 
@@ -308,14 +308,14 @@ class RadarCellSegmenter:
         """
         require(
             self.seed_carry or carried is None,
-            "Detection: carried labels offered while segmenter.seed_carry is off",
+            "Detection: carried labels offered while params.detection.seed_carry_frames is 0",
         )
         if self.refl_name not in ds.data_vars:
             raise ContractViolation(
                 f"Detection: configured tracking field {self.refl_name!r} is "
                 f"not in the grid (available: "
                 f"{sorted(str(v) for v in ds.data_vars)}). Check "
-                "global_.tracking_field and reader.field_map/fields."
+                "params.global.tracking_field and params.ingest.field_map / fields."
             )
         refl = ds[self.refl_name].values
         binary_mask = self._convective_mask(refl, grid_ds)
@@ -350,9 +350,9 @@ class RadarCellSegmenter:
         )
 
         ds_out = ds.copy()
-        ds_out[self.labels_name] = labels_da
+        ds_out[CELL_LABELS_VAR] = labels_da
         logger.debug(
-            f"Labels attached: var={self.labels_name}, shape={labels.shape}, max={labels.max()}"
+            f"Labels attached: var={CELL_LABELS_VAR}, shape={labels.shape}, max={labels.max()}"
         )
         return ds_out
 

@@ -27,7 +27,12 @@ import os
 
 import pandas as pd
 
-from adapt.contracts import ProductTableWrite, check_xlma_stat_minutes, check_xlma_stat_scan
+from adapt.contracts import (
+    ProductTableWrite,
+    SharedConfig,
+    check_xlma_stat_minutes,
+    check_xlma_stat_scan,
+)
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
@@ -44,7 +49,7 @@ class XlmaStatModule(BaseModule):
         "Lightning (xLMA) statistics on minute-projected cells; "
         "needs params: xlma_stat: {input_dir: ...}"
     )
-    config_class = XlmaStatConfig
+    options_class = XlmaStatConfig
     inputs = ["xlma_stat_config", "analysis_ds", "scan_time"]
     outputs = ["xlma_stat_minutes_rows", "xlma_stat_scan_rows"]
     output_contracts = {
@@ -67,22 +72,21 @@ class XlmaStatModule(BaseModule):
     )
 
     @classmethod
-    def build_config(cls, cfg) -> XlmaStatConfig:
-        """The run's config; refuses a run without an existing ``input_dir`` folder."""
-        config = XlmaStatConfig(**cfg.module_params.get("xlma_stat", {}))
-        if config.input_dir is None:
+    def configure(cls, options: XlmaStatConfig, shared: SharedConfig) -> XlmaStatConfig:
+        """The options; refuses a run without an existing ``input_dir`` folder."""
+        if options.input_dir is None:
             raise ValueError(
                 "xlma_stat needs the folder of xLMA flash-sorted NetCDF files; set it "
                 "in the pipeline file as params: xlma_stat: {input_dir: ...}"
             )
-        if not os.path.isdir(config.input_dir):
-            raise ValueError(f"params.xlma_stat.input_dir '{config.input_dir}' is not a folder")
-        if not any(name.endswith(".nc") for name in os.listdir(config.input_dir)):
+        if not os.path.isdir(options.input_dir):
+            raise ValueError(f"params.xlma_stat.input_dir '{options.input_dir}' is not a folder")
+        if not any(name.endswith(".nc") for name in os.listdir(options.input_dir)):
             raise ValueError(
-                f"params.xlma_stat.input_dir '{config.input_dir}' holds no flash-sorted NetCDF "
+                f"params.xlma_stat.input_dir '{options.input_dir}' holds no flash-sorted NetCDF "
                 "(*.nc) files; convert raw LYLOUT ASCII sources with xLMA/pyxlma first"
             )
-        return config
+        return options
 
     def __init__(self) -> None:
         # The folder's flashes, re-read only when its files change: every scan

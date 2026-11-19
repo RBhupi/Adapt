@@ -1,7 +1,9 @@
 """Root-level pytest fixtures for Adapt test suite.
 
-Provides shared configuration fixtures following Pydantic-based architecture.
-All tests must use these fixtures instead of creating raw dict configs.
+Provides the shared configuration fixtures. A run config is built the way
+``adapt run`` builds it, from a pipeline file held in memory
+(``tests.helpers.run_configs``); a module's config is built by the module's own
+``configure`` from its options model.
 """
 
 import shutil
@@ -10,14 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.ingest import LoadModule
 from adapt.execution.nodes.projection import ProjectionModule
 from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.analysis.config import AnalysisOptions
+from adapt.modules.detection.config import DetectionOptions
+from adapt.modules.ingest.config import IngestOptions
+from adapt.modules.projection.config import ProjectionOptions
+from adapt.modules.tracking.config import TrackingOptions
+from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import StoreRegistry
+from tests.helpers.run_configs import new_run_config
+from tests.helpers.shared_config import SHARED
 
 # =============================================================================
 # Resource isolation
@@ -39,71 +47,6 @@ def _reset_repository_registry():
 
 
 # =============================================================================
-# Configuration Fixtures (Pydantic-based)
-# =============================================================================
-
-
-@pytest.fixture
-def param_config():
-    """Expert configuration with all defaults.
-
-    Use this as the base for all test configs. Override specific values
-    using user_config or by creating custom UserConfig instances.
-    """
-    # For tests, provide a default radar_id since it's required at runtime
-    from adapt.configuration.schemas.param import ParamConfig as PC
-
-    config = PC()
-    # Override radar with a test default (field name is 'radar', not 'radar_id')
-    config.downloader.radar = "TEST_RADAR"
-    return config
-
-
-@pytest.fixture
-def internal_config(param_config, temp_dir):
-    """Fully validated runtime configuration (no overrides).
-
-    Use this when tests don't care about specific config values and just
-    need a valid InternalConfig to pass to constructors.
-
-    Examples
-    --------
-    >>> def test_segmenter_init(internal_config):
-    ...     seg = RadarCellSegmenter(internal_config)
-    ...     assert seg.method == "threshold"  # expert default
-    """
-    user = UserConfig(base_dir=str(temp_dir))
-    return resolve_config(param_config, user)
-
-
-@pytest.fixture
-def make_config(param_config, temp_dir):
-    """Factory fixture for creating custom test configs.
-
-    Use this when you need to override specific values for a test.
-    Returns a callable that accepts UserConfig-compatible kwargs.
-
-    Examples
-    --------
-    >>> def test_custom_threshold(make_config):
-    ...     config = make_config(threshold=35)
-    ...     seg = RadarCellSegmenter(config)
-    ...     assert seg.threshold == 35.0
-    """
-
-    def _make(**user_overrides):
-        """Create InternalConfig with user overrides."""
-        # Ensure base_dir is always present in tests
-        if "base_dir" not in user_overrides:
-            user_overrides["base_dir"] = str(temp_dir)
-
-        user = UserConfig(**user_overrides)
-        return resolve_config(param_config, user)
-
-    return _make
-
-
-# =============================================================================
 # Directory Fixtures
 # =============================================================================
 
@@ -116,6 +59,53 @@ def temp_dir():
     shutil.rmtree(d, ignore_errors=True)
 
 
+@pytest.fixture
+def store_root(temp_dir):
+    """An initialized store root (registry.db + logs/ + collections/).
+
+    The registry connection is released here, before ``temp_dir`` removes the
+    directory: Windows refuses to delete ``registry.db`` while it is open, and
+    the autouse reset above only tears down after ``temp_dir``.
+    """
+    root = init_store(temp_dir / "store")
+    yield root
+    StoreRegistry.close_all()
+
+
+# =============================================================================
+# Run Config Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def internal_config(store_root):
+    """The config of a new run of a pipeline file that sets nothing.
+
+    Use this when a test does not care about specific config values and just
+    needs the config a run has: a realtime ``TEST_RADAR`` run of the six
+    modules of a plain NEXRAD run, in this test's store.
+    """
+    return new_run_config(store_root)
+
+
+@pytest.fixture
+def make_config(store_root):
+    """Factory for the config of a new run of a pipeline file with given sections.
+
+    Examples
+    --------
+    >>> def test_custom_level(make_config):
+    ...     config = make_config(params={"global": {"z_level": 3000}})
+    ...     assert config.global_.z_level == 3000.0
+    """
+
+    def _make(**sections):
+        """``new_run_config`` in this test's store: ``run``, ``modules``, ``params``."""
+        return new_run_config(store_root, **sections)
+
+    return _make
+
+
 # =============================================================================
 # Per-Module Config Fixtures
 # =============================================================================
@@ -123,78 +113,79 @@ def temp_dir():
 
 @pytest.fixture
 def detection_module_config(make_detection_config):
-    # Threshold segmenter (the default): the pyart methods need a 3D grid NetCDF,
-    # which these unit fixtures don't produce. Override method per-test for those.
+    # Threshold segmenter (the default): the pyart methods need a 3D grid,
+    # which these unit fixtures don't produce.
     return make_detection_config()
 
 
 @pytest.fixture
-def analysis_module_config(internal_config):
-    return AnalysisModule.build_config(internal_config)
+def analysis_module_config(make_analysis_config):
+    return make_analysis_config()
 
 
 @pytest.fixture
-def projection_module_config(internal_config):
-    return ProjectionModule.build_config(internal_config)
+def projection_module_config(make_projection_config):
+    return make_projection_config()
 
 
 @pytest.fixture
-def tracking_module_config(internal_config):
-    return TrackingModule.build_config(internal_config)
+def tracking_module_config(make_tracking_config):
+    return make_tracking_config()
 
 
 @pytest.fixture
-def ingest_module_config(internal_config):
-    return LoadModule.build_config(internal_config)
+def ingest_module_config(make_ingest_config):
+    return make_ingest_config()
 
 
 @pytest.fixture
-def make_detection_config(make_config):
-    def _make(**kw):
-        # Default to the threshold method: unit fixtures build a 2D dataset
-        # only, while the pyart methods (the new expert default) classify the
-        # 3D grid NetCDF. Tests exercising pyart pass segmentation_method=...
-        kw.setdefault("segmentation_method", "threshold")
-        # `threshold` is no longer a user-facing field; apply it directly to the
-        # built config's method_params so existing call sites keep working.
-        threshold = kw.pop("threshold", None)
-        cfg = DetectModule.build_config(make_config(**kw))
+def make_detection_config():
+    def _make(threshold=None, **options):
+        """Detection's config, as a run with default shared values configures it, for
+        ``options`` (``params.detection``); ``threshold`` is short for the threshold
+        method's own parameter."""
         if threshold is not None:
-            cfg = cfg.model_copy(
-                update={"method_params": {**cfg.method_params, "threshold": float(threshold)}}
-            )
-        return cfg
+            options["threshold_params"] = {"threshold": threshold}
+        return DetectModule.configure(DetectionOptions(**options), SHARED)
 
     return _make
 
 
 @pytest.fixture
-def make_analysis_config(make_config):
-    def _make(**kw):
-        return AnalysisModule.build_config(make_config(**kw))
+def make_analysis_config():
+    def _make(**options):
+        """Analysis's config, as a run with default shared values configures it,
+        for ``options`` (``params.analysis``)."""
+        return AnalysisModule.configure(AnalysisOptions(**options), SHARED)
 
     return _make
 
 
 @pytest.fixture
-def make_projection_config(make_config):
-    def _make(**kw):
-        return ProjectionModule.build_config(make_config(**kw))
+def make_projection_config():
+    def _make(**options):
+        """Projection's config, as a run with default shared values configures it,
+        for ``options`` (``params.projection``)."""
+        return ProjectionModule.configure(ProjectionOptions(**options), SHARED)
 
     return _make
 
 
 @pytest.fixture
-def make_tracking_config(make_config):
-    def _make(**kw):
-        return TrackingModule.build_config(make_config(**kw))
+def make_tracking_config():
+    def _make(**options):
+        """Tracking's config, as a run with default shared values configures it,
+        for ``options`` (``params.tracking``)."""
+        return TrackingModule.configure(TrackingOptions(**options), SHARED)
 
     return _make
 
 
 @pytest.fixture
-def make_ingest_config(make_config):
-    def _make(**kw):
-        return LoadModule.build_config(make_config(**kw))
+def make_ingest_config():
+    def _make(**options):
+        """Ingest's config, as a run with default shared values configures it,
+        for ``options`` (``params.ingest``)."""
+        return LoadModule.configure(IngestOptions(**options), SHARED)
 
     return _make

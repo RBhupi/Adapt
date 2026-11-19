@@ -3,29 +3,29 @@
 
 """Tests for the source selector config: which ingress source feeds the pipeline.
 
-`source` names a registered source plugin (default "aws_nexrad"); `source_dir`
-is the directory a local source scans.
+`source` names a registered source plugin, as the pipeline file's `run.source`
+gives it; `source_dir` is the directory a local source scans.
 """
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
-from adapt.configuration.schemas.param import ParamConfig  # noqa: E402
-from adapt.configuration.schemas.resolve import resolve_config  # noqa: E402
-from adapt.configuration.schemas.user import UserConfig  # noqa: E402
-
 
 class TestSourceSelector:
-    def test_source_defaults_to_aws_nexrad(self, tmp_path):
-        cfg = resolve_config(ParamConfig(), UserConfig(base_dir=str(tmp_path), radar="KLOT"))
+    def test_a_downloading_run_has_no_source_folder(self, make_config):
+        cfg = make_config(run={"source": "aws_nexrad"})
         assert cfg.source == "aws_nexrad"
         assert cfg.source_dir is None
 
-    def test_user_can_select_local_directory_source(self, tmp_path):
-        user = UserConfig(
-            base_dir=str(tmp_path), radar="KLOT", source="local_directory", source_dir="/data/in"
-        )
-        cfg = resolve_config(ParamConfig(), user)
+    def test_user_can_select_local_directory_source(self, make_config):
+        run = {
+            "source": "local_directory",
+            "source_dir": "/data/in",
+            "mode": "historical",
+            "start_time": "2024-01-01T12:00:00Z",
+            "end_time": "2024-01-01T13:00:00Z",
+        }
+        cfg = make_config(run=run)
         assert cfg.source == "local_directory"
         assert cfg.source_dir == "/data/in"

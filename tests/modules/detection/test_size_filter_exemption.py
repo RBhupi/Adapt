@@ -13,7 +13,6 @@ test is waived; the maximum still applies.
 import numpy as np
 import pytest
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.modules.detection.module import RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
@@ -30,10 +29,7 @@ def basins():
 
 def _segmenter(make_detection_config, **kw):
     return RadarCellSegmenter(
-        make_detection_config(
-            threshold=35.0,
-            segmenter=UserSegmenterConfig(filter_by_size=True, min_cellsize_gridpoint=5, **kw),
-        )
+        make_detection_config(threshold=35.0, filter_by_size=True, min_cellsize_gridpoint=5, **kw)
     )
 
 
@@ -57,10 +53,7 @@ def test_an_exempt_basin_survives_the_size_floor(make_detection_config, basins):
 def test_the_maximum_size_filter_still_applies_to_exempt_basins(make_detection_config, basins):
     seg = RadarCellSegmenter(
         make_detection_config(
-            threshold=35.0,
-            segmenter=UserSegmenterConfig(
-                filter_by_size=True, min_cellsize_gridpoint=5, max_cellsize_gridpoint=4
-            ),
+            threshold=35.0, filter_by_size=True, min_cellsize_gridpoint=5, max_cellsize_gridpoint=4
         )
     )
     out = seg._filter_and_relabel(basins, frozenset({1, 2}))

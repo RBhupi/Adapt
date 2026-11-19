@@ -15,7 +15,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from adapt.contracts import PersistenceSpec
+from pydantic import BaseModel
+
+from adapt.contracts import PersistenceSpec, SharedConfig
 
 
 class BaseModule(ABC):
@@ -35,7 +37,19 @@ class BaseModule(ABC):
     returns under a key it also lists in ``inputs``: the runtime hands the value
     back next time (``None`` before the module has run) and saves it with the
     run's checkpoint. What it needs of earlier scans' ordinary outputs it names
-    in ``prior_inputs`` and reads from ``prior_scans``.
+    in ``prior_inputs`` (``prior_inputs_for`` when an option decides) and reads
+    from ``prior_scans``.
+
+    A module owns its options: ``options_class`` is their model, the pipeline
+    file sets them under ``params: {<name>: ...}``, and ``configure`` turns the
+    validated options into the config ``run()`` receives.
+
+    A module's rows are written over the stored ones key by key. Run again over
+    a stored run with other options, it would leave rows of both options mixed,
+    so that pass is refused — unless the module sets ``rows_keyed_by_options``:
+    the key of every table it writes holds a hash of its options, so the rows
+    of each set of options stand apart.
+
     Contract callables (from adapt.contracts) are invoked by GraphExecutor
     automatically — nodes do not call them manually.
 
@@ -64,18 +78,19 @@ class BaseModule(ABC):
     output_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
     required_history: ClassVar[int] = 1
     # The outputs of earlier scans this module reads from ``prior_scans``: the
-    # runtime keeps exactly these (of every module) for the scans that follow.
+    # runtime keeps exactly these (of every module, as ``prior_inputs_for`` its
+    # options) for the scans that follow. A listed module must produce each one.
     prior_inputs: ClassVar[tuple[str, ...]] = ()
-    config_class: ClassVar[type | None] = None
+    # The module's options: a frozen model that refuses unknown keys and gives
+    # each option its default, bounds and description. None = no options.
+    options_class: ClassVar[type[BaseModel] | None] = None
+    # True when the key of every table this module writes holds a hash of its
+    # options: rows made with other options are other rows, never overwritten.
+    rows_keyed_by_options: ClassVar[bool] = False
     # How each output is persisted (see adapt.contracts.persistence). The
     # OutputRouter writes declared outputs mechanically; modules never touch
     # storage. Empty tuple = this module persists nothing directly.
     persistence: ClassVar[tuple[PersistenceSpec, ...]] = ()
-    injected_global_fields: ClassVar[frozenset[str]] = frozenset()
-    # The ParamConfig sections (pipeline-file ``params:`` keys) that hold this
-    # module's options. A module without any owns its options instead, under
-    # ``params: {<name>: ...}``.
-    param_sections: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     def module_summary(cls) -> str:
@@ -92,30 +107,25 @@ class BaseModule(ABC):
         return cls.name
 
     @classmethod
-    def default_params(cls) -> dict[str, Any]:
-        """Owned, user-tunable defaults for this module.
+    def options_preset(cls) -> str | None:
+        """This module's default options as packaged, commented YAML: ``<name>: {...}``.
 
-        Sourced from ``config_class`` field defaults — the single place defaults
-        live — excluding any field listed in ``injected_global_fields`` (those are
-        filled from the shared global section by ``build_config``). Returns ``{}``
-        when the module declares no ``config_class``.
-        """
-        if cls.config_class is None:
-            return {}
-        return {
-            name: field.default
-            for name, field in cls.config_class.model_fields.items()  # type: ignore[attr-defined]
-            if name not in cls.injected_global_fields
-        }
-
-    @classmethod
-    def options_text(cls) -> str | None:
-        """This module's options as commented YAML to paste under ``params:``.
-
-        None (the default) when ``default_params`` and the option descriptions
-        say it all; a module whose options are a packaged preset returns it.
+        None (the default) when the defaults of ``options_class`` are the
+        module's defaults; a module whose options are a packaged rule returns it.
         """
         return None
+
+    @classmethod
+    def configure(cls, options: Any, shared: SharedConfig) -> Any:
+        """The frozen config ``run()`` receives, built once when the run is configured.
+
+        ``options`` are this module's validated options (an ``options_class``
+        instance; None without one) and ``shared`` the values of the whole run.
+        By default the config is the options; a module overrides this to add
+        what it takes from ``shared`` or derives, or to refuse (``ValueError``)
+        a run it cannot make.
+        """
+        return options
 
     @classmethod
     def inputs_for(cls, config: Any) -> list[str]:
@@ -126,13 +136,19 @@ class BaseModule(ABC):
         return cls.inputs
 
     @classmethod
-    def build_config(cls, internal_config: Any) -> Any | None:
-        """Build this module's frozen config by slicing the resolved InternalConfig.
+    def prior_inputs_for(cls, config: Any) -> tuple[str, ...]:
+        """The outputs of earlier scans this module reads when configured with ``config``.
 
-        The module decides what it needs: global values, its own section, and
-        (rarely) a cross-reference to another section. Returns None when the
-        module needs no config. Modules override this with the slicing
-        logic; the config engine calls it once per registered module at startup.
+        ``prior_inputs`` unless an option makes one unnecessary.
+        """
+        return cls.prior_inputs
+
+    @classmethod
+    def method_line(cls, config: Any) -> str | None:
+        """This module's line of the run header, read off its own built ``config``.
+
+        One short "<method> · <key choices>", never the full options. None (the
+        default) for a module with no method to name: it gets no line.
         """
         return None
 

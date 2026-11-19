@@ -51,11 +51,8 @@ def test_no_cells_below_threshold(empty_2d_ds, detection_module_config):
 def test__multiple_cells(large_multi_cell_ds, make_detection_config):
     """Multiple distinct cells are detected and labeled."""
     # Don't filter by size for this test
-    from adapt.configuration.schemas.user import UserSegmenterConfig
 
-    config = make_detection_config(
-        threshold=30, segmenter=UserSegmenterConfig(filter_by_size=False)
-    )
+    config = make_detection_config(threshold=30, filter_by_size=False)
     seg = RadarCellSegmenter(config)
 
     out = seg.segment(large_multi_cell_ds)

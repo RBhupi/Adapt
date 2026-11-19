@@ -1,19 +1,11 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Observability toggles live on the logging config section, defaulted by ParamConfig."""
-
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
+"""Observability toggles live on the run config's logging section."""
 
 
-def _run(**user) -> UserConfig:
-    return UserConfig(radar="KTST", base_dir="/store", **user)
-
-
-def test_logging_config_carries_observability_defaults() -> None:
-    cfg = resolve_config(ParamConfig(), _run()).logging
+def test_logging_config_carries_observability_defaults(internal_config) -> None:
+    cfg = internal_config.logging
     assert cfg.level == "INFO"
     assert cfg.enabled is True
     assert cfg.traces is True
@@ -23,7 +15,6 @@ def test_logging_config_carries_observability_defaults() -> None:
     assert cfg.console_level == "WARNING"
 
 
-def test_a_logging_option_given_in_params_reaches_the_run() -> None:
-    user = _run(logging={"console_level": "DEBUG", "json_logs": True})
-    cfg = resolve_config(ParamConfig(), user).logging
+def test_a_logging_option_given_in_params_reaches_the_run(make_config) -> None:
+    cfg = make_config(params={"logging": {"console_level": "DEBUG", "json_logs": True}}).logging
     assert (cfg.console_level, cfg.json_logs) == ("DEBUG", True)

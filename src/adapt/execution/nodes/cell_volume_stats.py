@@ -23,10 +23,15 @@ Output columns (authoritative — documented here, schema inferred from the fram
 import numpy as np
 import pandas as pd
 
-from adapt.contracts import CELL_LABELS_VAR, ProductTableWrite, check_cell_volume_stats
+from adapt.contracts import (
+    CELL_LABELS_VAR,
+    ProductTableWrite,
+    SharedConfig,
+    check_cell_volume_stats,
+)
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
-from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
+from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig, CellVolumeStatsOptions
 from adapt.modules.cell_volume_stats.module import CellVolumeStatsAlgorithm
 
 
@@ -34,13 +39,7 @@ class CellVolumeStatsModule(BaseModule):
     name = "cell_volume_stats"
     summary = "3D volume stats per cell (base, top, echo-top heights)"
     required_history = 1
-    config_class = CellVolumeStatsConfig
-    # Names filled from the shared global section by build_config; the remaining
-    # config_class fields (thresholds, gap_tolerance_m, structure_threshold, and
-    # polarimetric var names) are the module's owned, user-tunable params.
-    injected_global_fields = frozenset(
-        {"reflectivity_var", "labels_var", "z_coord", "y_coord", "x_coord", "time_coord"}
-    )
+    options_class = CellVolumeStatsOptions
     inputs = [
         "cell_volume_stats_config",
         "grid_ds",
@@ -58,23 +57,15 @@ class CellVolumeStatsModule(BaseModule):
     )
 
     @classmethod
-    def build_config(cls, cfg) -> CellVolumeStatsConfig:
-        # Only inject the global tracking_field + fixed labels name; polarimetric
-        # var names fall back to config defaults (or user module_params).
-        params = cfg.module_params.get("cell_volume_stats", {})
-        return CellVolumeStatsConfig(
-            reflectivity_var=cfg.global_.tracking_field,
-            labels_var=CELL_LABELS_VAR,
-            z_coord=cfg.global_.coord_names.z,
-            y_coord=cfg.global_.coord_names.y,
-            x_coord=cfg.global_.coord_names.x,
-            time_coord=cfg.global_.coord_names.time,
-            **params,
-        )
+    def configure(
+        cls, options: CellVolumeStatsOptions, shared: SharedConfig
+    ) -> CellVolumeStatsConfig:
+        """The options, computed on the field the run tracks."""
+        return CellVolumeStatsConfig(**options.model_dump(), reflectivity_var=shared.tracking_field)
 
     def run(self, context: dict) -> dict:
         config = context["cell_volume_stats_config"]
-        cell_labels_2d = context["segmented_ds"][config.labels_var].values
+        cell_labels_2d = context["segmented_ds"][CELL_LABELS_VAR].values
         labels = np.unique(cell_labels_2d[cell_labels_2d > 0])
         algo = CellVolumeStatsAlgorithm(config)
         rows = [

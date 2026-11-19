@@ -1,11 +1,10 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Config schema for the xlma_stat module.
+"""Options of the xlma_stat module, which are also its config.
 
-Holds exactly what the reader and the science class consume. Frozen. Built at
-startup by the node's build_config from the resolved InternalConfig. Only pydantic
-+ stdlib.
+What a pipeline file sets under ``params: {xlma_stat: ...}``, and exactly what
+the reader and the science class consume. Frozen. Only pydantic + stdlib.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,7 +14,7 @@ class XlmaStatConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # No default folder: None leaves `adapt config --show xlma_stat` a slot to fill,
-    # and the node's build_config refuses to configure a run without it.
+    # and the node's configure refuses a run without it.
     input_dir: str | None = Field(
         None,
         description="Directory of xLMA flash-sorted NetCDF files (*.nc); required. "

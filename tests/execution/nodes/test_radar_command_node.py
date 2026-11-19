@@ -5,12 +5,14 @@
 
 import json
 import logging
+from dataclasses import replace
 from datetime import timedelta
-from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import yaml
 
+from adapt.configuration.schemas.module_resolver import module_options
 from adapt.contracts import check_radar_commands
 from adapt.execution.nodes import radar_command as node
 from adapt.execution.nodes.radar_command import RadarCommandModule
@@ -18,6 +20,7 @@ from adapt.modules.radar_command import RadarCommandConfig
 from adapt.modules.radar_command.transport import NotSent, SendError
 from tests.helpers import radar_store
 from tests.helpers.pipeline_files import API, API_KEY, API_URL, RADAR_COMMAND, export_api
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -350,7 +353,7 @@ def test_a_command_that_failed_is_not_sent_again_at_the_next_scan(monkeypatch, f
 
 def test_api_settings_lost_during_the_run_are_recorded_and_do_not_raise(monkeypatch):
     export_api(monkeypatch)
-    config = RadarCommandModule.build_config(_internal("aws_nexrad", {**RADAR_COMMAND, "api": API}))
+    config = _configured("aws_nexrad", {**RADAR_COMMAND, "api": API})
     monkeypatch.delenv("ADAPT_TEST_CA")
 
     row = _row(RadarCommandModule().run(_context(config)))
@@ -360,9 +363,10 @@ def test_api_settings_lost_during_the_run_are_recorded_and_do_not_raise(monkeypa
     assert row["command_json"] is not None
 
 
-def _internal(source: str, params: dict):
-    """As much of a run's config as build_config reads."""
-    return SimpleNamespace(source=source, module_params={"radar_command": params})
+def _configured(source: str, params: dict) -> RadarCommandConfig:
+    """The config a run from ``source`` gets from these ``params.radar_command``."""
+    options = module_options("radar_command", params, source="a test")
+    return RadarCommandModule.configure(options, replace(SHARED, source=source))
 
 
 @pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
@@ -371,20 +375,20 @@ def test_a_run_that_sends_needs_its_api_settings_when_it_is_configured(monkeypat
     monkeypatch.delenv(variable)
 
     with pytest.raises(ValueError, match=variable):
-        RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
+        _configured("aws_nexrad", {"api": API})
 
 
 def test_a_run_that_sends_needs_a_ca_file_it_can_read(monkeypatch, tmp_path):
     export_api(monkeypatch, ADAPT_TEST_CA=str(tmp_path / "gone.cer"))
 
     with pytest.raises(ValueError, match="ADAPT_TEST_CA"):
-        RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
+        _configured("aws_nexrad", {"api": API})
 
 
 def test_a_run_with_its_api_settings_exported_is_configured_to_send(monkeypatch):
     export_api(monkeypatch)
 
-    config = RadarCommandModule.build_config(_internal("aws_nexrad", {"api": API}))
+    config = _configured("aws_nexrad", {"api": API})
 
     assert config.api is not None
     assert API_KEY not in config.model_dump_json()
@@ -394,16 +398,14 @@ def test_over_a_stored_run_nothing_is_sent(monkeypatch):
     for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
         monkeypatch.delenv(variable, raising=False)  # none is needed: nothing is sent
 
-    config = RadarCommandModule.build_config(_internal("stored_run", {"api": API}))
+    config = _configured("stored_run", {"api": API})
 
     assert config.api is None
 
 
 def test_the_files_parts_are_laid_over_the_packaged_options():
-    config = RadarCommandModule.build_config(
-        _internal("aws_nexrad", {"planning": {"horizon_minutes": 6}})
-    )
-    packaged = RadarCommandModule.default_params()
+    config = _configured("aws_nexrad", {"planning": {"horizon_minutes": 6}})
+    packaged = yaml.safe_load(RadarCommandModule.options_preset())["radar_command"]
 
     assert config.planning.horizon_minutes == 6
     assert config.planning.interval_seconds == packaged["planning"]["interval_seconds"]

@@ -171,15 +171,6 @@ def test_orchestrator_stop_clears_queues(pipeline_config):
     assert orch._stop_event is True
 
 
-def test_orchestrator_processor_config_accessible(pipeline_config):
-    """Test orchestrator can access processor config."""
-    orch = PipelineOrchestrator(pipeline_config)
-
-    assert hasattr(orch.config, "processor")
-    assert orch.config.processor.max_history >= 0
-    assert orch.config.processor.min_file_size > 0
-
-
 def test_enabled_module_names_are_the_processors(pipeline_config):
     """The run header lists every module the processor runs, extended ones
     (cell_volume_stats) included — otherwise the user can't see they're configured.

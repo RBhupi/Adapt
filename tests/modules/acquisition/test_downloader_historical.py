@@ -15,8 +15,11 @@ def test_historical_mode_completes(fake_scan, fake_aws_conn, fake_gateway, make_
     ]
 
     config = make_config(
-        start_time="2024-01-01T00:00:00Z",
-        end_time="2024-01-01T02:00:00Z",
+        run={
+            "mode": "historical",
+            "start_time": "2024-01-01T00:00:00Z",
+            "end_time": "2024-01-01T02:00:00Z",
+        }
     )
 
     d = AwsNexradDownloader(

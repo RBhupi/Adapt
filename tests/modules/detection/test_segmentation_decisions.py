@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
@@ -43,13 +42,11 @@ def _segmenter(make_detection_config, **kw) -> RadarCellSegmenter:
     seg_kw = {
         "filter_by_size": False,
         "h_maxima": 5.0,
-        "seed_carry": True,
+        "seed_carry_frames": 2,
         "closing_radius": 0,
         **kw,
     }
-    return RadarCellSegmenter(
-        make_detection_config(threshold=35.0, segmenter=UserSegmenterConfig(**seg_kw))
-    )
+    return RadarCellSegmenter(make_detection_config(threshold=35.0, **seg_kw))
 
 
 def test_independent_seed_is_recorded_with_its_peak_and_basin(make_detection_config):
@@ -88,7 +85,7 @@ def test_carried_claims_record_survivor_and_rescue(make_detection_config):
 
 
 def test_expired_and_outside_claims_are_recorded_but_do_not_claim(make_detection_config):
-    seg = _segmenter(make_detection_config, seed_carry_max_frames=2)
+    seg = _segmenter(make_detection_config, seed_carry_frames=2)
     seg.segment(_plateau_ds(), carried=_carried((1, 1), BUMP_B, ages=(0, 2)))
     d = seg.decisions()
     decisions = {s.prior_label: s.decision for s in d.seeds if s.origin == "CARRIED"}

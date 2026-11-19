@@ -6,11 +6,11 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from adapt.contracts import (
-    CELL_LABELS_VAR,
     DecisionTableWrite,
     NetcdfArtifact,
     ProductTableWrite,
     ProductView,
+    SharedConfig,
     check_cell_adjacency,
     check_cell_events,
     check_cell_identity,
@@ -22,7 +22,7 @@ from adapt.contracts import (
 )
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
-from adapt.modules.tracking.config import TrackingConfig
+from adapt.modules.tracking.config import TrackingConfig, TrackingOptions
 from adapt.modules.tracking.lut import attach_cell_uid_lut, attach_registration_uid_lut
 from adapt.modules.tracking.module import CellTracker, TrackerState
 from adapt.modules.tracking.tables import (
@@ -80,8 +80,8 @@ class TrackingModule(BaseModule):
         2D dataset with projections (output of ProjectionModule).
     cell_stats : pd.DataFrame
         Per-cell statistics (output of AnalysisModule).
-    tracking_config : TrackingModuleConfig
-        Runtime configuration for the tracker.
+    tracking_config : TrackingConfig
+        The module's options and what ``configure`` adds for the run.
     scan_time : datetime
         Radar scan timestamp.
 
@@ -107,7 +107,7 @@ class TrackingModule(BaseModule):
 
     name = "tracking"
     summary = "link cells across scans"
-    param_sections = ("tracker",)
+    options_class = TrackingOptions
     inputs = [
         "projected_ds",
         "cell_stats",
@@ -138,7 +138,6 @@ class TrackingModule(BaseModule):
         "tracking_decisions": check_tracking_decisions,
         "tracking_state": check_module_state,
     }
-    config_class = TrackingConfig
     persistence = (
         NetcdfArtifact(
             key="analysis_ds",
@@ -175,29 +174,20 @@ class TrackingModule(BaseModule):
     )
 
     @classmethod
-    def build_config(cls, cfg) -> TrackingConfig:
-        t = cfg.tracker
+    def configure(cls, options: TrackingOptions, shared: SharedConfig) -> TrackingConfig:
+        """The options, and the run's field and largest scan gap."""
         return TrackingConfig(
-            uid_width=t.cell_uid.width,
-            field_var=cfg.global_.tracking_field,
-            labels_var=CELL_LABELS_VAR,
-            max_tracking_gap_minutes=cfg.global_.max_scan_gap_minutes,
-            cell_threshold=t.cell_threshold,
-            polarity=t.polarity,
-            growth_max_km=t.growth_max_km,
-            growth_size_km=t.growth_size_km,
-            max_overlap_mismatch=t.max_overlap_mismatch,
-            max_link_cost=t.max_link_cost,
-            residual_weight=t.residual_weight,
-            heading_weight=t.heading_weight,
-            max_speed_ms=t.max_speed_ms,
-            max_acceleration_ms2=t.max_acceleration_ms2,
-            split_overlap=t.split_overlap_threshold,
-            merge_overlap=t.merge_overlap_threshold,
-            latent_scans=t.latent_scans,
-            identity_intensity_weight=t.identity_intensity_weight,
-            identity_score_margin=t.identity_score_margin,
-            core_field_threshold=t.core_field_threshold,
+            **options.model_dump(),
+            field_var=shared.tracking_field,
+            max_tracking_gap_minutes=shared.max_scan_gap_minutes,
+        )
+
+    @classmethod
+    def method_line(cls, config: TrackingConfig) -> str:
+        return (
+            f"gap {config.max_tracking_gap_minutes:g}min "
+            f"· u≤{config.max_overlap_mismatch:g} · c≤{config.max_link_cost:g} "
+            f"· vmax {config.max_speed_ms:g}m/s"
         )
 
     def run(self, context: dict) -> dict:

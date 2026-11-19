@@ -1,10 +1,9 @@
 """Test RadarCellSegmenter initialization with Pydantic configs."""
 
 import pytest
+from pydantic import ValidationError
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
+from adapt.modules.detection.config import DetectionOptions
 from adapt.modules.detection.module import RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
@@ -23,20 +22,14 @@ def test_expert_default_method_is_threshold():
 
     Threshold needs only the 2D CAPPI the pipeline always produces, so a plain
     `adapt run nexrad` works with no further setup. The pyart
-    convective/stratiform classifiers stay available via `segmenter.method`.
+    convective/stratiform classifiers stay available via `params.detection.method`.
     """
-    from adapt.configuration.schemas.param import ParamConfig
-
-    assert ParamConfig().segmenter.method == "threshold"
+    assert DetectionOptions().method == "threshold"
 
 
 def test_custom_config(make_detection_config):
     """Segmenter respects user config overrides."""
-    config = make_detection_config(
-        threshold=45,
-        min_cellsize_gridpoint=10,
-        # Note: filter_by_size not exposed in UserConfig yet, uses default
-    )
+    config = make_detection_config(threshold=45, min_cellsize_gridpoint=10)
 
     seg = RadarCellSegmenter(config)
     assert seg.method_params["threshold"] == 45.0
@@ -44,13 +37,6 @@ def test_custom_config(make_detection_config):
 
 
 def test_unknown_method_raises():
-    """Invalid segmentation method fails at config validation time."""
-    # Pydantic validation happens at model creation, not at runtime
-    # This test verifies the old behavior is no longer needed
-    # Invalid methods are caught by Literal["threshold"] in ParamConfig
-
-    with pytest.raises(Exception):  # noqa: B017 — ValidationError from Pydantic
-        # Try to create config with invalid method
-        param = ParamConfig()
-        user = UserConfig(segmentation_method="watershed")  # Invalid
-        resolve_config(param, user)
+    """Invalid segmentation method fails when the options are validated, not at runtime."""
+    with pytest.raises(ValidationError, match="method"):
+        DetectionOptions(method="watershed")

@@ -9,11 +9,8 @@ pytestmark = pytest.mark.unit
 
 def test_close_cells_without_closing(close_cells_ds, make_detection_config):
     """Without morphological closing, nearby cells remain separate."""
-    from adapt.configuration.schemas.user import UserSegmenterConfig
 
-    config = make_detection_config(
-        threshold=30, segmenter=UserSegmenterConfig(filter_by_size=False)
-    )
+    config = make_detection_config(threshold=30, filter_by_size=False)
     seg = RadarCellSegmenter(config)
 
     labels = seg.segment(close_cells_ds)["cell_labels"].values
@@ -24,11 +21,11 @@ def test_close_cells_without_closing(close_cells_ds, make_detection_config):
 
 def test_close_cells_with_closing(close_cells_ds, make_detection_config):
     """Closing fills the gap but maxtree still resolves two distinct intensity peaks."""
-    from adapt.configuration.schemas.user import UserSegmenterConfig
 
     config = make_detection_config(
         threshold=30,
-        segmenter=UserSegmenterConfig(filter_by_size=False, closing_radius=1),
+        filter_by_size=False,
+        closing_radius=1,
     )
     seg = RadarCellSegmenter(config)
 
@@ -60,11 +57,11 @@ def test_a_no_echo_pixel_closed_into_the_mask_does_not_disturb_the_cells(make_de
     lowest value there, never reach the peak finder as NaN."""
     import numpy as np
 
-    from adapt.configuration.schemas.user import UserSegmenterConfig
-
     config = make_detection_config(
         threshold=35,
-        segmenter=UserSegmenterConfig(filter_by_size=False, closing_radius=2, h_maxima=5.0),
+        filter_by_size=False,
+        closing_radius=2,
+        h_maxima=5.0,
     )
 
     with_nan = RadarCellSegmenter(config)

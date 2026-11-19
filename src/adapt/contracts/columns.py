@@ -11,9 +11,17 @@ the prefix would orphan every frozen store for zero scientific gain.
 ``CELL_LABELS_VAR`` is the fixed internal name of the segmentation label
 grid. It is pipeline-internal (produced by detection), never source data,
 and therefore not configurable.
+
+``X_COORD``, ``Y_COORD``, ``Z_COORD`` and ``TIME_COORD`` are the fixed
+coordinate names of every gridded dataset: ingest writes them and every later
+stage reads them, so they are not configurable either.
 """
 
 CELL_LABELS_VAR = "cell_labels"
+X_COORD = "x"
+Y_COORD = "y"
+Z_COORD = "z"
+TIME_COORD = "time"
 
 
 def stat_column(field: str, stat: str) -> str:

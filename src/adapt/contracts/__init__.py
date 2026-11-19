@@ -24,7 +24,14 @@ from adapt.contracts.cell_volume_stats import (
     assert_cell_volume_stats,
     check_cell_volume_stats,
 )
-from adapt.contracts.columns import CELL_LABELS_VAR, stat_column
+from adapt.contracts.columns import (
+    CELL_LABELS_VAR,
+    TIME_COORD,
+    X_COORD,
+    Y_COORD,
+    Z_COORD,
+    stat_column,
+)
 from adapt.contracts.decisions import (
     SegmentationComponent,
     SegmentationDecisions,
@@ -55,6 +62,7 @@ from adapt.contracts.pipeline import (
     SCAN_SEEDS,
     STORE_VIEWS,
     ContractViolation,
+    SharedConfig,
     config_key,
     require,
 )
@@ -86,8 +94,13 @@ __all__ = [
     "SCAN_SEEDS",
     "STORE_VIEWS",
     "config_key",
+    "SharedConfig",
     # canonical naming
     "CELL_LABELS_VAR",
+    "X_COORD",
+    "Y_COORD",
+    "Z_COORD",
+    "TIME_COORD",
     "stat_column",
     # persistence specs — modules declare these in their ``persistence`` ClassVar
     "ProductTableWrite",

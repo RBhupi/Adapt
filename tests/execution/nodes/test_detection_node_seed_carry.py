@@ -14,7 +14,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.contracts import ContractViolation, check_prior_scans, check_seed_carry
 from adapt.execution.nodes.detection import DetectModule
 
@@ -60,14 +59,12 @@ def _prior(advected: np.ndarray | None, ages: tuple[int, ...]) -> dict:
 
 
 def _run(make_detection_config, *prior_scans, **segmenter_kw) -> dict:
-    kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry": True, **segmenter_kw}
+    kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry_frames": 2, **segmenter_kw}
     ctx = {
         "grid_ds_2d": _plateau_ds(),
         "grid_ds": None,
         "prior_scans": list(prior_scans),
-        "detection_config": make_detection_config(
-            threshold=35.0, segmenter=UserSegmenterConfig(**kw)
-        ),
+        "detection_config": make_detection_config(threshold=35.0, **kw),
     }
     return DetectModule().run(ctx)
 
@@ -79,8 +76,24 @@ def test_node_declares_prior_scans_input_and_seed_carry_output():
     assert DetectModule.output_contracts["seed_carry"] is check_seed_carry
 
 
+def test_with_the_carry_on_the_node_reads_the_previous_scans_labels_ages_and_count(
+    make_detection_config,
+):
+    config = make_detection_config(seed_carry_frames=1)
+
+    assert set(DetectModule.prior_inputs_for(config)) == {"projected_ds", "seed_carry", "num_cells"}
+
+
+def test_with_the_carry_off_the_node_reads_nothing_of_earlier_scans(make_detection_config):
+    config = make_detection_config(seed_carry_frames=0)
+
+    assert DetectModule.prior_inputs_for(config) == ()
+
+
 def test_seed_carry_is_empty_with_the_flag_off(make_detection_config):
-    out = _run(make_detection_config, _prior(_advected(PEAK_A, BUMP_B), (0, 0)), seed_carry=False)
+    out = _run(
+        make_detection_config, _prior(_advected(PEAK_A, BUMP_B), (0, 0)), seed_carry_frames=0
+    )
     assert out["seed_carry"] == ()
     assert out["num_cells"] == 1
 
@@ -122,7 +135,7 @@ def test_label_at_the_carry_bound_is_not_offered(make_detection_config):
     out = _run(
         make_detection_config,
         _prior(_advected(PEAK_A, BUMP_B), (0, 2)),
-        seed_carry_max_frames=2,
+        seed_carry_frames=2,
     )
     assert out["num_cells"] == 1
 

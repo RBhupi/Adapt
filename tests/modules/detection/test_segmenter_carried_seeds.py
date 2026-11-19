@@ -19,7 +19,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.contracts import ContractViolation
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
 
@@ -53,10 +52,8 @@ def _carried(*blocks: tuple[int, int], ages: tuple[int, ...] | None = None) -> C
 
 
 def _segmenter(make_detection_config, **segmenter_kw) -> RadarCellSegmenter:
-    kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry": True, **segmenter_kw}
-    return RadarCellSegmenter(
-        make_detection_config(threshold=35.0, segmenter=UserSegmenterConfig(**kw))
-    )
+    kw = {"filter_by_size": False, "h_maxima": 5.0, "seed_carry_frames": 2, **segmenter_kw}
+    return RadarCellSegmenter(make_detection_config(threshold=35.0, **kw))
 
 
 def test_labels_identical_with_no_carried_labels(make_detection_config):
@@ -73,12 +70,12 @@ def test_carry_age_is_all_zero_when_nothing_is_offered(make_detection_config):
 
 
 def test_carry_age_is_absent_when_the_flag_is_off(make_detection_config):
-    out = _segmenter(make_detection_config, seed_carry=False).segment(_plateau_ds())
+    out = _segmenter(make_detection_config, seed_carry_frames=0).segment(_plateau_ds())
     assert "carry_age" not in out["cell_labels"].attrs
 
 
 def test_carried_labels_with_the_flag_off_raise(make_detection_config):
-    seg = _segmenter(make_detection_config, seed_carry=False)
+    seg = _segmenter(make_detection_config, seed_carry_frames=0)
     with pytest.raises(ContractViolation):
         seg.segment(_plateau_ds(), carried=_carried(BUMP_B))
 
@@ -125,7 +122,7 @@ def test_only_the_deficit_is_admitted_farthest_from_a_seed_first(make_detection_
 
 
 def test_prior_cell_at_the_carry_bound_is_not_offered(make_detection_config):
-    out = _segmenter(make_detection_config, seed_carry_max_frames=2).segment(
+    out = _segmenter(make_detection_config, seed_carry_frames=2).segment(
         _plateau_ds(), carried=_carried(PEAK_A, BUMP_B, ages=(0, 2))
     )
     assert int(out["cell_labels"].values.max()) == 1

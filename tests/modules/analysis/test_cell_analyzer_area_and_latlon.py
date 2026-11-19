@@ -260,6 +260,19 @@ def test_projection_centroid_forward_column_present(make_analysis_config):
     assert "cell_centroid_projection1_y" in df.columns
 
 
+def test_projection_centroid_for_every_step_in_the_dataset(make_analysis_config):
+    """The dataset decides how many forward steps are analysed, not the run config."""
+    from adapt.modules.analysis.module import RadarCellAnalyzer
+
+    steps_in_data = 5  # more than the projector's default of 3
+    analyzer = RadarCellAnalyzer(make_analysis_config())
+    df = analyzer.extract(_make_ds(with_projections=True, projection_steps=steps_in_data))
+
+    assert len(df) == 1
+    for step in range(1, steps_in_data + 1):
+        assert f"cell_centroid_projection{step}_x" in df.columns
+
+
 # ---------------------------------------------------------------------------
 # Empty result contract
 # ---------------------------------------------------------------------------

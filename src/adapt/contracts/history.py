@@ -5,9 +5,9 @@
 
 ``prior_scans`` is the one history key the processor provides to per-scan
 modules: the previous scans, oldest first, each a dict of that scan's time and
-identity and the outputs modules declared they read back (``prior_inputs``). It
-never holds the current scan, and is empty on the first scan or when the time
-gap to the last scan is too large.
+identity and the outputs modules read back with their options
+(``prior_inputs_for``). It never holds the current scan, and is empty on the
+first scan or when the time gap to the last scan is too large.
 """
 
 from adapt.contracts.pipeline import require

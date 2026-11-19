@@ -3,25 +3,34 @@
 
 """Node-level tests for CellVolumeStatsModule — covers the three review fixes:
 
-A) build_config does not read non-existent global var_names (no AttributeError).
+A) configure adds the run's tracked field to the module's own options.
 B) run() on a scan without cells returns an empty frame that PASSES the output contract.
 C) a datetime scan_time round-trips through the writer to the canonical join key.
 """
 
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
 import xarray as xr
-from pydantic import ValidationError
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
+from adapt.configuration.schemas.errors import ConfigError  # noqa: E402
 from adapt.contracts import check_cell_volume_stats  # noqa: E402
 from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule  # noqa: E402
-from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig  # noqa: E402
+from adapt.modules.cell_volume_stats.config import (  # noqa: E402
+    CellVolumeStatsConfig,
+    CellVolumeStatsOptions,
+)
 from adapt.utils.time import to_scan_iso  # noqa: E402
+from tests.helpers.shared_config import SHARED  # noqa: E402
+
+
+def _default_config() -> CellVolumeStatsConfig:
+    return CellVolumeStatsModule.configure(CellVolumeStatsOptions(), SHARED)
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -58,27 +67,27 @@ def _segmented() -> xr.Dataset:
     )
 
 
-class TestBuildConfigFixA:
-    def test_build_config_injects_globals_without_error(self, internal_config):
-        cfg = CellVolumeStatsModule.build_config(internal_config)
+class TestConfigureFixA:
+    def test_configure_adds_the_tracked_field_to_the_modules_options(self):
+        cfg = CellVolumeStatsModule.configure(
+            CellVolumeStatsOptions(gap_tolerance_m=250.0), replace(SHARED, tracking_field="dbz")
+        )
         assert isinstance(cfg, CellVolumeStatsConfig)
-        assert cfg.reflectivity_var == internal_config.global_.tracking_field
-        assert cfg.labels_var == "cell_labels"
-        assert cfg.z_coord == internal_config.global_.coord_names.z
-        # polarimetric var names fall back to config defaults (module-owned, not global)
+        assert cfg.reflectivity_var == "dbz"
+        assert cfg.gap_tolerance_m == 250.0
+        # polarimetric var names are the module's own options, not shared values
         assert cfg.zdr_var == "differential_reflectivity"
 
-    def test_build_config_rejects_a_mistyped_param(self, make_config):
-        cfg = make_config(module_params={"cell_volume_stats": {"gap_tolerance": 250.0}})
-        with pytest.raises(ValidationError, match=r"gap_tolerance\s+Extra inputs"):
-            CellVolumeStatsModule.build_config(cfg)
+    def test_a_mistyped_param_is_refused_when_the_run_is_configured(self, make_config):
+        with pytest.raises(ConfigError, match=r"params\.cell_volume_stats\.gap_tolerance — unrec"):
+            make_config(params={"cell_volume_stats": {"gap_tolerance": 250.0}})
 
 
 class TestEmptyPathFixB:
-    def test_a_scan_without_cells_returns_contract_safe_empty(self, internal_config):
+    def test_a_scan_without_cells_returns_contract_safe_empty(self):
         mod = CellVolumeStatsModule()
         ctx = {
-            "cell_volume_stats_config": CellVolumeStatsModule.build_config(internal_config),
+            "cell_volume_stats_config": _default_config(),
             "grid_ds": _grid_3d(),
             "segmented_ds": _segmented() * 0,
             "run_id": "R1",
@@ -91,11 +100,11 @@ class TestEmptyPathFixB:
 
 
 class TestRunAndWriteFixC:
-    def test_datetime_scan_time_round_trips_to_join_key(self, internal_config, tmp_path):
+    def test_datetime_scan_time_round_trips_to_join_key(self, tmp_path):
         mod = CellVolumeStatsModule()
         scan_time = datetime(2024, 1, 1, 12, 0, 0)  # naive, like NEXRAD strptime
         ctx = {
-            "cell_volume_stats_config": CellVolumeStatsModule.build_config(internal_config),
+            "cell_volume_stats_config": _default_config(),
             "grid_ds": _grid_3d(),
             "segmented_ds": _segmented(),
             "run_id": "R1",

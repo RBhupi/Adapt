@@ -3,8 +3,8 @@
 
 """Base Pydantic model with strict defaults for Adapt configs.
 
-All Adapt config schemas inherit from this base to ensure consistent
-validation behavior across parameter, user, CLI, and internal configs.
+The pipeline file's models and the run config inherit from this base, so both
+validate the same way.
 """
 
 from pydantic import BaseModel, ConfigDict

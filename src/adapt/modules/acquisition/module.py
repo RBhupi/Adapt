@@ -59,14 +59,9 @@ class AwsNexradDownloader(threading.Thread):
     Example usage (typically called by orchestrator)::
 
         downloader = AwsNexradDownloader(
-            config={
-                "radar": "KDIX",
-                "output_dir": "/data/nexrad",
-                "latest_files": 5,
-                "latest_minutes": 60,
-                "poll_interval_sec": 30
-            },
-            result_queue=processor_queue
+            config,  # the run config; its downloader settings are read
+            result_queue=processor_queue,
+            acquire=gateway,
         )
         downloader.start()
         ...

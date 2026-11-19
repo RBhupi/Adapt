@@ -11,11 +11,10 @@ scan and rule in the ``target_selection`` table; ``radar_command`` acts on it.
 """
 
 from dataclasses import dataclass
-from typing import Any
 
-from adapt.contracts import ProductTableWrite, check_module_state, check_selection
+from adapt.contracts import ProductTableWrite, SharedConfig, check_module_state, check_selection
 from adapt.execution.module_registry import registry
-from adapt.execution.nodes._options import laid_over, preset_options, preset_text
+from adapt.execution.nodes._options import preset_text
 from adapt.modules.base import BaseModule
 from adapt.modules.target_selection import (
     CurrentTarget,
@@ -59,7 +58,8 @@ class TargetSelectionModule(BaseModule):
         "target_selection_state",
     ]
     outputs = ["selection", "target_selection_state"]
-    config_class = TSEConfig
+    options_class = TSEConfig
+    rows_keyed_by_options = True  # config_hash is in the table's key
     output_contracts = {
         "selection": check_selection,
         "target_selection_state": check_module_state,
@@ -74,19 +74,13 @@ class TargetSelectionModule(BaseModule):
     )
 
     @classmethod
-    def default_params(cls) -> dict[str, Any]:
-        return preset_options(_PACKAGE, _PRESET, cls.name)
-
-    @classmethod
-    def options_text(cls) -> str:
+    def options_preset(cls) -> str:
         """The packaged rule as commented YAML, ready to paste under ``params:``."""
         return preset_text(_PACKAGE, _PRESET)
 
     @classmethod
-    def build_config(cls, cfg) -> TargetSelectionRun:
-        given = cfg.module_params.get(cls.name, {})
-        rules = TSEConfig.model_validate(laid_over(cls.default_params(), given))
-        return TargetSelectionRun(rules=rules, tracking_field=cfg.global_.tracking_field)
+    def configure(cls, options: TSEConfig, shared: SharedConfig) -> TargetSelectionRun:
+        return TargetSelectionRun(rules=options, tracking_field=shared.tracking_field)
 
     def run(self, context: dict) -> dict:
         config: TargetSelectionRun = context["target_selection_config"]

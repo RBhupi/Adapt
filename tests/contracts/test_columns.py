@@ -3,9 +3,19 @@
 
 """Canonical column/variable naming — the single authoritative convention."""
 
+import numpy as np
 import pytest
+import xarray as xr
 
-from adapt.contracts import CELL_LABELS_VAR, stat_column
+from adapt.contracts import (
+    CELL_LABELS_VAR,
+    TIME_COORD,
+    X_COORD,
+    Y_COORD,
+    Z_COORD,
+    check_grid_ds_2d,
+    stat_column,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -23,3 +33,17 @@ def test_stat_column_is_field_generic():
 
 def test_cell_labels_constant():
     assert CELL_LABELS_VAR == "cell_labels"
+
+
+def test_grid_coordinate_names_are_fixed():
+    # Stored NetCDF grids carry these names; changing one orphans every store.
+    assert (X_COORD, Y_COORD, Z_COORD, TIME_COORD) == ("x", "y", "z", "time")
+
+
+def test_a_grid_on_the_canonical_coordinates_satisfies_the_grid_contract():
+    grid = xr.Dataset(
+        {"reflectivity": ((Y_COORD, X_COORD), np.zeros((2, 2)))},
+        coords={Y_COORD: [0.0, 1.0], X_COORD: [0.0, 1.0]},
+    )
+
+    check_grid_ds_2d(grid)

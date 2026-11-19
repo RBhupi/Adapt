@@ -1,30 +1,14 @@
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
-from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.modules.analysis.module import RadarCellAnalyzer
 
 
 @pytest.fixture
-def config():
-    d = tempfile.mkdtemp()
-    try:
-        import shutil
-
-        param = ParamConfig()
-        user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user)
-        return AnalysisModule.build_config(internal)
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
+def config(make_analysis_config):
+    return make_analysis_config()
 
 
 def _ds_with_labels(time, labels: np.ndarray) -> xr.Dataset:
@@ -65,9 +49,9 @@ def test_extract_adjacency_simple_touch(config):
     assert int(df.iloc[0]["touching_boundary_pixels"]) == 4
 
 
-def test_extract_adjacency_threshold_filters(config):
+def test_extract_adjacency_threshold_filters(make_analysis_config):
     # Override threshold to require >4 touches so pair is filtered out
-    cfg = config.model_copy(update={"adjacency_min_touching": 5})
+    cfg = make_analysis_config(adjacency_min_touching_boundary_pixels=5)
     analyzer = RadarCellAnalyzer(cfg)
 
     labels = np.zeros((4, 4), dtype=np.int32)

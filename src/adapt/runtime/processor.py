@@ -39,13 +39,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.contracts import ContractViolation, PersistenceMeta
+from adapt.contracts import ContractViolation, PersistenceMeta, config_key
 from adapt.contracts.observability import Observability
 from adapt.execution.graph.executor import GraphExecutor, GraphRun
 from adapt.execution.module_registry import registry as module_registry
 from adapt.execution.pipeline_builder import (
     _ensure_modules_registered,
     carried_keys,
+    prior_keys,
     resolve_enabled_modules,
     scan_graph,
 )
@@ -156,10 +157,9 @@ class RadarProcessor(threading.Thread):
         self._router = StoreOutputRouter(collection)
 
         # Rolling history, newest last: of each complete scan, its identity and
-        # the outputs modules read back from earlier scans (``prior_inputs``).
+        # the outputs the modules, as configured, read back from earlier scans.
         self._scan_history: list[dict] = []
-        self._max_history = config.processor.max_history
-        self._prior_keys = frozenset(key for m in modules for key in m.prior_inputs)
+        self._prior_keys = prior_keys(modules, self._module_configs)
         # What each module returned for its next scan (None before it has run).
         self._carried_keys = carried_keys(modules)
         self._carried: dict = dict.fromkeys(self._carried_keys)
@@ -168,9 +168,10 @@ class RadarProcessor(threading.Thread):
         # The scan time of the checkpoint this run goes on from, if it has one.
         self._resumed_after: datetime | None = None
         # Prior scans the most demanding module needs (none without modules).
-        # ``prior_scans`` always reaches back at least one scan: detection's seed
-        # carry reads the last one.
         self._prior_needed = max((m.required_history for m in modules), default=1) - 1
+        # How many scans the history keeps, hence how far ``prior_scans`` reaches
+        # back: at least one, since detection's seed carry reads the last one.
+        self._history_depth = max(1, self._prior_needed)
         # One bound for every stage that pairs frames (see global_.max_scan_gap_minutes):
         # beyond it no seed is carried, no projection runs and tracking resets.
         self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
@@ -182,6 +183,19 @@ class RadarProcessor(threading.Thread):
     def module_names(self) -> tuple[str, ...]:
         """Enabled per-scan modules, in registration order."""
         return tuple(m.name for m in self._modules)
+
+    @property
+    def method_lines(self) -> tuple[tuple[str, str], ...]:
+        """``(module name, its run-header line)`` of each module that names a method.
+
+        Each module reads its own built config (None when it has none); same
+        order as ``module_names``.
+        """
+        lines = (
+            (m.name, m.method_line(self._module_configs.get(config_key(m.name))))
+            for m in self._modules
+        )
+        return tuple((name, line) for name, line in lines if line is not None)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -398,7 +412,7 @@ class RadarProcessor(threading.Thread):
             # state moves on — once both are checkpointed with its completion.
             entry = {key: result[key] for key in self._prior_keys if key in result}
             history = [*self._scan_history, {**entry, "scan_id": scan_id, "scan_time": scan_time}]
-            history = history[-self._max_history :]
+            history = history[-self._history_depth :]
             carried = {key: result[key] for key in self._carried_keys}
             self._complete_scan(scan_id, statuses, history, carried)
             self._scan_history, self._carried = history, carried
@@ -456,8 +470,7 @@ class RadarProcessor(threading.Thread):
             self.collection.catalog.record_scan_pass(self.run_id, scan_id, statuses)
             return
         payload = pickle.dumps(
-            {"history": history[-max(1, self._prior_needed) :], "carried": carried},
-            protocol=pickle.HIGHEST_PROTOCOL,
+            {"history": history, "carried": carried}, protocol=pickle.HIGHEST_PROTOCOL
         )
         name = write_checkpoint(self.collection, self.run_id, scan_id, payload)
         self.collection.catalog.record_scan_pass(self.run_id, scan_id, statuses, checkpoint=name)
@@ -524,7 +537,7 @@ class RadarProcessor(threading.Thread):
             )
         if not time_gap_valid:
             return []
-        return self._scan_history[-max(1, self._prior_needed) :]
+        return list(self._scan_history)
 
     def _validate_time_gap(self, current_scan_time=None):
         """Return (valid, gap_minutes) between the most recent history entry and current scan."""

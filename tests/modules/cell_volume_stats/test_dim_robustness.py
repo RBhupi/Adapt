@@ -31,7 +31,7 @@ def _grid(dims, data, coords):
 
 
 def _run(grid):
-    cfg = CellVolumeStatsConfig()
+    cfg = CellVolumeStatsConfig(reflectivity_var="reflectivity")
     return CellVolumeStatsAlgorithm(cfg).compute_cell(grid, LABELS, 1)
 
 

@@ -9,6 +9,7 @@ suitable for downstream segmentation and projection.
 
 import xarray as xr
 
+from adapt.contracts.columns import X_COORD, Y_COORD
 from adapt.contracts.pipeline import require
 
 
@@ -27,8 +28,8 @@ def assert_gridded(ds: xr.Dataset, reflectivity_var: str) -> None:
     ContractViolation
         If any invariant is violated
     """
-    require("x" in ds.coords, "Grid contract violated: missing 'x' coordinate")
-    require("y" in ds.coords, "Grid contract violated: missing 'y' coordinate")
+    require(X_COORD in ds.coords, f"Grid contract violated: missing '{X_COORD}' coordinate")
+    require(Y_COORD in ds.coords, f"Grid contract violated: missing '{Y_COORD}' coordinate")
     require(
         reflectivity_var in ds.data_vars,
         f"Grid contract violated: missing '{reflectivity_var}' variable",
@@ -48,6 +49,6 @@ def check_grid_ds_2d(ds: xr.Dataset) -> None:
     the detection module at its own boundary — bound contracts have no
     config access by design.
     """
-    require("x" in ds.coords, "Grid contract violated: missing 'x' coordinate")
-    require("y" in ds.coords, "Grid contract violated: missing 'y' coordinate")
+    require(X_COORD in ds.coords, f"Grid contract violated: missing '{X_COORD}' coordinate")
+    require(Y_COORD in ds.coords, f"Grid contract violated: missing '{Y_COORD}' coordinate")
     require(len(ds.data_vars) > 0, "Grid contract violated: no data variables")

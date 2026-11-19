@@ -18,7 +18,7 @@ def test_the_staging_folder_is_removed_when_the_downloader_stops(
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     downloader = AwsNexradDownloader(
-        make_config(radar="KDIX"),
+        make_config(run={"radar": "KDIX"}),
         result_queue=Queue(),
         acquire=fake_gateway,
         conn=fake_aws_conn([]),

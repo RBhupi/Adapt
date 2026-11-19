@@ -6,13 +6,8 @@
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from adapt.configuration.schemas.errors import (
-    ConfigError,
-    format_validation_error,
-    validated,
-)
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
+from adapt.configuration.schemas.errors import ConfigError, validated
+from adapt.configuration.schemas.module_resolver import module_options
 
 pytestmark = pytest.mark.unit
 
@@ -23,27 +18,28 @@ class _Sample(BaseModel):
     count: int = Field(ge=0, le=10)
 
 
-def _error(data: dict) -> ValidationError:
-    with pytest.raises(ValidationError) as excinfo:
-        _Sample.model_validate(data)
-    return excinfo.value
+def _refusal(model: type[BaseModel], data: dict) -> str:
+    """What the user is told when ``data`` is not a valid ``model``."""
+    with pytest.raises(ConfigError) as excinfo:
+        validated(model, data, source="nexrad.yaml")
+    return str(excinfo.value)
 
 
 def test_extra_forbidden_names_field_value_and_reason():
-    msg = format_validation_error(_error({"name": "x", "count": 5, "bogus": 1}), "nexrad.yaml")
+    msg = _refusal(_Sample, {"name": "x", "count": 5, "bogus": 1})
     assert "nexrad.yaml" in msg
     assert "bogus" in msg
     assert "unrecognized option" in msg
 
 
 def test_missing_required_field_is_reported():
-    msg = format_validation_error(_error({"count": 5}), "nexrad.yaml")
+    msg = _refusal(_Sample, {"count": 5})
     assert "name" in msg
     assert "required option is missing" in msg
 
 
 def test_out_of_range_reports_value_and_bound():
-    msg = format_validation_error(_error({"name": "x", "count": 99}), "nexrad.yaml")
+    msg = _refusal(_Sample, {"name": "x", "count": 99})
     assert "count" in msg
     assert "99" in msg
     assert "out of range" in msg
@@ -56,12 +52,12 @@ def test_validated_raises_configerror_not_validationerror():
     assert not isinstance(excinfo.value, ValidationError)
 
 
-def test_resolve_config_reports_stale_segmenter_option():
-    """The reported case: a removed 'threshold' under segmenter must name the path."""
+def test_a_stale_detection_option_is_reported_with_its_path_and_value():
+    """The reported case: a removed 'threshold' among detection's options must name the path."""
     with pytest.raises(ConfigError) as excinfo:
-        resolve_config(ParamConfig(), {"radar": "KLOT", "segmenter": {"threshold": 30.0}})
+        module_options("detection", {"threshold": 30.0}, source="nexrad.yaml")
     message = str(excinfo.value)
-    assert "segmenter.threshold" in message
+    assert "params.detection.threshold" in message
     assert "30.0" in message
 
 
@@ -69,9 +65,7 @@ def test_a_union_field_is_reported_once_without_branch_names():
     class _Union(BaseModel):
         poll: int | float
 
-    with pytest.raises(ValidationError) as excinfo:
-        _Union.model_validate({"poll": "fast"})
-    msg = format_validation_error(excinfo.value, "nexrad.yaml")
+    msg = _refusal(_Union, {"poll": "fast"})
 
     bullets = [line for line in msg.splitlines() if line.startswith("  •")]
     assert len(bullets) == 1
@@ -83,9 +77,7 @@ def test_a_section_given_as_a_scalar_asks_for_a_mapping_in_plain_words():
     class _Nested(BaseModel):
         run: _Sample
 
-    with pytest.raises(ValidationError) as excinfo:
-        _Nested.model_validate({"run": "nope"})
-    msg = format_validation_error(excinfo.value, "nexrad.yaml")
+    msg = _refusal(_Nested, {"run": "nope"})
 
     assert "must be a mapping" in msg
     assert "instance of" not in msg

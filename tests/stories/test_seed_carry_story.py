@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.execution.nodes.detection import DetectModule
 from adapt.execution.nodes.projection import ProjectionModule
 
@@ -47,7 +46,9 @@ def _cells_per_scan(make_detection_config, make_projection_config, seed_carry: b
     detect, project = DetectModule(), ProjectionModule()
     detection_config = make_detection_config(
         threshold=35.0,
-        segmenter=UserSegmenterConfig(seed_carry=seed_carry, filter_by_size=False, h_maxima=5.0),
+        seed_carry_frames=2 if seed_carry else 0,
+        filter_by_size=False,
+        h_maxima=5.0,
     )
     projection_config = make_projection_config()
 

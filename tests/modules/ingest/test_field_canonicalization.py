@@ -3,7 +3,7 @@
 
 """Source variable names are canonicalized ONCE, at the end of regrid().
 
-reader.field_map renames source names to canonical names; reader.fields is
+ingest.field_map renames source names to canonical names; ingest.fields is
 the explicit keep-list. Everything downstream of ingest sees canonical
 names only, and the applied mapping is recorded as provenance.
 """
@@ -38,12 +38,9 @@ def _fake_grid(*var_names):
     return types.SimpleNamespace(to_xarray=lambda: ds)
 
 
-def _loader(monkeypatch, make_ingest_config, grid, **reader_overrides):
+def _loader(monkeypatch, make_ingest_config, grid, **options):
     monkeypatch.setattr("pyart.map.grid_from_radars", lambda radar, **kw: grid)
-    config = (
-        make_ingest_config(reader=reader_overrides) if reader_overrides else make_ingest_config()
-    )
-    return RadarDataLoader(config)
+    return RadarDataLoader(make_ingest_config(**options))
 
 
 def test_field_map_renames_source_variables_to_canonical(monkeypatch, make_ingest_config):

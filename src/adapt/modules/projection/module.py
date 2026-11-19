@@ -64,46 +64,15 @@ class RadarCellProjector:
 
     Configuration
     ==============
-    Config dict structure:
+    A validated ``ProjectionConfig`` (``adapt.modules.projection.config``): the
+    module's options — each with its default, bounds and meaning there, the
+    Farneback parameters under ``flow_params`` — plus what the run adds:
 
-    - `method` : str, default "adapt_default"
-        Currently only "adapt_default" (Farneback optical flow) supported.
-
-    - `max_projection_steps` : int, default 1, max 10
-        Number of future projections to compute (beyond registration).
-
-    - `max_time_interval_minutes` : int, default 30
-        Maximum time gap between consecutive frames. Skips processing
-        if time gap exceeds this (motion model breaks down with large gaps).
-
-    - `nan_fill_value` : float, default 0
-        Value to replace NaNs in reflectivity before flow computation.
-        (NaNs from missing data, clutter removal, etc.)
-
-    - `flow_params` : dict, optional
-        OpenCV Farneback optical flow parameters:
-
-        - `pyr_scale` : float, default 0.5
-            Image pyramid scale (0.5 = 2x reduction per level)
-
-        - `levels` : int, default 3
-            Number of pyramid levels
-
-        - `winsize` : int, default 10
-            Averaging window size
-
-        - `iterations` : int, default 3
-            Iterations at each pyramid level
-
-        - `poly_n` : int, default 5
-            Polynomial expansion size
-
-        - `poly_sigma` : float, default 1.2
-            Gaussian standard deviation
-
-    - `global` : dict, optional
-        - `tracking_field` : str
-            Canonical field driving the optical flow (default: "reflectivity")
+    - `max_time_interval_minutes` : float
+        Largest time gap between the two frames projected across; beyond it the
+        current dataset is returned without projections.
+    - `reflectivity_var` : str
+        The field the optical flow is computed on (the run's tracking field).
 
     Notes
     -----
@@ -117,12 +86,12 @@ class RadarCellProjector:
 
     Examples
     --------
-    >>> config = {
-    ...     "method": "adapt_default",
-    ...     "max_projection_steps": 3,
-    ...     "max_time_interval_minutes": 30,
-    ...     "flow_params": {"levels": 3, "winsize": 10}
-    ... }
+    >>> config = ProjectionConfig(
+    ...     max_projection_steps=3,
+    ...     flow_params={"levels": 3, "winsize": 10},
+    ...     max_time_interval_minutes=10.0,
+    ...     reflectivity_var="reflectivity",
+    ... )
     >>> projector = RadarCellProjector(config)
     >>> ds_with_motion = projector.project([ds_t1, ds_t0])
     >>> num_projections = ds_with_motion["cell_projections"].shape[0]
@@ -136,34 +105,20 @@ class RadarCellProjector:
 
         Parameters
         ----------
-        config : InternalConfig
-            Fully validated runtime configuration.
+        config : ProjectionConfig
+            The module's options and what the node's ``configure`` adds for the run.
 
         Notes
         -----
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-
-        Examples
-        --------
-        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
-        >>> config = resolve_config(ParamConfig())
-        >>> projector = RadarCellProjector(config)
         """
         self.method = config.method
         self.nan_fill = config.nan_fill_value
         self.max_interval_minutes = config.max_time_interval_minutes
         self.max_proj_steps = config.max_projection_steps
-        self.flow_params = {
-            "pyr_scale": config.pyr_scale,
-            "levels": config.levels,
-            "winsize": config.winsize,
-            "iterations": config.iterations,
-            "poly_n": config.poly_n,
-            "poly_sigma": config.poly_sigma,
-            "flags": config.flags,
-        }
+        self.flow_params = config.flow_params.model_dump()
         self.min_motion_threshold = config.min_motion_threshold
         self.max_flow_magnitude = config.max_flow_magnitude
         self.registration_step_minutes = config.registration_step_minutes

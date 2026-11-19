@@ -22,11 +22,8 @@ def test_min_cellsize_filter(two_cell_ds, make_detection_config):
 def test_disable_size_filter(two_cell_ds, make_detection_config):
     """All detected cells are retained when filter_by_size=False."""
     # threshold=20 will detect both cells (50 and 30 dBZ)
-    from adapt.configuration.schemas.user import UserSegmenterConfig
 
-    config = make_detection_config(
-        threshold=20.0, segmenter=UserSegmenterConfig(filter_by_size=False)
-    )
+    config = make_detection_config(threshold=20.0, filter_by_size=False)
     seg = RadarCellSegmenter(config)
 
     out = seg.segment(two_cell_ds)
@@ -38,11 +35,8 @@ def test_disable_size_filter(two_cell_ds, make_detection_config):
 
 def test_relabeling_is_contiguous(two_cell_ds, make_detection_config):
     """Cell labels are contiguous integers starting from 1."""
-    from adapt.configuration.schemas.user import UserSegmenterConfig
 
-    config = make_detection_config(
-        threshold=20.0, segmenter=UserSegmenterConfig(filter_by_size=False)
-    )
+    config = make_detection_config(threshold=20.0, filter_by_size=False)
     seg = RadarCellSegmenter(config)
 
     labels = seg.segment(two_cell_ds)["cell_labels"].values

@@ -182,8 +182,8 @@ class StoreClient:
 
         Parsed from the run provenance record (registry runs.config_json) —
         the single authoritative record of per-run settings such as
-        ``global_.tracking_field`` and ``reader.field_map``. Keys use the
-        InternalConfig field spelling (``global_``, not ``global``).
+        ``global_.tracking_field`` and ``module_params.ingest.field_map``. Keys
+        use the InternalConfig field spelling (``global_``, not ``global``).
         """
         row = (
             self._registry_conn()

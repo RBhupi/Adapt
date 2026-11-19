@@ -99,9 +99,9 @@ class TestNonScalarComments:
         assert yaml.safe_load(out) == data
 
     def test_nested_section_header_is_a_comment_above_it(self):
-        data = {"segmenter": {"threshold_params": {"threshold": 30}}}
+        data = {"detection": {"threshold_params": {"threshold": 30}}}
         desc = {
-            "segmenter": {
+            "detection": {
                 "threshold_params": {"_header": "threshold method", "threshold": "dBZ"},
             }
         }

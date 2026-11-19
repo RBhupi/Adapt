@@ -45,7 +45,7 @@ enters only through the excess `e = polarity·(f − cell_threshold)₊`.
 | `events.py` | `cell_events` rows |
 | `decision_log.py` | `ScanLog` → `TrackingDecisions` (decisions.db) |
 | `identity.py`, `lut.py` | cell uids; label → uid lookup tables |
-| `config.py` | frozen `TrackingConfig` |
+| `config.py` | `TrackingOptions` (the options a pipeline file sets) and the frozen `TrackingConfig` |
 
 ## Outputs
 
@@ -59,14 +59,15 @@ enters only through the excess `e = polarity·(f − cell_threshold)₊`.
   margin, crossing), `tracking_lineage` (every hypothesis), `tracking_identity`,
   `tracking_latent`.
 
-## Configuration (`tracker:`)
+## Configuration (`params: {tracking: ...}`)
 
 `cell_threshold`, `polarity`, `growth_max_km` (r_max), `growth_size_km` (ℓ0),
 `max_overlap_mismatch` (u_max), `max_link_cost` (c_max), `residual_weight` (w_d),
 `heading_weight` (w_h), `max_speed_ms` (v_max), `max_acceleration_ms2` (a_max),
 `split_overlap_threshold` (τ_s), `merge_overlap_threshold` (τ_m), `latent_scans` (N),
 `identity_intensity_weight` (γ), `identity_score_margin` (δ_S), `core_field_threshold`
-(diagnostic only). Keys of the previous tracker fail loudly, naming their replacement.
+(diagnostic only), `uid_width` (characters of a `cell_uid`). Any other key is refused as
+an unrecognized option. `adapt config --show tracking` prints them with their defaults.
 
 ## References
 

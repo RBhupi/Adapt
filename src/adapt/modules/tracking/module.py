@@ -31,6 +31,7 @@ import pandas as pd
 import xarray as xr
 
 from adapt.contracts import (
+    CELL_LABELS_VAR,
     TrackingCell,
     TrackingDecisions,
     TrackingIdentity,
@@ -273,7 +274,7 @@ class CellTracker:
 
     def _link(self, last: _LastScan, ds, cells, grid, time, time_s, scan_id, log):
         cfg = self.cfg
-        labels = ds[cfg.labels_var].values
+        labels = ds[CELL_LABELS_VAR].values
         by_label = {c.label: c for c in cells}
         proj = np.asarray(ds["cell_projections"].values[0])
         live = [live_footprint(t, proj, grid, time_s - last.time_s, cfg) for t in self._tracks]
@@ -425,7 +426,11 @@ class CellTracker:
         the parent's size, which is not motion (the speed limits apply to links of
         one cell: continuations and resumptions).
         """
-        threshold = self.cfg.split_overlap if kind == "SPLIT" else self.cfg.merge_overlap
+        threshold = (
+            self.cfg.split_overlap_threshold
+            if kind == "SPLIT"
+            else self.cfg.merge_overlap_threshold
+        )
         fractions = {}
         for key, p in tested.items():
             fraction = p.overlap.o_c if kind == "SPLIT" else p.overlap.o_h
@@ -535,7 +540,7 @@ class CellTracker:
                         "MERGE",
                         pairs[(p, s)],
                         fraction=pairs[(p, s)].overlap.o_h,
-                        threshold=self.cfg.merge_overlap,
+                        threshold=self.cfg.merge_overlap_threshold,
                         reason="IDENTITY",
                     )
                 )
@@ -572,7 +577,7 @@ class CellTracker:
                         "SPLIT",
                         pairs[(parent, c)],
                         fraction=pairs[(parent, c)].overlap.o_c,
-                        threshold=self.cfg.split_overlap,
+                        threshold=self.cfg.split_overlap_threshold,
                         reason="IDENTITY",
                     )
                 )

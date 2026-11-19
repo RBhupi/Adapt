@@ -11,7 +11,6 @@ import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import matplotlib
 import numpy as np
@@ -36,9 +35,6 @@ try:
     CONTEXTILY_AVAILABLE = True
 except ImportError:
     CONTEXTILY_AVAILABLE = False
-
-if TYPE_CHECKING:
-    from adapt.configuration.schemas.internal import InternalConfig
 
 __all__ = ["PlotConsumer", "RadarPlotter"]
 
@@ -69,11 +65,11 @@ class RadarPlotter:
     ahead). Line style and alpha transparency decrease with projection distance
     (recent projections more opaque, distant projections faint).
 
-    **Configuration:**
+    **Settings:**
 
-    All appearance settings (DPI, figure size, colors, thresholds) controlled via
-    `config["visualization"]` section. Enables consistent multi-radar visualization
-    without code changes.
+    Appearance (DPI, figure size, line widths, thresholds) is one fixed set of
+    values, the same for every radar; the variables and coordinates are read by
+    their contract names.
 
     **Output:**
 
@@ -82,7 +78,7 @@ class RadarPlotter:
 
     Example usage::
 
-        plotter = RadarPlotter(config=config)
+        plotter = RadarPlotter()
         plot_path = plotter.plot_from_netcdf(
             segmentation_nc="analysis/KDIX_20250305_000310_analysis_segmentation.nc",
             output_path="plots/KDIX_20250305_000310.png"
@@ -90,83 +86,41 @@ class RadarPlotter:
         print(f"Plot saved to {plot_path}")
     """
 
-    def __init__(self, config: "InternalConfig | None" = None, show_plots: bool = False):
+    def __init__(self, show_plots: bool = False):
         """Initialize plotter.
 
         Parameters
         ----------
-        config : InternalConfig, optional
-            Fully validated runtime configuration.
         show_plots : bool, optional
             If True, display plots (uses interactive backend). Default False
             (Agg backend for headless/file-only output).
         """
+        # Plot
+        self.dpi = 200
+        self.figsize = (20, 10)
+        self.output_format = "png"
 
-        self.config = config
+        # Basemap
+        self.use_basemap = True
+        self.basemap_alpha = 0.6
 
-        if config:
-            # Plot configuration
-            self.dpi = config.visualization.dpi
-            self.figsize = config.visualization.figsize
-            self.output_format = config.visualization.output_format
+        # Style
+        self.seg_linewidth = 1.0
+        self.proj_linewidth = 0.8
+        self.proj_alpha = 0.6
+        self.flow_scale = 1.0
+        self.flow_subsample = 10
 
-            # Basemap configuration
-            self.use_basemap = config.visualization.use_basemap
-            self.basemap_alpha = config.visualization.basemap_alpha
-
-            # Style configuration
-            self.seg_linewidth = config.visualization.seg_linewidth
-            self.proj_linewidth = config.visualization.proj_linewidth
-            self.proj_alpha = config.visualization.proj_alpha
-            self.flow_scale = config.visualization.flow_scale
-            self.flow_subsample = config.visualization.flow_subsample
-
-            # Reflectivity thresholds
-            self.min_refl = config.visualization.min_reflectivity
-            self.vmin = config.visualization.refl_vmin
-            self.vmax = config.visualization.refl_vmax
-        else:
-            # Defaults for backward compatibility
-            self.dpi = 200
-            self.figsize = (20, 10)
-            self.output_format = "png"
-            self.use_basemap = True
-            self.basemap_alpha = 0.6
-            self.seg_linewidth = 1.0
-            self.proj_linewidth = 0.8
-            self.proj_alpha = 0.6
-            self.flow_scale = 1.0
-            self.flow_subsample = 10
-            self.min_refl = 0
-            self.vmin = 10
-            self.vmax = 50
+        # Reflectivity thresholds
+        self.min_refl = 0
+        self.vmin = 10
+        self.vmax = 50
 
         if self.use_basemap and not CONTEXTILY_AVAILABLE:
             logger.warning("Basemap requested but contextily not installed")
             self.use_basemap = False
 
         logger.info(f"RadarPlotter initialized (format={self.output_format}, dpi={self.dpi})")
-
-    def _get_var_name(self, var_key: str, default: str) -> str:
-        """Get variable name from config."""
-        if self.config:
-            if var_key == "reflectivity":
-                return self.config.global_.tracking_field
-            elif var_key == "cell_labels":
-                return CELL_LABELS_VAR
-        return default
-
-    def _get_coord_name(self, coord_key: str, default: str) -> str:
-        """Get coordinate name from config."""
-        if self.config:
-            coord_map = {
-                "x": self.config.global_.coord_names.x,
-                "y": self.config.global_.coord_names.y,
-                "z": self.config.global_.coord_names.z,
-                "time": self.config.global_.coord_names.time,
-            }
-            return coord_map.get(coord_key, default)
-        return default
 
     def _extract_timestamp(self, ds: xr.Dataset) -> datetime:
         """Extract timestamp from dataset."""
@@ -184,11 +138,8 @@ class RadarPlotter:
 
     def _get_coordinates_km(self, ds: xr.Dataset) -> tuple[np.ndarray, np.ndarray]:
         """Get x, y coordinates in km."""
-        y_name = self._get_coord_name("y", "y")
-        x_name = self._get_coord_name("x", "x")
-
-        y_coords = ds[y_name].values / 1000  # Convert m to km
-        x_coords = ds[x_name].values / 1000
+        y_coords = ds["y"].values / 1000  # Convert m to km
+        x_coords = ds["x"].values / 1000
 
         return x_coords, y_coords
 
@@ -306,14 +257,11 @@ class RadarPlotter:
         self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
     ) -> bool:
         """Plot optical flow arrows on Panel 1."""
-        heading_x_name = self._get_var_name("heading_x", "heading_x")
-        heading_y_name = self._get_var_name("heading_y", "heading_y")
-
-        if heading_x_name not in ds.data_vars or heading_y_name not in ds.data_vars:
+        if "heading_x" not in ds.data_vars or "heading_y" not in ds.data_vars:
             return False
 
-        heading_x = ds[heading_x_name].values
-        heading_y = ds[heading_y_name].values
+        heading_x = ds["heading_x"].values
+        heading_y = ds["heading_y"].values
 
         if np.all(np.isnan(heading_x)):
             logger.debug("Optical flow not plotted (all NaN - first frame)")
@@ -386,14 +334,11 @@ class RadarPlotter:
         self, ax: plt.Axes, ds: xr.Dataset, x_coords: np.ndarray, y_coords: np.ndarray
     ) -> None:
         """Plot thin transparent gray contours for projections."""
-        proj_name = self._get_var_name("cell_projections", "cell_projections")
-        frame_offset_name = self._get_coord_name("frame_offset", "frame_offset")
-
-        if proj_name not in ds.data_vars:
+        if "cell_projections" not in ds.data_vars:
             return
 
-        proj_da = ds[proj_name]
-        if frame_offset_name not in proj_da.dims:
+        proj_da = ds["cell_projections"]
+        if "frame_offset" not in proj_da.dims:
             return
 
         y_grid, x_grid = np.meshgrid(y_coords, x_coords, indexing="ij")
@@ -401,11 +346,11 @@ class RadarPlotter:
         linestyles = ["dashed", "dashdot", "dotted"]
         base_width = self.proj_linewidth
 
-        num_frames = len(proj_da[frame_offset_name])
+        num_frames = len(proj_da["frame_offset"])
 
         # Skip frame_offset=0 (registration), plot future projections
         for proj_idx in range(1, num_frames):
-            labels_proj = proj_da.isel({frame_offset_name: proj_idx}).values
+            labels_proj = proj_da.isel(frame_offset=proj_idx).values
 
             if np.all(np.isnan(labels_proj)):
                 continue
@@ -494,7 +439,7 @@ class RadarPlotter:
         - Background: Reflectivity field (dBZ scale, ChaseSpectral colormap)
         - Overlay: Optical flow vectors (motion estimation between frames)
         - Optional: OpenStreetMap basemap for geographic reference
-        - Vectors scaled by flow_scale config, subsampled for clarity
+        - Vectors scaled by flow_scale, subsampled for clarity
 
         **Right Panel:**
         - Background: Reflectivity (masked to segmented cells only)
@@ -538,16 +483,14 @@ class RadarPlotter:
         timestamp = self._extract_timestamp(ds)
 
         # Get reflectivity
-        refl_name = self._get_var_name("reflectivity", "reflectivity")
-        refl = ds[refl_name].values
+        refl = ds["reflectivity"].values
         refl_masked = self._mask_reflectivity(refl)
 
         # Get coordinates
         x_coords, y_coords = self._get_coordinates_km(ds)
 
         # Get labels
-        labels_name = self._get_var_name("cell_labels", "cell_labels")
-        labels = ds[labels_name]
+        labels = ds[CELL_LABELS_VAR]
 
         # Create figure
         fig, ax1, ax2 = self._setup_figure()
@@ -650,13 +593,9 @@ class RadarPlotter:
         assert seg_ds is not None  # loop raises on all retries; reaching here guarantees success
 
         # Validate required variables
-        labels_name = self._get_var_name("cell_labels", "cell_labels")
-        refl_name = self._get_var_name("reflectivity", "reflectivity")
-
-        if labels_name not in seg_ds.data_vars:
-            raise ValueError(f"Missing variable: {labels_name}")
-        if refl_name not in seg_ds.data_vars:
-            raise ValueError(f"Missing variable: {refl_name}")
+        for name in (CELL_LABELS_VAR, "reflectivity"):
+            if name not in seg_ds.data_vars:
+                raise ValueError(f"Missing variable: {name}")
 
         try:
             plot_file = self.plot_reflectivity_with_cells(
@@ -690,7 +629,6 @@ class PlotConsumer(threading.Thread):
         run_id: str,
         stop_event: threading.Event,
         output_dir: Path,
-        config: "InternalConfig | None" = None,
         poll_interval: float = 2.0,
         show_live: bool = False,
         name: str = "PlotConsumer",
@@ -708,8 +646,6 @@ class PlotConsumer(threading.Thread):
         output_dir : Path
             The directory its launcher gives it for the plots; never the
             store's databases.
-        config : InternalConfig, optional
-            Configuration for plot styling and parameters.
         poll_interval : float
             Seconds between catalog polls (default: 2.0).
         show_live : bool
@@ -723,12 +659,11 @@ class PlotConsumer(threading.Thread):
         self.run_id = run_id
         self.stop_event = stop_event
         self.output_dir = Path(output_dir)
-        self.config = config
         self.poll_interval = poll_interval
         self.show_live = show_live
 
         # Initialize plotter
-        self.plotter = RadarPlotter(config=config, show_plots=show_live)
+        self.plotter = RadarPlotter(show_plots=show_live)
 
         # Track last processed artifact to detect new ones
         self._last_seen_id: str | None = None

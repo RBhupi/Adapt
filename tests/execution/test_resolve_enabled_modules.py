@@ -26,10 +26,6 @@ def _names(mods):
     return [m.name for m in mods]
 
 
-def test_all_enabled_by_default():
-    assert _names(resolve_enabled_modules(_mods())) == ["a", "b", "c", "ext"]
-
-
 def test_modules_allowlist_restricts_and_preserves_order():
     out = resolve_enabled_modules(_mods(), modules=["ext", "a", "b", "c"])
     assert _names(out) == ["a", "b", "c", "ext"]  # original order, not arg order

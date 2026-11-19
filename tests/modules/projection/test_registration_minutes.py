@@ -109,9 +109,7 @@ def test_subminute_gap_yields_empty_minute_dimension(constant_flow, projection_m
 
 def test_step_minutes_follows_epoch_aligned_grid(constant_flow, make_projection_config):
     """step=2 keeps a stable 2-minute grid (19:02, 19:04, 19:06), not per-scan offsets."""
-    from adapt.configuration.schemas.user import UserProjectorConfig
-
-    config = make_projection_config(projector=UserProjectorConfig(registration_step_minutes=2))
+    config = make_projection_config(registration_step_minutes=2)
     out = RadarCellProjector(config).project(_pair("2024-05-18T19:00:00", "2024-05-18T19:06:00"))
 
     minutes = pd.to_datetime(out["registration_minutes"]["minute"].values)

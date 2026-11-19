@@ -13,13 +13,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from adapt.configuration.pipeline_file import RunSection, load_pipeline_file
+from adapt.configuration.pipeline_file import PipelineFile, RunSection, load_pipeline_file
 from adapt.configuration.pipeline_run import run_config
 from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, write_pipeline_template
 from adapt.configuration.schemas.errors import ConfigError
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
+from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.module_registry import registry
 from adapt.persistence.store import init_store
 
@@ -114,7 +112,16 @@ def test_uncommenting_the_offered_radar_modules_gives_a_runnable_file(tmp_path):
     config = run_config(load_pipeline_file(path), path)
 
     assert config.modules[-2:] == ["target_selection", "radar_command"]
-    assert set(config.module_params) == {"cell_volume_stats", "target_selection", "radar_command"}
+    assert set(config.module_params) == {
+        "ingest",
+        "detection",
+        "projection",
+        "analysis",
+        "tracking",
+        "cell_volume_stats",
+        "target_selection",
+        "radar_command",
+    }
 
 
 def test_written_file_resolves_to_a_runnable_config(tmp_path):
@@ -143,23 +150,18 @@ def test_written_file_leaves_every_option_at_its_default(tmp_path):
 
     config = run_config(load_pipeline_file(path), path)
 
-    defaults = resolve_config(ParamConfig(), UserConfig(radar="KLOT", base_dir=str(root)))
-    for section in (
-        "reader",
-        "downloader",
-        "regridder",
-        "segmenter",
-        "global_",
-        "projector",
-        "analyzer",
-        "tracker",
-        "visualization",
-        "output",
-        "logging",
-    ):
+    owners = ["ingest", "detection", "projection", "analysis", "tracking", "cell_volume_stats"]
+    nothing_set = PipelineFile.model_validate(
+        {
+            "run": {"source": "aws_nexrad", "radar": "KLOT", "mode": "realtime"},
+            "modules": owners,
+            "params": {},
+        }
+    )
+    defaults = run_config(nothing_set, path)
+    for section in ("downloader", "global_", "logging"):
         assert getattr(config, section) == getattr(defaults, section), section
-    cvs = registry.get("cell_volume_stats")
-    assert cvs.build_config(config) == cvs.build_config(defaults)
+    assert resolve_module_configs(config, owners) == resolve_module_configs(defaults, owners)
 
 
 def test_unknown_template_lists_the_available_ones(tmp_path):

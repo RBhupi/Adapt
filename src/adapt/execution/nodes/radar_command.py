@@ -16,18 +16,18 @@ import logging
 import math
 from dataclasses import replace
 from datetime import timedelta
-from typing import Any
 
 import pandas as pd
 
 from adapt.contracts import (
     ProductTableWrite,
+    SharedConfig,
     check_module_state,
     check_radar_commands,
     check_selection,
 )
 from adapt.execution.module_registry import registry
-from adapt.execution.nodes._options import laid_over, preset_options, preset_text
+from adapt.execution.nodes._options import preset_text
 from adapt.modules.base import BaseModule
 from adapt.modules.radar_command.command import CommandValidationError, to_json
 from adapt.modules.radar_command.config import ApiConfig, RadarCommandConfig, config_hash
@@ -78,7 +78,8 @@ class RadarCommandModule(BaseModule):
         _STATE,
     ]
     outputs = ["radar_commands", _STATE]
-    config_class = RadarCommandConfig
+    options_class = RadarCommandConfig
+    rows_keyed_by_options = True  # config_hash is in the table's key
     input_contracts = {"selection": check_selection}
     output_contracts = {"radar_commands": check_radar_commands, _STATE: check_module_state}
     persistence = (
@@ -91,26 +92,20 @@ class RadarCommandModule(BaseModule):
     )
 
     @classmethod
-    def default_params(cls) -> dict[str, Any]:
-        return preset_options(_PACKAGE, _PRESET, cls.name)
-
-    @classmethod
-    def options_text(cls) -> str:
+    def options_preset(cls) -> str:
         """The packaged options as commented YAML, ready to paste under ``params:``."""
         return preset_text(_PACKAGE, _PRESET)
 
     @classmethod
-    def build_config(cls, cfg) -> RadarCommandConfig:
+    def configure(cls, options: RadarCommandConfig, shared: SharedConfig) -> RadarCommandConfig:
         """The run's config. A run over a stored run never sends; a run that sends
         must have its API address, key and CA file in the environment now."""
-        given = cfg.module_params.get(cls.name, {})
-        config = RadarCommandConfig.model_validate(laid_over(cls.default_params(), given))
-        if config.api is None:
-            return config
-        if cfg.source == "stored_run":
-            return config.model_copy(update={"api": None})
-        endpoint(config.api)  # raises naming the variable that is unset or unusable
-        return config
+        if options.api is None:
+            return options
+        if shared.source == "stored_run":
+            return options.model_copy(update={"api": None})
+        endpoint(options.api)  # raises naming the variable that is unset or unusable
+        return options
 
     @classmethod
     def inputs_for(cls, config: RadarCommandConfig) -> list[str]:

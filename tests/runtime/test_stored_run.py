@@ -21,6 +21,7 @@ from adapt.execution.nodes.tracking import TrackingModule
 from adapt.persistence.output_router import StoreOutputRouter
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc
+from tests.helpers.pipeline_files import MODULES
 from tests.helpers.queue_msg import msg
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -91,9 +92,10 @@ def _run_xlma_over_it(make_processor, make_config, store_env, tmp_path) -> list[
     # two flashes in minute 19:05 at the radar origin — the cell's mid-gap position
     write_flash_sorted_nc(lma_dir / "LYLOUT_240518_190000_3600_map.nc", "2024-05-18T19:05:10", 2)
     (lma_dir / "LYLOUT_240518_190000.dat").write_text("raw ascii — ignored", encoding="utf-8")
-    config = make_config(module_params={"xlma_stat": {"input_dir": str(lma_dir)}}).model_copy(
-        update={"source": "stored_run", "modules": ["xlma_stat"]}
-    )
+    # A pass over a stored run: that run's config, running the pass's modules.
+    config = make_config(
+        modules=[*MODULES, "xlma_stat"], params={"xlma_stat": {"input_dir": str(lma_dir)}}
+    ).model_copy(update={"source": "stored_run", "modules": ["xlma_stat"]})
     proc = make_processor(config=config)
     return [proc.process_file(message) for message in store_env.acquirer.stored_scans()]
 
@@ -163,8 +165,9 @@ def test_a_live_run_cannot_take_a_modules_output_from_the_store(
 ):
     """A new scan has nothing stored yet: the producer must be listed."""
     write_flash_sorted_nc(tmp_path / "LYLOUT_240518_190000_3600_map.nc", "2024-05-18T19:05:10", 1)
-    config = make_config(module_params={"xlma_stat": {"input_dir": str(tmp_path)}}).model_copy(
-        update={"modules": ["ingest", "xlma_stat"]}
-    )
+    # A config no pipeline file gives (run_config refuses it): the processor refuses it too.
+    config = make_config(
+        modules=[*MODULES, "xlma_stat"], params={"xlma_stat": {"input_dir": str(tmp_path)}}
+    ).model_copy(update={"modules": ["ingest", "xlma_stat"]})
     with pytest.raises(ValueError, match="'tracking' produces — list 'tracking' too"):
         make_processor(config=config)

@@ -183,7 +183,7 @@ def test_an_unknown_source_lists_the_registered_ones(store, live, adapt, capsys)
 def test_a_module_missing_its_input_is_refused_before_the_run(store, live, adapt, capsys):
     live(
         modules=["ingest", "detection", "analysis", "tracking"],
-        params={"segmenter": {"seed_carry_frames": 0}},
+        params={"detection": {"seed_carry_frames": 0}},
     )
 
     assert adapt("run", "case") == 2
@@ -243,12 +243,12 @@ def test_settings_of_the_stored_run_cannot_be_changed_by_the_file(stored, adapt,
         "again",
         run=STORED,
         modules=["target_selection"],
-        params={"tracker": {"max_speed_ms": 30.0}},
+        params={"global": {"z_level": 3000}},
     )
 
     assert adapt("run", "again", "--run-id", radar_store.RUN) == 2
 
-    assert "params.tracker cannot change over a stored run" in capsys.readouterr().err
+    assert "params.global cannot change over a stored run" in capsys.readouterr().err
 
 
 def test_a_source_folder_that_does_not_exist_is_refused_before_the_run(

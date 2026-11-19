@@ -648,6 +648,103 @@ def test_packaged_yaml_has_no_section_of_the_old_pipeline_file() -> None:
     assert not offenders, f"old pipeline-file sections in: {offenders}"
 
 
+# ── A module's options belong to the module ──────────────────────────────────
+# A module's options are one model in the module, set under ``params.<module>``
+# and handed to the module by ``configure`` (ARCHITECTURE.md, rule 1). These
+# names belonged to what that replaced: sections of a shared config named
+# differently from the modules, defined in three schemas and translated between
+# them. A match means an option is defined or named outside its module again.
+_REMOVED_OPTION_NAMES = (
+    "UserConfig",
+    "ParamConfig",
+    "resolve_config",
+    "param_sections",
+    "build_config",
+    "default_params",
+    "options_text",
+    "injected_global_fields",
+    "config_class",
+    "with_module_params",
+    "coord_names",
+    "labels_var",
+)
+# The sections that held the options, each with the module that owns them now.
+_OLD_SECTIONS = {
+    "reader": "ingest",
+    "regridder": "ingest",
+    "segmenter": "detection",
+    "projector": "projection",
+    "analyzer": "analysis",
+    "tracker": "tracking",
+}
+# Names an option had under its old section and no longer has under its module
+# (``tracker.cell_uid.width`` is ``tracking.uid_width``; the optical-flow values
+# moved into ``projection.flow_params``). The options models cannot give these.
+_OLD_OPTION_NAMES = {
+    "tracker": ("cell_uid", "split_overlap", "merge_overlap"),
+    "analyzer": ("adjacency_min_touching",),
+    "projector": (
+        "pyr_scale",
+        "levels",
+        "winsize",
+        "iterations",
+        "poly_n",
+        "poly_sigma",
+        "flags",
+    ),
+}
+# A comment inside a CREATE TABLE statement is stored with the table in every
+# decisions.db. Rewording it would make a new store differ from the stores
+# already written, so this one old name stays.
+_STORED_WITH_THE_SCHEMA = {
+    "configuration/schemas/collection_decisions.sql": {"tracker.core_field_threshold"},
+}
+
+
+def _whole_names_in_the_source(names: list[str]) -> list[str]:
+    """``file: name`` for each of ``names`` found as a whole name in the packaged
+    code and text (``_build_config`` is not ``build_config``)."""
+    pattern = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in names) + r")\b")
+    offenders = []
+    for path in sorted(_SRC_ADAPT.rglob("*")):
+        if path.suffix not in {".py", ".yaml", ".sql", ".md"}:
+            continue
+        rel = _rel(path, _SRC_ADAPT)
+        found = set(pattern.findall(path.read_text(encoding="utf-8")))
+        offenders.extend(
+            f"{rel}: {name}" for name in sorted(found - _STORED_WITH_THE_SCHEMA.get(rel, set()))
+        )
+    return offenders
+
+
+def test_names_of_the_removed_option_layer_are_not_in_the_source() -> None:
+    offenders = _whole_names_in_the_source(list(_REMOVED_OPTION_NAMES))
+    assert not offenders, (
+        "names of the config layer that module-owned options replaced are back:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_no_option_is_named_by_the_section_that_held_it() -> None:
+    """Code, messages and comments name an option as ``params.<module>.<option>``."""
+    from adapt.execution.module_registry import registry
+    from adapt.execution.pipeline_builder import catalog_module_names
+
+    catalog_module_names()
+    old_names = [f"params.{section}" for section in _OLD_SECTIONS]
+    for section, module in _OLD_SECTIONS.items():
+        options_class = registry.get(module).options_class
+        assert options_class is not None
+        options = (*options_class.model_fields, *_OLD_OPTION_NAMES.get(section, ()))
+        old_names += [f"{section}.{option}" for option in options]
+
+    offenders = _whole_names_in_the_source(old_names)
+    assert not offenders, (
+        "an option is named by a section that no longer exists; name it by its "
+        "module (params.<module>.<option>):\n" + "\n".join(offenders)
+    )
+
+
 # What a node object may set on itself while running: the algorithm it builds
 # once from its config, and xlma_stat's flash files (inputs read once, not
 # results). Anything a module carries from scan to scan is a key it both reads
@@ -695,4 +792,43 @@ def test_a_module_node_carries_nothing_between_scans_in_its_attributes() -> None
     assert not offenders, (
         "a node sets attributes while running; return carried state under a key the "
         f"module also reads (see BaseModule), or extend _NODE_ATTRIBUTES: {offenders}"
+    )
+
+
+# ── A module's defaults are complete ──────────────────────────────────────────
+# ``adapt config --show`` and the option resolver take a module's defaults from
+# its packaged preset, else from its options model built with no argument. A
+# part of the options given alone is filled from the part's own defaults.
+
+
+def _options_without_default(model: type, prefix: str = "") -> list[str]:
+    """Dotted names of the options of ``model``, nested parts included, with no default."""
+    from typing import get_args
+
+    from pydantic import BaseModel
+
+    missing = []
+    for name, field in model.model_fields.items():
+        if field.is_required():
+            missing.append(f"{prefix}{name}")
+        for part in (field.annotation, *get_args(field.annotation)):
+            if isinstance(part, type) and issubclass(part, BaseModel):
+                missing.extend(_options_without_default(part, f"{prefix}{name}."))
+    return missing
+
+
+def test_a_module_without_a_preset_has_a_default_for_every_option() -> None:
+    from adapt.execution.module_registry import registry
+    from adapt.execution.pipeline_builder import catalog_module_names
+
+    offenders = {
+        name: missing
+        for name in catalog_module_names()
+        if (cls := registry.get(name)).options_preset() is None
+        and cls.options_class is not None
+        and (missing := _options_without_default(cls.options_class))
+    }
+    assert not offenders, (
+        "options without a default: give each one, or package a preset "
+        f"(BaseModule.options_preset): {offenders}"
     )

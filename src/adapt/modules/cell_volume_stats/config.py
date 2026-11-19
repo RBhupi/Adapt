@@ -1,21 +1,22 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Config schema for the cell_volume_stats module.
+"""Options and config of the cell_volume_stats module.
 
-Holds exactly what CellVolumeStatsAlgorithm consumes. Frozen. Built at startup by
-the node's build_config from the resolved InternalConfig. Only pydantic + stdlib.
+``CellVolumeStatsOptions`` is what a pipeline file sets under
+``params: {cell_volume_stats: ...}``. ``CellVolumeStatsConfig`` is exactly what
+CellVolumeStatsAlgorithm consumes: the options, plus what the node's
+``configure`` takes from the run. Frozen. Only pydantic + stdlib.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class CellVolumeStatsConfig(BaseModel):
+class CellVolumeStatsOptions(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # Variable names. reflectivity/labels are injected from global; the polarimetric
-    # names are module-owned (not a global knob), so they default here.
-    reflectivity_var: str = "reflectivity"
+    # The polarimetric variable names are the module's own (not a value the
+    # run's modules share), so they default here.
     zdr_var: str = Field(
         "differential_reflectivity",
         description="Differential reflectivity variable for the zdr_* statistics; "
@@ -31,11 +32,6 @@ class CellVolumeStatsConfig(BaseModel):
         description="Correlation coefficient variable for the rhohv_* statistics; "
         "skipped when the grid lacks it",
     )
-    labels_var: str = "cell_labels"
-    z_coord: str = "z"
-    y_coord: str = "y"
-    x_coord: str = "x"
-    time_coord: str = "time"
 
     thresholds: tuple[float, ...] = Field(
         (10.0, 20.0, 30.0, 40.0, 50.0),
@@ -54,3 +50,9 @@ class CellVolumeStatsConfig(BaseModel):
         description="Reflectivity threshold (dBZ) of the storm-structure (layering) "
         "summary columns multilayer_fraction, mean_nlayers and max_nlayers",
     )
+
+
+class CellVolumeStatsConfig(CellVolumeStatsOptions):
+    """The options, and the field the statistics are computed on."""
+
+    reflectivity_var: str  # the field the run tracks

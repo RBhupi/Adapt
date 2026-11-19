@@ -42,7 +42,7 @@ def test_fetch_scans_retries_then_returns_empty(fake_gateway, make_config):
             raise RuntimeError("AWS down")
 
     sleeps: list = []
-    config = make_config(max_fetch_retries=4)
+    config = make_config(params={"downloader": {"max_fetch_retries": 4}})
     d = AwsNexradDownloader(
         config, acquire=fake_gateway, conn=ExplodingConn(), sleeper=sleeps.append
     )
@@ -66,7 +66,7 @@ def test_fetch_scans_recovers_on_retry(fake_scan, fake_gateway, make_config):
                 raise RuntimeError("transient AWS error")
             return good
 
-    config = make_config(max_fetch_retries=3)
+    config = make_config(params={"downloader": {"max_fetch_retries": 3}})
     d = AwsNexradDownloader(config, acquire=fake_gateway, conn=FlakyConn(), sleeper=lambda _: None)
 
     scans = d._fetch_scans(datetime.now(UTC), datetime.now(UTC))

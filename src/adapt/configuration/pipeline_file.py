@@ -5,9 +5,11 @@
 
 Sections: ``run`` (where scans come from), ``modules`` (the per-scan modules to
 run, by name, checked against the module catalog; Adapt orders them by their
-inputs and outputs) and ``params`` (ParamConfig section name, or the name of a
-listed module that owns its options -> options; a section's options are checked
-against its ParamConfig model, see ``param_sections``).
+inputs and outputs) and ``params`` (a section of the run config — ``global``,
+``downloader``, ``logging`` — or the name of a listed module -> options). The
+options themselves are checked when a run of the file is configured, see
+``pipeline_run``: a section's by the run config's model of it, a module's by
+the module's own options model.
 
 ``load_pipeline_file`` reads and validates a file; ``pipeline_run`` turns it
 into a run's config. The folder that holds the file is the store root.
@@ -28,10 +30,13 @@ from pydantic import (
     model_validator,
 )
 
-from adapt.configuration.param_sections import check_sections
 from adapt.configuration.schemas.base import AdaptBaseModel
 from adapt.configuration.schemas.errors import ConfigError, validated
-from adapt.configuration.schemas.param import ParamConfig
+from adapt.configuration.schemas.internal import (
+    InternalDownloaderConfig,
+    InternalGlobalConfig,
+    InternalLoggingConfig,
+)
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
 
@@ -40,7 +45,7 @@ __all__ = [
     "PipelineFile",
     "RunSection",
     "load_pipeline_file",
-    "param_section_names",
+    "param_section_models",
 ]
 
 # Downloader settings the run section owns; ``params.downloader`` must not set them.
@@ -55,13 +60,15 @@ _FROZEN = AdaptBaseModel.model_config.copy()
 _FROZEN.update({"frozen": True})
 
 
-def param_section_names() -> tuple[str, ...]:
-    """ParamConfig section names (by alias): the ``params:`` keys that are sections."""
-    return tuple(
-        field.alias or name
-        for name, field in ParamConfig.model_fields.items()
-        if isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel)
-    )
+def param_section_models() -> dict[str, type[BaseModel]]:
+    """The ``params:`` keys that are sections of the run config, each with the
+    model of its options: the three settings ``InternalConfig`` holds under
+    these names."""
+    return {
+        "downloader": InternalDownloaderConfig,
+        "global": InternalGlobalConfig,
+        "logging": InternalLoggingConfig,
+    }
 
 
 class RunSection(AdaptBaseModel):
@@ -177,33 +184,22 @@ class PipelineFile(AdaptBaseModel):
     def _params_are_sections_or_listed_modules(
         cls, params: dict[str, dict[str, Any]], info: ValidationInfo
     ) -> dict[str, dict[str, Any]]:
-        sections = param_section_names()
+        sections = tuple(param_section_models())
         catalog_module_names()  # registers every catalog module
-        # A module without params sections owns its options, under its own name.
-        owners = sorted(n for n in registry.list_modules() if not registry.get(n).param_sections)
+        modules = sorted(registry.list_modules())  # each sets its options under its name
         for key in params:
-            if key in owners:
+            if key in modules:
                 # "modules" is absent from info.data when it failed its own validation.
                 if "modules" in info.data and key not in info.data["modules"]:
                     raise ValueError(
                         f"params.{key} sets the options of {key}, which this file does not "
                         f"run — list it under 'modules:', or remove params.{key}"
                     )
-                _check_module_options(key, params[key])
-                continue
-            if key in sections:
-                continue
-            if key in registry:
-                held = registry.get(key).param_sections
-                where = ", ".join(f"params.{s}" for s in held) or "no params section"
+            elif key not in sections:
                 raise ValueError(
-                    f"the options of module '{key}' are set under {where} — "
-                    f"run 'adapt config --show {key}' to see them"
+                    f"unknown params key '{key}'. Valid keys: the sections "
+                    f"{', '.join(sections)}; the modules {', '.join(modules)}"
                 )
-            raise ValueError(
-                f"unknown params key '{key}'. Valid keys: the sections {', '.join(sections)}; "
-                f"the modules {', '.join(owners)}"
-            )
         owned = [k for k in RUN_OWNED_DOWNLOADER_KEYS if k in params.get("downloader", {})]
         if owned:
             raise ValueError(
@@ -212,26 +208,7 @@ class PipelineFile(AdaptBaseModel):
                 + ", ".join(f"run.{k}" for k in owned)
                 + " instead"
             )
-        check_sections({k: v for k, v in params.items() if k in sections})
         return params
-
-
-def _check_module_options(name: str, options: dict[str, Any]) -> None:
-    """``params.NAME``'s keys must be options module ``name`` owns."""
-    cls = registry.get(name)
-    # A preset may leave an optional part out, so the config model's parts count too.
-    owned = {**dict.fromkeys(getattr(cls.config_class, "model_fields", {})), **cls.default_params()}
-    for key in options:
-        if key in cls.injected_global_fields:
-            raise ValueError(
-                f"params.{name}.{key} is not set per module: {name} takes it from the "
-                "shared params.global section"
-            )
-        if key not in owned:
-            raise ValueError(
-                f"unknown option '{key}' under params.{name}. Its options: "
-                f"{', '.join(owned) or '(none)'} — run 'adapt config --show {name}'"
-            )
 
 
 class _RepeatedKey(ValueError):

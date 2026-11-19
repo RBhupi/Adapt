@@ -125,7 +125,7 @@ def test_a_cell_far_from_every_footprint_is_an_initiation(tracker):
 
 
 def test_a_link_faster_than_the_speed_cap_is_rejected(make_tracking_config):
-    tracker = CellTracker(make_tracking_config(tracker={"max_speed_ms": 5.0}))
+    tracker = CellTracker(make_tracking_config(max_speed_ms=5.0))
     a = _box(10, 14, 10, 14)
     b = _box(10, 14, 12, 16)  # 2 km in 277 s = 7.2 m/s
     _, (_, e1) = _run(tracker, [(a, None), (b, b)])
@@ -197,7 +197,7 @@ def test_identity_at_a_merge_follows_the_stronger_source(tracker):
 def test_identity_never_moves_to_a_physically_impossible_continuation(make_tracking_config):
     # The same merge as above, but with a speed cap the stronger source's jump to
     # the survivor's centre violates: the identity stays with the assigned cell.
-    tracker = CellTracker(make_tracking_config(tracker={"max_speed_ms": 9.3}))
+    tracker = CellTracker(make_tracking_config(max_speed_ms=9.3))
     prev = _box(10, 15, 10, 14, 1, _box(10, 13, 15, 19, 2))
     refl0 = np.where(prev == 1, 35.0, np.where(prev == 2, 55.0, 0.0))
     merged = _box(10, 15, 10, 19)
@@ -250,7 +250,7 @@ def test_an_unresumed_latent_track_terminates_after_n_scans(tracker):
 
 
 def test_without_latency_a_track_terminates_at_once(make_tracking_config):
-    tracker = CellTracker(make_tracking_config(tracker={"latent_scans": 0}))
+    tracker = CellTracker(make_tracking_config(latent_scans=0))
     a = _box(10, 14, 10, 14)
     empty = np.zeros(SHAPE, dtype=np.int32)
     _, (_, e1) = _run(tracker, [(a, None), (empty, a)])

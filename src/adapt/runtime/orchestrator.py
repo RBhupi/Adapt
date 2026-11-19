@@ -208,23 +208,23 @@ class PipelineOrchestrator:
 
     def _enabled_module_names(self) -> tuple[str, ...]:
         """The processor's enabled per-scan modules (the header lists them)."""
-        if not self.processor:
-            return ()
+        assert self.processor is not None
         return self.processor.module_names
 
     def _record_run_start(self, radar: str) -> None:
         """Begin the ONE run lifecycle in the registry and print the console header."""
         assert self.registry is not None
         assert self._reporter is not None
+        assert self.processor is not None
         prov = capture_provenance()
         modules = self._enabled_module_names()
         config_json = self.config.model_dump_json()
         try:
-            self.registry.get_run(self.run_id or "")
+            self.registry.get_run(self.run_id)
         except StoreError:
             self.registry.begin_run(
                 StoreRunStart(
-                    run_id=self.run_id or "",
+                    run_id=self.run_id,
                     collection_id=radar,
                     config_hash=config_hash(config_json),
                     config_json=config_json,
@@ -245,10 +245,10 @@ class PipelineOrchestrator:
             )
         else:
             # --run-id continuation: reopen the ONE run record.
-            self.registry.resume_run(self.run_id or "")
+            self.registry.resume_run(self.run_id)
         self.run_registered.set()
         header = RunStart(
-            run_id=self.run_id or "",
+            run_id=self.run_id,
             pipeline=self.config.source,
             pipeline_version=prov.software_version,
             site=radar,
@@ -257,12 +257,12 @@ class PipelineOrchestrator:
             mode=self.config.mode,
             start_time=datetime.now(UTC),
             configuration_hash=config_hash(config_json),
-            configuration_file="" if self.config.pipeline is None else self.config.pipeline.file,
+            configuration_file=self.config.pipeline.file,
             provenance=prov,
             enabled_modules=modules,
         )
         self._reporter.header(header)
-        self._reporter.methods(self.config, modules)
+        self._reporter.methods(self.processor.method_lines)
 
     def _finalize_history(self) -> None:
         """Print the run summary, then persist history.
@@ -286,12 +286,11 @@ class PipelineOrchestrator:
 
         # Persist after the user-facing summary is out. Failures here are reported
         # loudly but must not abort the orderly shutdown.
-        run_id = self.run_id or ""
         try:
             if warnings:
-                self.history.record_warnings(run_id, warnings)
+                self.history.record_warnings(self.run_id, warnings)
             if errors:
-                self.history.record_errors(run_id, errors)
+                self.history.record_errors(self.run_id, errors)
             self.summary = summary
             self._run_status = self.history.finalize_run(summary)
         except Exception:
@@ -325,7 +324,7 @@ class PipelineOrchestrator:
         slowest = tuple((name, total) for name, _calls, total in module_stats[:3])
         duration = (time.time() - self._start_time) if self._start_time else 0.0
         return RunSummary(
-            run_id=self.run_id or "",
+            run_id=self.run_id,
             status=status,
             end_time=datetime.now(UTC),
             duration_seconds=duration,
@@ -353,7 +352,7 @@ class PipelineOrchestrator:
         return source_cls(
             config=self.config,
             result_queue=self.downloader_queue,
-            acquire=StoreAcquirer(self.collection, self.run_id or ""),
+            acquire=StoreAcquirer(self.collection, self.run_id),
         )
 
     def start(self, max_runtime: int | None = None) -> str:
@@ -424,7 +423,6 @@ class PipelineOrchestrator:
         self._reporter = RunReporter()
 
         # Store composition: collection domain, registry, run lifecycle.
-        assert self.run_id is not None
         self.collection = self.store.collection(radar)
         self.registry = StoreRegistry.get_instance(self.store.root)
         self.registry.register_collection(radar, source_kind=self.config.source)
@@ -434,9 +432,7 @@ class PipelineOrchestrator:
         # to the processor thread (contextvars do not cross threads) so the whole run
         # shares one trace.
         self._obs = self._build_observability()
-        self._root_span = self._obs.span(
-            "pipeline", pipeline_id=self.run_id or "", dataset_id=radar
-        )
+        self._root_span = self._obs.span("pipeline", pipeline_id=self.run_id, dataset_id=radar)
         self._root_span.__enter__()
         self._root_trace_id = self._obs.current().trace_id
 

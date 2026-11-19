@@ -1,6 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
+from adapt.execution.nodes.projection import ProjectionModule
+from adapt.modules.projection.config import ProjectionOptions
 from adapt.modules.projection.module import RadarCellProjector
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -14,11 +19,10 @@ def test_validate_requires_two_datasets(simple_labeled_ds_pair, make_projection_
         proj.project(simple_labeled_ds_pair[:1])
 
 
-def test_projection_skipped_if_time_gap_too_large(simple_labeled_ds_pair, make_projection_config):
+def test_projection_skipped_if_time_gap_too_large(simple_labeled_ds_pair):
     """Projection skipped when time gap exceeds max interval."""
-    from adapt.configuration.schemas.user import UserGlobalConfig
-
-    config = make_projection_config(global_=UserGlobalConfig(max_scan_gap_minutes=1))
+    one_minute = replace(SHARED, max_scan_gap_minutes=1.0)
+    config = ProjectionModule.configure(ProjectionOptions(), one_minute)
     proj = RadarCellProjector(config)
 
     out = proj.project(simple_labeled_ds_pair)

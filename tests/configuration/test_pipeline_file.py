@@ -3,9 +3,11 @@
 
 """The pipeline file: one YAML file per pipeline, validated before anything runs.
 
-Module names are checked against the module catalog, ``params:`` keys are routed
-to ParamConfig sections or to the listed modules that own their options, and
-every mistake fails loudly with the file, the key, and what would be valid.
+Module names are checked against the module catalog, ``params:`` keys are the
+run config's sections or the listed modules, each of which owns its options,
+and every mistake fails loudly with the file, the key, and what would be valid.
+The options themselves are checked when the file is configured for a run: a
+section's by the run config, a module's by the module's own options model.
 """
 
 from datetime import UTC, datetime
@@ -13,8 +15,15 @@ from datetime import UTC, datetime
 import pytest
 import yaml
 
-from adapt.configuration.pipeline_file import PipelineFile, load_pipeline_file
+from adapt.configuration.pipeline_file import (
+    PipelineFile,
+    load_pipeline_file,
+    param_section_models,
+)
+from adapt.configuration.pipeline_run import configured_modules
 from adapt.configuration.schemas.errors import ConfigError
+from adapt.configuration.schemas.internal import InternalConfig
+from adapt.execution.pipeline_builder import catalog_module_names
 
 pytestmark = pytest.mark.unit
 
@@ -42,6 +51,12 @@ def _load(tmp_path, data) -> PipelineFile:
     return load_pipeline_file(_write(tmp_path, data))
 
 
+def _configure(tmp_path, data) -> list:
+    """The file's modules, configured and wired as a run of it (or ``adapt graph``) would."""
+    path = _write(tmp_path, data)
+    return configured_modules(load_pipeline_file(path), path)
+
+
 class TestSections:
     def test_params_whose_entries_are_all_commented_out_are_empty(self, tmp_path):
         text = (
@@ -53,7 +68,7 @@ class TestSections:
             "  - ingest\n"
             "  # - detection\n"
             "params:\n"
-            "  # tracker:\n"
+            "  # tracking:\n"
         )
 
         pipeline = _load(tmp_path, text)
@@ -96,7 +111,7 @@ class TestSections:
 
     def test_a_section_given_twice_is_refused_naming_its_lines(self, tmp_path):
         # E.g. a second `params:` line, with an entry under it, appended to the file.
-        text = yaml.safe_dump(_file(), sort_keys=False) + "params:\n  tracker: {}\n"
+        text = yaml.safe_dump(_file(), sort_keys=False) + "params:\n  tracking: {}\n"
         first = text.splitlines().index("params: {}") + 1
         last = len(text.splitlines()) - 1
 
@@ -109,7 +124,7 @@ class TestSections:
 
     def test_an_option_given_twice_is_refused(self, tmp_path):
         text = yaml.safe_dump(_file(), sort_keys=False).replace(
-            "params: {}\n", "params:\n  tracker:\n    max_speed: 1\n    max_speed: 2\n"
+            "params: {}\n", "params:\n  tracking:\n    max_speed: 1\n    max_speed: 2\n"
         )
 
         with pytest.raises(ConfigError, match="'max_speed'"):
@@ -146,15 +161,31 @@ class TestModules:
 
 
 class TestParams:
-    @pytest.mark.parametrize("section", ["segmenter", "tracker", "global", "downloader"])
-    def test_paramconfig_section_names_are_accepted(self, tmp_path, section):
+    def test_the_sections_of_the_run_config_are_these_three(self):
+        assert tuple(param_section_models()) == ("downloader", "global", "logging")
+
+    @pytest.mark.parametrize("section", ["downloader", "global", "logging"])
+    def test_a_sections_options_are_the_run_configs_model_of_that_section(self, section):
+        held = {field.alias or name: field for name, field in InternalConfig.model_fields.items()}
+
+        assert param_section_models()[section] is held[section].annotation
+
+    @pytest.mark.parametrize("section", ["logging", "global", "downloader"])
+    def test_the_run_configs_section_names_are_accepted(self, tmp_path, section):
         pipeline = _load(tmp_path, _file(params={section: {}}))
 
         assert section in pipeline.params
 
     @pytest.mark.parametrize(
         ("module", "options"),
-        [("cell_volume_stats", {"thresholds": [30.0]}), ("xlma_stat", {"search_radius_m": 250.0})],
+        [
+            ("ingest", {"min_radius": 2000.0}),
+            ("detection", {"h_maxima": 2.5}),
+            ("analysis", {"exclude_fields": ["velocity"]}),
+            ("tracking", {"max_speed_ms": 30.0}),
+            ("cell_volume_stats", {"thresholds": [30.0]}),
+            ("xlma_stat", {"search_radius_m": 250.0}),
+        ],
     )
     def test_the_options_of_a_module_that_owns_them_are_accepted(self, tmp_path, module, options):
         pipeline = _load(
@@ -164,42 +195,32 @@ class TestParams:
         assert pipeline.params[module] == options
 
     @pytest.mark.parametrize("module", ["cell_volume_stats", "xlma_stat"])
-    def test_a_mistyped_module_option_lists_the_modules_options(self, tmp_path, module):
+    def test_a_mistyped_module_option_is_refused_when_the_file_is_configured(
+        self, tmp_path, module
+    ):
         with pytest.raises(ConfigError) as exc:
-            _load(
+            _configure(
                 tmp_path,
                 _file(modules=[*_MODULES, "xlma_stat"], params={module: {"input_dirr": "/data"}}),
             )
 
         message = str(exc.value)
-        assert f"params.{module}" in message
-        assert "input_dirr" in message
-        assert f"adapt config --show {module}" in message
+        assert "nexrad.yaml" in message
+        assert f"params.{module}.input_dirr — unrecognized option" in message
+        assert f"not a valid '{module}' setting" in message
 
     def test_a_module_option_filled_from_global_is_refused(self, tmp_path):
         # cell_volume_stats takes its reflectivity variable from params.global.
-        with pytest.raises(ConfigError, match="reflectivity_var"):
-            _load(tmp_path, _file(params={"cell_volume_stats": {"reflectivity_var": "dbz"}}))
+        with pytest.raises(
+            ConfigError, match=r"params\.cell_volume_stats\.reflectivity_var — unrecognized"
+        ):
+            _configure(tmp_path, _file(params={"cell_volume_stats": {"reflectivity_var": "dbz"}}))
 
-    @pytest.mark.parametrize(
-        ("module", "sections"),
-        [
-            ("ingest", ["reader", "regridder"]),
-            ("detection", ["segmenter"]),
-            ("projection", ["projector"]),
-            ("analysis", ["analyzer"]),
-            ("tracking", ["tracker"]),
-        ],
-    )
-    def test_a_modules_name_points_at_the_sections_holding_its_options(
-        self, tmp_path, module, sections
-    ):
-        with pytest.raises(ConfigError) as exc:
-            _load(tmp_path, _file(params={module: {}}))
+    @pytest.mark.parametrize("module", catalog_module_names())
+    def test_every_catalog_module_takes_its_options_under_its_own_name(self, tmp_path, module):
+        pipeline = _load(tmp_path, _file(modules=catalog_module_names(), params={module: {}}))
 
-        message = str(exc.value)
-        assert all(section in message for section in sections)
-        assert f"adapt config --show {module}" in message
+        assert pipeline.params == {module: {}}
 
     def test_unknown_key_lists_the_valid_keys(self, tmp_path):
         with pytest.raises(ConfigError) as exc:
@@ -207,13 +228,34 @@ class TestParams:
 
         message = str(exc.value)
         assert "segmentor" in message
-        assert "segmenter" in message
+        assert "global" in message
+        assert "detection" in message
         assert "cell_volume_stats" in message
 
-    def test_a_section_whose_options_are_all_commented_out_has_empty_options(self, tmp_path):
-        pipeline = _load(tmp_path, _file(params={"tracker": None}))
+    @pytest.mark.parametrize(
+        "section",
+        [
+            "visualization",
+            "output",
+            "processor",
+            "reader",
+            "regridder",
+            "segmenter",
+            "projector",
+            "analyzer",
+            "tracker",
+        ],
+    )
+    def test_a_section_nothing_reads_is_an_unknown_key(self, tmp_path, section):
+        with pytest.raises(ConfigError) as exc:
+            _load(tmp_path, _file(params={section: {}}))
 
-        assert pipeline.params == {"tracker": {}}
+        assert f"unknown params key '{section}'" in str(exc.value)
+
+    def test_a_section_whose_options_are_all_commented_out_has_empty_options(self, tmp_path):
+        pipeline = _load(tmp_path, _file(params={"logging": None}))
+
+        assert pipeline.params == {"logging": {}}
 
     @pytest.mark.parametrize("key", ["radar", "mode", "start_time", "end_time"])
     def test_downloader_settings_owned_by_run_are_rejected(self, tmp_path, key):
@@ -225,20 +267,15 @@ class TestParams:
     @pytest.mark.parametrize(
         ("section", "options", "path"),
         [
-            ("regridder", {"min_radius": -5}, "regridder.min_radius"),
-            ("segmenter", {"h_maxima": -1}, "segmenter.h_maxima"),
-            ("segmenter", {"min_cellsize_gridpoint": 0}, "segmenter.min_cellsize_gridpoint"),
-            ("projector", {"flow_params": {"poly_n": 1}}, "projector.flow_params.poly_n"),
-            ("projector", {"flow_params": {"pyr_scale": 5}}, "projector.flow_params.pyr_scale"),
-            ("projector", {"max_projection_steps": 25}, "projector.max_projection_steps"),
             ("downloader", {"min_file_size": 0}, "downloader.min_file_size"),
             ("downloader", {"queue_resume_fraction": 3}, "downloader.queue_resume_fraction"),
-            ("visualization", {"dpi": 10}, "visualization.dpi"),
         ],
     )
-    def test_a_section_option_out_of_its_bounds_is_refused(self, tmp_path, section, options, path):
+    def test_a_section_option_out_of_its_bounds_is_refused_when_the_file_is_configured(
+        self, tmp_path, section, options, path
+    ):
         with pytest.raises(ConfigError) as exc:
-            _load(tmp_path, _file(params={section: options}))
+            _configure(tmp_path, _file(params={section: options}))
 
         assert "nexrad.yaml" in str(exc.value)
         assert f"params.{path} — value" in str(exc.value)
@@ -247,38 +284,18 @@ class TestParams:
     @pytest.mark.parametrize(
         ("section", "key"),
         [
-            ("segmenter", "threshhold"),
-            ("segmenter", "seed_carry"),  # retired
-            ("segmenter", "closing_kernel"),  # retired
             ("logging", "progress_every"),  # never offered
             ("global", "bogus"),
         ],
     )
-    def test_an_unknown_section_option_is_refused_naming_the_file(self, tmp_path, section, key):
+    def test_an_unknown_section_option_is_refused_when_the_file_is_configured(
+        self, tmp_path, section, key
+    ):
         with pytest.raises(ConfigError) as exc:
-            _load(tmp_path, _file(params={section: {key: 1}}))
+            _configure(tmp_path, _file(params={section: {key: 1}}))
 
         assert "nexrad.yaml" in str(exc.value)
         assert f"params.{section}.{key} — unrecognized option" in str(exc.value)
-
-    @pytest.mark.parametrize(
-        ("section", "options", "path"),
-        [
-            ("output", {"compression": "gzip"}, "output.compression"),
-            ("visualization", {"enabled": False}, "visualization.enabled"),
-            ("tracker", {"cell_uid": {"alphabet": "base36_upper"}}, "tracker.cell_uid.alphabet"),
-            ("downloader", {"output_dir": "/elsewhere"}, "downloader.output_dir"),
-        ],
-    )
-    def test_an_obsolete_option_is_refused_as_having_no_effect(
-        self, tmp_path, section, options, path
-    ):
-        with pytest.raises(ConfigError) as exc:
-            _load(tmp_path, _file(params={section: options}))
-
-        message = str(exc.value)
-        assert f"params.{path}" in message
-        assert "obsolete option" in message
 
     @pytest.mark.parametrize(
         ("module", "options"),
@@ -308,8 +325,12 @@ class TestParams:
     def test_an_unknown_part_of_a_packaged_rule_is_refused(self, tmp_path):
         modules = [*_MODULES, "target_selection"]
 
-        with pytest.raises(ConfigError, match="unknown option 'entree'"):
-            _load(tmp_path, _file(modules=modules, params={"target_selection": {"entree": {}}}))
+        with pytest.raises(
+            ConfigError, match=r"params\.target_selection\.entree — unrecognized option"
+        ):
+            _configure(
+                tmp_path, _file(modules=modules, params={"target_selection": {"entree": {}}})
+            )
 
 
 class TestRunSection:

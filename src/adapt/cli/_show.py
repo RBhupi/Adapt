@@ -5,17 +5,16 @@
 
 The output is lines to paste under the ``params:`` line of a pipeline file: a
 first comment line saying so, then the entries indented two spaces. NAME is a
-module or a ``ParamConfig`` section:
+module or a section of the run config:
 
-- a module whose options live in params sections prints those sections;
-- a params section (``global``, ``segmenter``, ...) prints itself;
-- a module that owns its options prints them under its own name, ``NAME: ...``
-  — its packaged preset with its comments when it ships one.
+- a section (``global``, ``downloader``, ``logging``) prints itself;
+- a module prints its options under its own name, ``NAME: ...`` — its packaged
+  preset with its comments when it ships one, else under a header line that
+  names the module and the command showing the options every module shares.
 
 Each option carries the first sentence of its description (and the allowed
-values, for a choice) as a comment. Obsolete options (``param_sections.obsolete``)
-are not offered, and a section with no other option says so; neither are the
-downloader options that the pipeline file's ``run:`` section owns.
+values, for a choice) as a comment. The downloader settings that the pipeline
+file's ``run:`` section owns are not offered.
 """
 
 import textwrap
@@ -25,10 +24,8 @@ from typing import Any, Literal, Union, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from adapt.configuration.param_sections import obsolete
-from adapt.configuration.pipeline_file import RUN_OWNED_DOWNLOADER_KEYS, param_section_names
+from adapt.configuration.pipeline_file import RUN_OWNED_DOWNLOADER_KEYS, param_section_models
 from adapt.configuration.schemas.errors import ConfigError
-from adapt.configuration.schemas.param import ParamConfig
 from adapt.configuration.schemas.yaml_writer import Descriptions, dump
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
@@ -45,17 +42,12 @@ def show(name: str) -> str:
         ``name`` is none of the above; the message lists every valid name by kind.
     """
     modules = catalog_module_names()
-    if name in param_section_names():
-        return _sections((name,))
+    sections = param_section_models()
+    if name in sections:
+        return _section(name, sections[name])
     if name in modules:
         cls = registry.get(name)
-        header = f"# {name}: {cls.module_summary()}"
-        if cls.param_sections:
-            return _sections(
-                cls.param_sections,
-                f"{header}. Options shared by every module: adapt config --show global",
-            )
-        packaged = cls.options_text()
+        packaged = cls.options_preset()
         if packaged is not None:
             note = (
                 f"# These are {name}'s defaults: listed under modules:, it runs with them.\n"
@@ -64,33 +56,29 @@ def show(name: str) -> str:
             return _paste("params", note + packaged)
         data, notes = (
             ({}, {})  # a module without options
-            if cls.config_class is None
-            else _options(cls.config_class, cls.default_params(), cls.injected_global_fields)
+            if cls.options_class is None
+            else _options(cls.options_class, cls.options_class().model_dump(), frozenset())
+        )
+        header = (
+            f"# {name}: {cls.module_summary()}. "
+            "Options shared by every module: adapt config --show global"
         )
         return _paste("params", dump({name: data}, {name: notes}, header))
     raise ConfigError(
         f"Unknown name '{name}' for adapt config --show. Valid names:\n"
         f"  modules: {', '.join(modules)}\n"
-        f"  params sections: {', '.join(param_section_names())}"
+        f"  params sections: {', '.join(sections)}"
     )
 
 
-def _sections(names: tuple[str, ...], header: str = "") -> str:
-    defaults = ParamConfig().model_dump(by_alias=True)
-    models = {
-        field.alias or attr: field.annotation for attr, field in ParamConfig.model_fields.items()
+def _section(name: str, model: type[BaseModel]) -> str:
+    """Run-config section ``name``'s options with their defaults."""
+    skip = frozenset(RUN_OWNED_DOWNLOADER_KEYS) if name == "downloader" else frozenset()
+    defaults = {
+        option: field.default for option, field in model.model_fields.items() if option not in skip
     }
-    data: dict[str, Any] = {}
-    notes: Descriptions = {}
-    for name in names:
-        skip = frozenset(RUN_OWNED_DOWNLOADER_KEYS) if name == "downloader" else frozenset()
-        options, comments = _options(models[name], defaults[name], skip)
-        if options:  # a section of obsolete options only has nothing to set
-            data[name], notes[name] = options, comments
-    if not data:
-        held = ", ".join(f"params.{name}" for name in names)
-        return f"# {held} has no options to set: those it had are obsolete and have no effect\n"
-    return _paste("params", dump(data, notes, header))
+    data, notes = _options(model, defaults, skip)
+    return _paste("params", dump({name: data}, {name: notes}))
 
 
 def _paste(line: str, entries: str) -> str:
@@ -101,12 +89,12 @@ def _paste(line: str, entries: str) -> str:
 
 
 def _options(model: Any, values: dict[str, Any], skip: frozenset[str]) -> tuple[dict, Descriptions]:
-    """The described options of ``model`` with their ``values``, and their comments."""
+    """The options of ``model`` with their ``values``, and their comments."""
     data: dict[str, Any] = {}
     notes: Descriptions = {}
     for attr, field in model.model_fields.items():
         key = field.alias or attr
-        if key in skip or obsolete(field):
+        if key in skip:
             continue
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):

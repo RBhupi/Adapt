@@ -3,7 +3,7 @@
 
 """Synthetic store for radar command tests — real production writers, known geometry.
 
-Collection ``KTST``, completed run ``run-1``, three scans at 12:00:37, 12:05:37
+Collection ``KTST``, completed run ``RUN``, three scans at 12:00:37, 12:05:37
 and 12:10:37. The first scan of a run has no projection (no previous scan to
 take a flow from); the other two carry 15 projection frames at the whole
 minutes after the scan (12:06..12:20 and 12:11..12:25).
@@ -33,9 +33,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.contracts.persistence import NetcdfArtifact, PersistenceMeta
 from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
 from adapt.modules.tracking.tables import Lifecycle
@@ -43,10 +40,11 @@ from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
+from tests.helpers.run_configs import new_run_config
 from tests.helpers.tracking_store import persist_tracking
 
 COLLECTION = "KTST"
-RUN = "run-1"
+RUN = "2026JUN01-1200-KTST"
 UID_A = "uid-a"
 UID_B = "uid-b"
 SCAN_TIMES = tuple(datetime(2026, 6, 1, 12, m, 37, tzinfo=UTC) for m in (0, 5, 10))
@@ -183,7 +181,7 @@ def volume_rows(index: int) -> pd.DataFrame:
 
 
 def build_store(tmp_path, volume_stats: bool, absent_frame: int | None = None) -> SimpleNamespace:
-    """Build the store under ``tmp_path`` with completed run ``run-1``; returns its
+    """Build the store under ``tmp_path`` with completed run ``RUN``; returns its
     root and scan ids.
 
     ``volume_stats=False`` leaves the collection without a cell_volume_stats
@@ -204,8 +202,9 @@ def build_store(tmp_path, volume_stats: bool, absent_frame: int | None = None) -
 
 
 def add_run(built: SimpleNamespace, run_id: str, volume_scans: tuple[int, ...]) -> tuple[str, ...]:
-    """Process the three volumes again as completed run ``run_id`` of the same
-    collection; only the scans indexed in ``volume_scans`` get cell_volume_stats rows."""
+    """Process the three volumes again as completed run ``run_id``
+    (``YYYYMONDD-HHMM-KTST``) of the same collection; only the scans indexed in
+    ``volume_scans`` get cell_volume_stats rows."""
     store = Store.open(built.root)
     collection = store.collection(COLLECTION)
     registry = StoreRegistry.get_instance(built.root)
@@ -252,10 +251,9 @@ def add_volume_stats(built: SimpleNamespace, run_id: str, index: int) -> None:
 
 
 def _run_config(root, run_id: str) -> str:
-    """The config a run records: a full InternalConfig, as the orchestrator writes it."""
-    config = resolve_config(ParamConfig(), UserConfig(radar=COLLECTION, base_dir=str(root)))
-    modules = ["ingest", "detection", "projection", "analysis", "tracking", "cell_volume_stats"]
-    return config.model_copy(update={"run_id": run_id, "modules": modules}).model_dump_json()
+    """The config a run records, as the orchestrator writes it: that of new run
+    ``run_id`` of a plain NEXRAD pipeline file of the collection."""
+    return new_run_config(root, run={"radar": COLLECTION}, run_id=run_id).model_dump_json()
 
 
 def _raw_name(scan_time: datetime) -> str:

@@ -8,10 +8,8 @@ pytestmark = pytest.mark.unit
 
 def test_init_custom_config(make_config, fake_gateway):
     """Downloader initializes with custom config."""
-    from adapt.configuration.schemas.user import UserDownloaderConfig
-
     config = make_config(
-        downloader=UserDownloaderConfig(radar="KDIX", latest_files=5, latest_minutes=60)
+        run={"radar": "KDIX"}, params={"downloader": {"latest_files": 5, "latest_minutes": 60}}
     )
     d = AwsNexradDownloader(config, acquire=fake_gateway)
 
@@ -34,18 +32,16 @@ def test_stop_sets_event(radar_config, fake_gateway):
     assert d.stopped()
 
 
-def test_historical_mode_from_config(make_config, fake_gateway):
-    """Downloader detects historical mode from config.downloader.mode."""
-    from adapt.configuration.schemas.user import UserDownloaderConfig
+_WINDOW = {
+    "mode": "historical",
+    "start_time": "2024-01-01T00:00:00Z",
+    "end_time": "2024-01-01T01:00:00Z",
+}
 
-    config = make_config(
-        downloader=UserDownloaderConfig(
-            start_time="2024-01-01T00:00:00Z",
-            end_time="2024-01-01T01:00:00Z",
-        )
-    )
-    d = AwsNexradDownloader(config, acquire=fake_gateway)
-    # Mode is decided by schema, not by is_historical_mode() method
+
+def test_historical_mode_from_config(make_config, fake_gateway):
+    """The downloader's mode is the run's: config.downloader.mode."""
+    d = AwsNexradDownloader(make_config(run=_WINDOW), acquire=fake_gateway)
     assert d.config.downloader.mode == "historical"
 
     d2 = AwsNexradDownloader(make_config(), acquire=fake_gateway)
@@ -54,15 +50,7 @@ def test_historical_mode_from_config(make_config, fake_gateway):
 
 def test_parse_time_range(make_config, fake_gateway):
     """Downloader parses time range correctly."""
-    from adapt.configuration.schemas.user import UserDownloaderConfig
-
-    config = make_config(
-        downloader=UserDownloaderConfig(
-            start_time="2024-01-01T00:00:00Z",
-            end_time="2024-01-01T01:00:00Z",
-        )
-    )
-    d = AwsNexradDownloader(config, acquire=fake_gateway)
+    d = AwsNexradDownloader(make_config(run=_WINDOW), acquire=fake_gateway)
 
     start, end = d._parse_time_range()
 

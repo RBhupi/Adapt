@@ -16,8 +16,7 @@ import pytest
 pyart = pytest.importorskip("pyart")
 import xarray as xr  # noqa: E402
 
-from adapt.configuration.schemas.param import SegmenterConfig  # noqa: E402
-from adapt.modules.detection.config import DetectionConfig  # noqa: E402
+from adapt.modules.detection.config import DetectionConfig, DetectionOptions  # noqa: E402
 from adapt.modules.detection.module import RadarCellSegmenter  # noqa: E402
 
 pytestmark = pytest.mark.unit
@@ -34,8 +33,8 @@ Z_LEVEL = 2000.0
 
 
 def _method_params(method: str) -> dict:
-    """The curated ParamConfig defaults for a method (as build_config resolves them)."""
-    return getattr(SegmenterConfig(), f"{method}_params").model_dump()
+    """The curated defaults for a method (as the node's ``configure`` resolves them)."""
+    return getattr(DetectionOptions(), f"{method}_params").model_dump()
 
 
 def _config(method: str) -> DetectionConfig:
@@ -51,7 +50,6 @@ def _config(method: str) -> DetectionConfig:
         carried_exempt_size_filter=True,
         seed_carry_min_separation=3,
         reflectivity_var="reflectivity",
-        labels_var="cell_labels",
         z_level=Z_LEVEL,
     )
 
@@ -135,7 +133,7 @@ def test_records_method_params_in_attrs(method, ds_2d, grid_ds):
         assert attrs["conv_scale_km"] == 25
 
 
-def test_segmenter_config_accepts_every_method():
-    """All five methods pass the SegmenterConfig Literal validation."""
+def test_detection_options_accept_every_method():
+    """All five methods pass the options' Literal validation."""
     for method in [*PYART_METHODS, "threshold"]:
-        assert SegmenterConfig(method=method).method == method
+        assert DetectionOptions(method=method).method == method

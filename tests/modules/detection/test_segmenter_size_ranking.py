@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.user import UserSegmenterConfig
 from adapt.modules.detection.module import RadarCellSegmenter
 
 pytestmark = pytest.mark.unit
@@ -35,9 +34,7 @@ def _all_convective_two_dome_ds() -> xr.Dataset:
 
 def test_size_ranking_when_every_pixel_is_convective(make_detection_config):
     """Both domes are labelled, nothing is dropped, and the larger one is label 1."""
-    config = make_detection_config(
-        threshold=35.0, segmenter=UserSegmenterConfig(filter_by_size=False)
-    )
+    config = make_detection_config(threshold=35.0, filter_by_size=False)
     labels = RadarCellSegmenter(config).segment(_all_convective_two_dome_ds())["cell_labels"].values
 
     assert int(labels.max()) == 2

@@ -7,42 +7,28 @@ assignment, the heading term, and persisted diagnostics.
 Synthetic inputs with analytically known outcomes; no stored fixtures.
 """
 
-import shutil
-import tempfile
-from pathlib import Path
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.module import CellTracker
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
 
-def _make_config(**overrides):
-    d = tempfile.mkdtemp()
-    try:
-        param = ParamConfig()
-        param.tracker.split_overlap_threshold = 0.4
-        param.tracker.merge_overlap_threshold = 0.4
-        for key, val in overrides.items():
-            # The scan-gap bound is global now — one value shared by the seed
-            # carry, projection and tracking — so it no longer lives on tracker.
-            if key == "max_tracking_gap_minutes":
-                param.global_.max_scan_gap_minutes = val
-            else:
-                setattr(param.tracker, key, val)
-        user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user)
-        return TrackingModule.build_config(internal)
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
+def _make_config(max_tracking_gap_minutes=SHARED.max_scan_gap_minutes, **options):
+    """Tracking's config with both lineage thresholds loose (0.4), then ``options``
+    (``params.tracking``). The scan-gap bound is the run's shared value — one for
+    the seed carry, projection and tracking — so it is not a tracking option."""
+    options = {"split_overlap_threshold": 0.4, "merge_overlap_threshold": 0.4, **options}
+    shared = replace(SHARED, max_scan_gap_minutes=max_tracking_gap_minutes)
+    return TrackingModule.configure(TrackingOptions(**options), shared)
 
 
 def _synthetic_ds(time, labels, refl=None, proj_labels=None):

@@ -1,64 +1,47 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""format_methods: a clean one-line-per-module summary of the chosen methods.
+"""format_methods: the ``methods:`` block of the run header.
 
-Built from the frozen InternalConfig at run start — the method (and a few key
-parameter choices) for each algorithmic module, never the full parameter set.
+The reporter lays out the lines it is handed, one ``(module name, line)`` pair
+per module that names a method; what a line says is the module's own business
+(``BaseModule.method_line``).
 """
 
 import logging
 
 from adapt.runtime.run_reporter import RunReporter, format_methods
 
-_MODULES = ("ingest", "detection", "projection", "analysis", "tracking", "cell_volume_stats")
+_PAIRS = (
+    ("ingest", "regrid cressman · roi dist_beam"),
+    ("detection", "threshold · min_cellsize 5"),
+)
 
 
-def test_one_line_per_algorithmic_module(internal_config):
-    text = format_methods(internal_config, _MODULES)
-    lines = text.splitlines()
-
-    assert lines[0] == "methods:"
-    body = lines[1:]
-    # ingest, detection, projection, tracking carry a method/approach; the purely
-    # parametric modules (analysis, cell_volume_stats) are skipped, not padded.
-    assert len(body) == 4
-    assert all(len(ln.splitlines()) == 1 for ln in body)
+def test_one_line_per_pair_under_the_title():
+    assert format_methods(_PAIRS).splitlines() == [
+        "methods:",
+        "  ingest     regrid cressman · roi dist_beam",
+        "  detection  threshold · min_cellsize 5",
+    ]
 
 
-def test_shows_segmentation_and_projection_methods(internal_config):
-    text = format_methods(internal_config, _MODULES)
+def test_lines_keep_the_order_they_were_given_in():
+    text = format_methods(tuple(reversed(_PAIRS)))
 
-    detection = next(ln for ln in text.splitlines() if ln.strip().startswith("detection"))
-    projection = next(ln for ln in text.splitlines() if ln.strip().startswith("projection"))
-    assert internal_config.segmenter.method in detection
-    assert internal_config.projector.method in projection
+    assert [line.split()[0] for line in text.splitlines()[1:]] == ["detection", "ingest"]
 
 
-def test_shows_key_param_choices_not_full_params(internal_config):
-    text = format_methods(internal_config, _MODULES)
-
-    # a few curated choices are welcome...
-    assert f"horizon {internal_config.projector.projection_horizon_minutes}min" in text
-    # ...but never the full per-method parameter dump
-    assert "zr_a" not in text
-    assert "conv_wt_threshold" not in text
+def test_a_name_longer_than_the_column_keeps_its_line():
+    # The name column is 11 wide; a longer name is never cut.
+    assert format_methods((("cell_volume_stats", "x"),)) == "methods:\n  cell_volume_statsx"
 
 
-def test_respects_enabled_modules(internal_config):
-    text = format_methods(internal_config, ("detection",))
-    body = text.splitlines()[1:]
-
-    assert len(body) == 1
-    assert body[0].strip().startswith("detection")
-    assert "projection" not in text and "tracking" not in text
+def test_no_pairs_yields_empty_string():
+    assert format_methods(()) == ""
 
 
-def test_no_algorithmic_modules_yields_empty_string(internal_config):
-    assert format_methods(internal_config, ("analysis", "cell_volume_stats")) == ""
-
-
-def test_reporter_methods_emits_console_tagged_record(internal_config):
+def _captured_reporter() -> tuple[RunReporter, list[logging.LogRecord]]:
     captured: list[logging.LogRecord] = []
 
     class _Cap(logging.Handler):
@@ -69,8 +52,21 @@ def test_reporter_methods_emits_console_tagged_record(internal_config):
     log.handlers[:] = [_Cap()]
     log.setLevel(logging.DEBUG)
     log.propagate = False
+    return RunReporter(logger=log), captured
 
-    RunReporter(logger=log).methods(internal_config, _MODULES)
+
+def test_reporter_methods_emits_console_tagged_record():
+    reporter, captured = _captured_reporter()
+
+    reporter.methods(_PAIRS)
 
     assert captured[0].console is True
-    assert captured[0].getMessage().startswith("methods:")
+    assert captured[0].getMessage() == format_methods(_PAIRS)
+
+
+def test_reporter_methods_emits_nothing_without_pairs():
+    reporter, captured = _captured_reporter()
+
+    reporter.methods(())
+
+    assert captured == []

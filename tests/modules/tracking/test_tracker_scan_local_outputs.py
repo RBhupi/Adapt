@@ -1,37 +1,29 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.module import CellTracker
+from tests.helpers.shared_config import SHARED
+
+
+def _make_config(split_overlap=0.4):
+    """Tracking's config with the split and the merge threshold both at ``split_overlap``."""
+    options = TrackingOptions(
+        split_overlap_threshold=split_overlap, merge_overlap_threshold=split_overlap
+    )
+    return TrackingModule.configure(options, SHARED)
 
 
 @pytest.fixture
 def config():
-    d = tempfile.mkdtemp()
-    try:
-        import shutil
-
-        param = ParamConfig()
-        # Split and merge are separate thresholds now; this fixture wants both
-        # loose, which is what the single value used to mean.
-        param.tracker.split_overlap_threshold = 0.4
-        param.tracker.merge_overlap_threshold = 0.4
-        user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user)
-        return TrackingModule.build_config(internal)
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
+    # Split and merge are separate thresholds; this fixture wants both loose.
+    return _make_config()
 
 
 @pytest.fixture
@@ -261,21 +253,6 @@ def test_merge_keeps_the_absorbed_track_latent(tracker):
 # ---------------------------------------------------------------------------
 # geometry-first cost
 # ---------------------------------------------------------------------------
-
-
-def _make_config(split_overlap=0.4):
-    import shutil
-
-    d = tempfile.mkdtemp()
-    try:
-        param = ParamConfig()
-        param.tracker.split_overlap_threshold = split_overlap
-        param.tracker.merge_overlap_threshold = split_overlap
-        user = UserConfig(base_dir=str(Path(d)), radar="TEST_RADAR")
-        internal = resolve_config(param, user)
-        return TrackingModule.build_config(internal)
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
 
 
 def test_prediction_residual_raises_continue_cost():

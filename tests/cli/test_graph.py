@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 RADAR = [*MODULES, "target_selection", "radar_command"]
 # Detection carries seeds between scans along projection's flow; without projection it is off.
-NO_CARRY = {"segmenter": {"seed_carry_frames": 0}}
+NO_CARRY = {"detection": {"seed_carry_frames": 0}}
 
 
 @pytest.fixture

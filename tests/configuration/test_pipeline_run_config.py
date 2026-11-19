@@ -4,23 +4,28 @@
 """``run_config``: a pipeline file becomes the run's InternalConfig.
 
 ``run:`` maps onto the source and downloader settings, ``modules`` is the run's
-module list, ``params:`` sections merge over the defaults and module-owned
+module list, ``params:`` sections are laid over their defaults and module-owned
 params route to ``module_params``, defaults filled in. The file's
 name, path and content are recorded with the run. A ``--run-id`` naming a stored
 run reloads that run's recorded config; anything else is a new run. The file's
 folder is the store root.
 """
 
+import json
 import shutil
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
+from adapt import __version__
 from adapt.configuration.pipeline_file import PipelineFile
 from adapt.configuration.pipeline_run import run_config
 from adapt.configuration.schemas.errors import ConfigError
-from adapt.configuration.schemas.param import ParamConfig
+from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
 from adapt.persistence.errors import StoreError
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
@@ -110,6 +115,14 @@ class TestRunSection:
         assert config.source_dir == str(tmp_path)
 
 
+class TestRecordedConfig:
+    @pytest.mark.parametrize("key", ["visualization", "output", "processor", "output_dirs"])
+    def test_a_section_nothing_reads_is_not_recorded(self, path, key):
+        recorded = json.loads(run_config(_pipeline(), path).model_dump_json())
+
+        assert key not in recorded
+
+
 class TestModules:
     def test_the_runs_modules_are_the_files_in_file_order(self, path):
         pipeline = _pipeline(modules=("tracking", *_MODULES[:-2], "cell_volume_stats"))
@@ -121,14 +134,13 @@ class TestModules:
 
 class TestParams:
     def test_section_options_override_their_defaults_only(self, path):
-        params = {"segmenter": {"method": "threshold", "threshold_params": {"threshold": 42.0}}}
+        params = {"logging": {"level": "DEBUG"}}
 
         config = run_config(_pipeline(params=params), path)
 
-        defaults = ParamConfig()
-        assert config.segmenter.threshold_params.threshold == 42.0
-        assert config.segmenter.min_cellsize_gridpoint == defaults.segmenter.min_cellsize_gridpoint
-        assert config.tracker.max_link_cost == defaults.tracker.max_link_cost
+        assert config.logging.level == "DEBUG"
+        assert config.logging.console_level == "WARNING"
+        assert config.global_.max_scan_gap_minutes == 10.0
 
     def test_global_section_is_merged(self, path):
         config = run_config(_pipeline(params={"global": {"z_level": 3000}}), path)
@@ -165,15 +177,17 @@ class TestParams:
 
         config = run_config(pipeline, path)
 
-        cvs = registry.get("cell_volume_stats").default_params()
         assert config.module_params["cell_volume_stats"] == {
-            **cvs,
-            "thresholds": list(cvs["thresholds"]),  # recorded as JSON
+            "zdr_var": "differential_reflectivity",
+            "kdp_var": "specific_differential_phase",
+            "rhohv_var": "cross_correlation_ratio",
+            "thresholds": [10.0, 20.0, 30.0, 40.0, 50.0],  # recorded as JSON
             "gap_tolerance_m": 250.0,
+            "structure_threshold": 30.0,
         }
         assert config.module_params["xlma_stat"] == {
-            **registry.get("xlma_stat").default_params(),
             "input_dir": str(tmp_path),
+            "search_radius_m": 500.0,
         }
 
 
@@ -183,7 +197,7 @@ class TestChecks:
     def test_a_module_missing_its_input_names_the_module_to_list(self, path):
         pipeline = _pipeline(
             modules=("ingest", "detection", "analysis", "tracking"),
-            params={"segmenter": {"seed_carry_frames": 0}},
+            params={"detection": {"seed_carry_frames": 0}},
         )
 
         with pytest.raises(ConfigError) as exc:
@@ -194,15 +208,18 @@ class TestChecks:
         assert "'analysis'" in message
         assert "list 'projection' too" in message
 
-    def test_a_module_refusing_its_options_fails_the_file(self, path):
-        # Seed carry advects projection's labels, so detection refuses it without them.
+    def test_a_module_missing_an_earlier_scan_output_names_the_module_to_list(self, path):
+        # By default detection carries seeds along projection's labels of the scan before.
         pipeline = _pipeline(modules=("ingest", "detection"))
 
         with pytest.raises(ConfigError) as exc:
             run_config(pipeline, path)
 
-        assert str(path) in str(exc.value)
-        assert "seed_carry_frames" in str(exc.value)
+        message = str(exc.value)
+        assert str(path) in message
+        assert "Module 'detection' reads output 'projected_ds' of earlier scans" in message
+        assert "list 'projection' under modules:" in message
+        assert "(adapt config --show detection)" in message
 
     def test_a_module_option_of_the_wrong_type_is_refused(self, path):
         params = {"cell_volume_stats": {"gap_tolerance_m": "wide"}}
@@ -265,11 +282,10 @@ class TestChecks:
 
         config = run_config(pipeline, path)
 
-        rule = registry.get("target_selection").build_config(config).rules
-        packaged = registry.get("target_selection").default_params()
+        rule = resolve_module_configs(config, ["target_selection"])["target_selection_config"].rules
         assert rule.duration.max_minutes == 15
-        assert rule.switch.allow is packaged["switch"]["allow"]
-        assert len(rule.entry.gates) == len(packaged["entry"]["gates"])
+        assert rule.switch.allow is False  # as packaged
+        assert len(rule.entry.gates) == 6  # as packaged
 
 
 class TestProvenance:
@@ -290,19 +306,56 @@ class TestProvenance:
         assert provenance.content["params"] == params
 
 
-def _record(store_root, config) -> None:
-    """Record ``config``'s run in the store, as the orchestrator does when it starts."""
+def _record(store_root, config, **changed) -> None:
+    """Record ``config``'s run in the store, as the orchestrator does when it starts
+    (``changed``: parts of the record that differ)."""
     registry = StoreRegistry.get_instance(store_root)
     registry.register_collection(config.downloader.radar, source_kind="aws_nexrad")
-    registry.begin_run(
-        RunStart(
-            run_id=config.run_id,
-            collection_id=config.downloader.radar,
-            config_hash="h",
-            config_json=config.model_dump_json(),
-            pipeline_version="0",
-            environment_json="{}",
-        )
+    start = RunStart(
+        run_id=config.run_id,
+        collection_id=config.downloader.radar,
+        config_hash="h",
+        config_json=config.model_dump_json(),
+        pipeline_version="0",
+        environment_json="{}",
+    )
+    registry.begin_run(replace(start, **changed))
+
+
+def _record_of_another_version(store_root, config) -> None:
+    """Record ``config``'s run as Adapt 0.9.1 would have, were its config to hold a
+    section and a downloader option this version does not have; the run has ended."""
+    recorded = json.loads(config.model_dump_json())
+    recorded["retired_section"] = {"depth": 2}
+    recorded["downloader"]["retired_option"] = 1
+    _record(store_root, config, config_json=json.dumps(recorded), pipeline_version="0.9.1")
+    StoreRegistry.get_instance(store_root).finalize_run(
+        config.run_id, "completed", scans_processed=0
+    )
+
+
+def _record_with_a_retired_module_option(store_root, config) -> None:
+    """Record ``config``'s run as a version whose cell_volume_stats had one more
+    option would have; the run has ended."""
+    recorded = json.loads(config.model_dump_json())
+    recorded["module_params"]["cell_volume_stats"]["retired_option"] = 1
+    _record(store_root, config, config_json=json.dumps(recorded))
+    StoreRegistry.get_instance(store_root).finalize_run(
+        config.run_id, "completed", scans_processed=0
+    )
+
+
+def _assert_names_the_unreadable_module_option(message: str) -> None:
+    assert f"run {_RUN_ID}" in message
+    assert "  • params.cell_volume_stats.retired_option — unrecognized option" in message
+
+
+def _assert_names_the_unusable_record(message: str) -> None:
+    assert message == (
+        f"Run {_RUN_ID}: this Adapt version cannot read its recorded config "
+        "(runs.config_json), at: retired_section, downloader.retired_option. The run was "
+        "recorded with pipeline_version 0.9.1. It cannot be resumed or used for a stored-run "
+        "pass (run.source: stored_run) with this version"
     )
 
 
@@ -324,7 +377,7 @@ class TestRunId:
         assert "new run" in capsys.readouterr().out
 
     def test_stored_run_id_reloads_that_runs_recorded_config(self, path, store_root, capsys):
-        params = {"segmenter": {"method": "threshold", "threshold_params": {"threshold": 37.0}}}
+        params = {"detection": {"method": "threshold", "threshold_params": {"threshold": 37.0}}}
         recorded = run_config(_pipeline(params=params), path, run_id=_RUN_ID)
         registry = StoreRegistry.get_instance(store_root)
         registry.register_collection("KBOX", source_kind="aws_nexrad")
@@ -379,6 +432,45 @@ class TestRunId:
         assert "KBOX" in str(exc.value)
         assert "KOTH" in str(exc.value)
 
+    def test_a_run_recorded_with_a_config_this_version_cannot_read_is_not_resumed(
+        self, path, store_root
+    ):
+        _record_of_another_version(store_root, run_config(_pipeline(), path, run_id=_RUN_ID))
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(_pipeline(), path, run_id=_RUN_ID)
+
+        _assert_names_the_unusable_record(str(exc.value))
+
+    def test_a_run_recorded_with_a_module_option_this_version_cannot_read_is_not_resumed(
+        self, path, store_root
+    ):
+        _record_with_a_retired_module_option(
+            store_root, run_config(_pipeline(), path, run_id=_RUN_ID)
+        )
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(_pipeline(), path, run_id=_RUN_ID)
+
+        _assert_names_the_unreadable_module_option(str(exc.value))
+
+    def test_the_refusal_of_such_a_record_does_not_guess_which_version_recorded_it(
+        self, path, store_root
+    ):
+        """The recorded version label may equal this build's: it is told as a fact only."""
+        config = run_config(_pipeline(), path, run_id=_RUN_ID)
+        recorded = json.loads(config.model_dump_json())
+        recorded["global_"]["z_level"] = None  # as JSON records an infinite altitude
+        _record(store_root, config, config_json=json.dumps(recorded), pipeline_version=__version__)
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(_pipeline(), path, run_id=_RUN_ID)
+
+        message = str(exc.value)
+        assert "another" not in message
+        assert f"The run was recorded with pipeline_version {__version__}." in message
+        assert "at: global_.z_level." in message
+
     def test_a_new_run_whose_generated_id_is_taken_is_refused(self, path, store_root, monkeypatch):
         # Ids have minute resolution: a second run started within the same minute.
         class _SameMinute(datetime):
@@ -390,7 +482,7 @@ class TestRunId:
         _record(store_root, run_config(_pipeline(), path))
 
         with pytest.raises(ConfigError) as exc:
-            run_config(_pipeline(params={"tracker": {"max_speed_ms": 30.0}}), path)
+            run_config(_pipeline(params={"tracking": {"max_speed_ms": 30.0}}), path)
 
         message = str(exc.value)
         assert f"A run with id {_RUN_ID} was started this minute" in message
@@ -414,22 +506,59 @@ class TestRunId:
             run_config(_pipeline(), tmp_path / "case.yaml", run_id=_RUN_ID)
 
 
+class _Depth(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    depth: int = 1
+
+
+class _Overwrites(BaseModule):
+    """A module with one option, whose rows a later pass writes over."""
+
+    name = "overwrites_probe"
+    inputs = ["scan_id"]
+    outputs = ["overwrites_probe_out"]
+    options_class = _Depth
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+class _KeepsApart(_Overwrites):
+    """The same, but it keys its rows by its options."""
+
+    name = "keeps_apart_probe"
+    outputs = ["keeps_apart_probe_out"]
+    rows_keyed_by_options = True
+
+
+@pytest.fixture
+def probes():
+    """Two modules outside the catalog, registered for the test."""
+    for cls in (_Overwrites, _KeepsApart):
+        registry.register(cls)
+    yield
+    for cls in (_Overwrites, _KeepsApart):
+        registry.unregister(cls.name)
+
+
 class TestStoredRun:
     """``run.source: stored_run``: the file's modules over a run the store already has."""
 
     _STORED = {"source": "stored_run", "radar": "KBOX", "mode": "historical"}
 
-    def _stored(self, store_root, path, status="completed", **params):
-        recorded = run_config(_pipeline(params=params), path, run_id=_RUN_ID)
-        _record(store_root, recorded)
-        if status != "running":
-            StoreRegistry.get_instance(store_root).finalize_run(_RUN_ID, status, scans_processed=0)
+    def _stored(self, path, modules=_MODULES, **params):
+        """Record run ``_RUN_ID`` of a file with these modules and params in the
+        store ``path`` is in, completed; return its config."""
+        recorded = run_config(_pipeline(modules=modules, params=params), path, run_id=_RUN_ID)
+        _record(path.parent, recorded)
+        StoreRegistry.get_instance(path.parent).finalize_run(
+            _RUN_ID, "completed", scans_processed=0
+        )
         return recorded
 
-    def test_it_runs_the_files_modules_with_the_stored_runs_settings(
-        self, path, store_root, tmp_path
-    ):
-        recorded = self._stored(store_root, path, **{"global": {"z_level": 3000}})
+    def test_it_runs_the_files_modules_with_the_stored_runs_settings(self, path, tmp_path):
+        recorded = self._stored(path, **{"global": {"z_level": 3000}})
         later = _pipeline(
             run=self._STORED,
             modules=("xlma_stat",),
@@ -449,7 +578,7 @@ class TestStoredRun:
     def test_over_a_run_in_a_moved_store_it_writes_where_the_store_now_is(
         self, path, store_root, tmp_path
     ):
-        self._stored(store_root, path)
+        self._stored(path)
         moved = tmp_path / "moved"
         shutil.copytree(store_root, moved)
         later = _pipeline(run=self._STORED, modules=("target_selection",))
@@ -458,14 +587,14 @@ class TestStoredRun:
 
         assert config.base_dir == str(moved)
 
-    def test_it_needs_the_run_named(self, path, store_root):
-        self._stored(store_root, path)
+    def test_it_needs_the_run_named(self, path):
+        self._stored(path)
 
         with pytest.raises(ConfigError, match="--run-id"):
             run_config(_pipeline(run=self._STORED, modules=("target_selection",)), path)
 
-    def test_an_unknown_run_lists_the_radars_runs(self, path, store_root):
-        self._stored(store_root, path)
+    def test_an_unknown_run_lists_the_radars_runs(self, path):
+        self._stored(path)
 
         with pytest.raises(ConfigError) as exc:
             run_config(
@@ -478,28 +607,45 @@ class TestStoredRun:
         assert _RUN_ID in str(exc.value)
 
     def test_a_run_still_running_is_refused(self, path, store_root):
-        self._stored(store_root, path, status="running")
+        _record(store_root, run_config(_pipeline(), path, run_id=_RUN_ID))  # never ended
 
         with pytest.raises(ConfigError, match="still running"):
             run_config(
                 _pipeline(run=self._STORED, modules=("target_selection",)), path, run_id=_RUN_ID
             )
 
-    def test_settings_the_stored_run_was_made_with_cannot_change(self, path, store_root):
-        self._stored(store_root, path)
-        later = _pipeline(
-            run=self._STORED,
-            modules=("target_selection",),
-            params={"tracker": {"max_speed_ms": 30.0}},
-        )
+    def test_a_run_recorded_with_a_config_this_version_cannot_read_is_refused(
+        self, path, store_root
+    ):
+        _record_of_another_version(store_root, run_config(_pipeline(), path, run_id=_RUN_ID))
+        later = _pipeline(run=self._STORED, modules=("target_selection",))
 
-        with pytest.raises(ConfigError, match="params.tracker cannot change over a stored run"):
+        with pytest.raises(ConfigError) as exc:
             run_config(later, path, run_id=_RUN_ID)
 
-    def test_a_module_may_read_what_an_unlisted_module_stored(self, path, store_root):
+        _assert_names_the_unusable_record(str(exc.value))
+
+    @pytest.mark.parametrize(
+        ("section", "options"),
+        [
+            ("global", {"z_level": 3000}),
+            ("downloader", {"poll_interval_sec": 60}),
+            ("logging", {"level": "DEBUG"}),
+        ],
+    )
+    def test_settings_every_module_shares_cannot_change(self, path, section, options):
+        self._stored(path)
+        later = _pipeline(
+            run=self._STORED, modules=("target_selection",), params={section: options}
+        )
+
+        with pytest.raises(ConfigError, match=f"params.{section} cannot change over a stored run"):
+            run_config(later, path, run_id=_RUN_ID)
+
+    def test_a_module_may_read_what_an_unlisted_module_stored(self, path):
         """Over a live source radar_command needs target_selection listed; over a
         stored run it reads the stored selection."""
-        self._stored(store_root, path)
+        self._stored(path)
 
         config = run_config(
             _pipeline(run=self._STORED, modules=("radar_command",)), path, run_id=_RUN_ID
@@ -507,8 +653,8 @@ class TestStoredRun:
 
         assert config.modules == ["radar_command"]
 
-    def test_radar_command_never_sends_over_a_stored_run(self, path, store_root, monkeypatch):
-        self._stored(store_root, path)
+    def test_radar_command_never_sends_over_a_stored_run(self, path, monkeypatch):
+        self._stored(path)
         for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
             monkeypatch.delenv(variable, raising=False)  # not needed: nothing is sent
         later = _pipeline(
@@ -519,4 +665,178 @@ class TestStoredRun:
 
         config = run_config(later, path, run_id=_RUN_ID)
 
-        assert registry.get("radar_command").build_config(config).api is None
+        configs = resolve_module_configs(config, ["radar_command"])
+        assert configs["radar_command_config"].api is None
+
+    def test_a_listed_modules_options_are_its_defaults_then_the_files_not_the_stored_runs(
+        self, path, store_root, monkeypatch
+    ):
+        """What the stored run recorded for a module the pass lists is replaced whole."""
+        export_api(monkeypatch)
+        sending = {"api": API, "planning": {"horizon_minutes": 6}}
+        recorded = run_config(
+            _pipeline(
+                modules=(*_MODULES, "target_selection", "radar_command"),
+                params={"radar_command": sending},
+            ),
+            path,
+            run_id=_RUN_ID,
+        )
+        _record(store_root, recorded)
+        StoreRegistry.get_instance(store_root).finalize_run(_RUN_ID, "completed", scans_processed=0)
+        later = _pipeline(run=self._STORED, modules=("radar_command",))
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert recorded.module_params["radar_command"]["api"] == API
+        assert config.module_params["radar_command"]["api"] is None
+        assert config.module_params["radar_command"]["planning"]["horizon_minutes"] == 12
+        assert (
+            config.module_params["target_selection"] == recorded.module_params["target_selection"]
+        )
+
+    @pytest.mark.parametrize(
+        ("module", "ran_with", "given", "differing"),
+        [
+            pytest.param(
+                "cell_volume_stats",
+                {"gap_tolerance_m": 250.0},
+                {},
+                ["params.cell_volume_stats.gap_tolerance_m — recorded: 250.0; this file: 500.0"],
+                id="the file leaves an option at its default",
+            ),
+            pytest.param(
+                "cell_volume_stats",
+                {},
+                {"thresholds": [30, 45.5], "structure_threshold": 35},
+                [
+                    "params.cell_volume_stats.thresholds — recorded: "
+                    "[10.0, 20.0, 30.0, 40.0, 50.0]; this file: [30.0, 45.5]",
+                    "params.cell_volume_stats.structure_threshold — recorded: 30.0; "
+                    "this file: 35.0",
+                ],
+                id="the file changes two options",
+            ),
+            pytest.param(
+                "xlma_stat",
+                {"search_radius_m": 750.0},
+                {},
+                ["params.xlma_stat.search_radius_m — recorded: 750.0; this file: 500.0"],
+                id="another module",
+            ),
+        ],
+    )
+    def test_a_module_the_stored_run_ran_with_other_options_is_refused(
+        self, path, tmp_path, module, ran_with, given, differing
+    ):
+        """Its rows would be written over in part: rows of both options, mixed."""
+
+        def params(options: dict) -> dict:
+            both = {"xlma_stat": {"input_dir": str(tmp_path)}}  # the same folder then and now
+            return {**both, module: {**both.get(module, {}), **options}}
+
+        self._stored(path, modules=(*_MODULES, "xlma_stat"), **params(ran_with))
+        later = _pipeline(
+            run=self._STORED, modules=("cell_volume_stats", "xlma_stat"), params=params(given)
+        )
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        first, *options, last = str(exc.value).splitlines()
+        assert first == (
+            f"Pipeline file {path}: run {_RUN_ID} ran {module} with other options than "
+            "this file gives:"
+        )
+        assert options == [f"  • {line}" for line in differing]
+        assert f"Give {module} the recorded options" in last
+        assert "or start a new run" in last
+
+    def test_a_module_given_the_options_the_stored_run_recorded_runs_over_it_again(
+        self, path, tmp_path
+    ):
+        ran_with = {"xlma_stat": {"input_dir": str(tmp_path), "search_radius_m": 750.0}}
+        recorded = self._stored(path, modules=(*_MODULES, "xlma_stat"), **ran_with)
+        later = _pipeline(run=self._STORED, modules=("xlma_stat",), params=ran_with)
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert config.modules == ["xlma_stat"]
+        assert config.module_params == recorded.module_params
+
+    def test_target_selection_may_run_with_another_rule_than_the_stored_run_recorded(self, path):
+        """Its rows carry the rule's hash in their key: both rules' rows are kept."""
+        self._stored(
+            path,
+            modules=(*_MODULES, "target_selection"),
+            target_selection={"duration": {"max_minutes": 15}},
+        )
+        later = _pipeline(run=self._STORED, modules=("target_selection",))
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert config.module_params["target_selection"]["duration"]["max_minutes"] == 60.0
+
+    def test_a_module_that_keys_its_rows_by_its_options_may_run_with_other_options(
+        self, path, probes
+    ):
+        self._stored(
+            path,
+            modules=(*_MODULES, _KeepsApart.name),
+            **{_KeepsApart.name: {"depth": 2}},
+        )
+        later = _pipeline(run=self._STORED, modules=(_KeepsApart.name,))
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert config.module_params[_KeepsApart.name] == {"depth": 1}
+
+    def test_a_module_that_does_not_say_so_is_refused_other_options(self, path, probes):
+        self._stored(
+            path,
+            modules=(*_MODULES, _Overwrites.name),
+            **{_Overwrites.name: {"depth": 2}},
+        )
+        later = _pipeline(run=self._STORED, modules=(_Overwrites.name,))
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        assert "  • params.overwrites_probe.depth — recorded: 2; this file: 1" in str(exc.value)
+
+    def test_recorded_options_this_version_cannot_read_refuse_a_pass_of_that_module(
+        self, path, store_root
+    ):
+        """Whether the pass gives the module the options it ran with cannot be told."""
+        _record_with_a_retired_module_option(
+            store_root, run_config(_pipeline(), path, run_id=_RUN_ID)
+        )
+        later = _pipeline(run=self._STORED, modules=("cell_volume_stats",))
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        _assert_names_the_unreadable_module_option(str(exc.value))
+
+    def test_the_wrong_options_of_several_listed_modules_are_told_together(self, path, tmp_path):
+        self._stored(path)
+        later = _pipeline(
+            run=self._STORED,
+            modules=("xlma_stat", "target_selection"),
+            params={
+                "xlma_stat": {"input_dir": str(tmp_path), "no_such_option": 1},
+                "target_selection": {"no_such_part": {}},
+            },
+        )
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        first, *told = str(exc.value).splitlines()
+        assert first == f"Invalid configuration (pipeline file {path}):"
+        assert [line.split(" — ")[0] for line in told] == [
+            "  • params.xlma_stat.no_such_option",
+            "  • params.target_selection.no_such_part",
+            "The options of xlma_stat: adapt config --show xlma_stat",
+            "The options of target_selection: adapt config --show target_selection",
+        ]

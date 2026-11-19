@@ -50,7 +50,6 @@ class TestDetectionEdgeCases:
 
     def test_entire_domain_above_threshold_is_one_cell(self, make_detection_config):
         """A single contiguous blob above threshold produces exactly one cell label."""
-        from adapt.configuration.schemas.user import UserSegmenterConfig
         from adapt.modules.detection.module import RadarCellSegmenter
 
         data = np.zeros((8, 8), dtype=np.float32)
@@ -59,7 +58,7 @@ class TestDetectionEdgeCases:
         config = make_detection_config(
             threshold=35,
             min_cellsize_gridpoint=1,
-            segmenter=UserSegmenterConfig(filter_by_size=False),
+            filter_by_size=False,
         )
         result = RadarCellSegmenter(config).segment(ds)
         labels = result["cell_labels"].values

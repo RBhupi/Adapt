@@ -8,6 +8,7 @@ import numpy as np
 from adapt.contracts import (
     CELL_LABELS_VAR,
     DecisionTableWrite,
+    SharedConfig,
     check_grid_ds_2d,
     check_prior_scans,
     check_seed_carry,
@@ -17,7 +18,7 @@ from adapt.contracts import (
 )
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
-from adapt.modules.detection.config import DetectionConfig
+from adapt.modules.detection.config import DetectionConfig, DetectionOptions
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,11 @@ class DetectModule(BaseModule):
     prior_scans : list[dict]
         The previous completed scans' contexts, oldest first, provided by the
         processor (empty on the first scan or after a too-large time gap).
-        With ``segmenter.seed_carry`` on, the last one's ``projected_ds`` (the
-        previous frame's labels advected one flow step forward) and
-        ``seed_carry`` are handed to the segmenter as carried labels.
-    config : InternalConfig
-        Runtime configuration.
+        With ``params.detection.seed_carry_frames`` above 0, the last one's
+        ``projected_ds`` (the previous frame's labels advected one flow step
+        forward) and ``seed_carry`` are handed to the segmenter as carried labels.
+    detection_config : DetectionConfig
+        The module's options and what ``configure`` adds for the run.
 
     Context outputs
     ---------------
@@ -59,9 +60,10 @@ class DetectModule(BaseModule):
 
     name = "detection"
     summary = "segment cells from the grid"
-    param_sections = ("segmenter",)
     required_history = 1
-    # Seed carry: the previous scan's advected labels, carry ages and cell count.
+    options_class = DetectionOptions
+    # Seed carry: the previous scan's advected labels (projection's), carry ages
+    # and cell count. Read only while the carry is on (``prior_inputs_for``).
     prior_inputs = ("projected_ds", "seed_carry", "num_cells")
     inputs = ["grid_ds_2d", "grid_ds", "prior_scans", "detection_config"]
     # detection_decisions: every seed and carried claim this scan and what
@@ -73,38 +75,26 @@ class DetectModule(BaseModule):
         "seed_carry": check_seed_carry,
         "detection_decisions": check_segmentation_decisions,
     }
-    config_class = DetectionConfig
     persistence = (DecisionTableWrite(key="detection_decisions"),)
 
     @classmethod
-    def build_config(cls, cfg) -> DetectionConfig:
-        seg = cfg.segmenter
-        # Checked at startup: at run time "prior scan has no projected_ds" is
-        # also the legitimate state of the second scan, so it cannot be told
-        # apart from a disabled projection module there.
-        projection_enabled = cfg.modules is None or "projection" in cfg.modules
-        if seg.seed_carry_frames > 0 and not projection_enabled:
-            raise ValueError(
-                "segmenter.seed_carry_frames > 0 needs the projection module (its advected "
-                "labels are the seeds carried forward) — list projection under modules: "
-                "or set params: segmenter: {seed_carry_frames: 0}"
-            )
-        method_params = getattr(seg, f"{seg.method}_params").model_dump()
+    def configure(cls, options: DetectionOptions, shared: SharedConfig) -> DetectionConfig:
+        """The options, the selected method's parameters, and the run's field and level."""
         return DetectionConfig(
-            method=seg.method,
-            method_params=method_params,
-            closing_radius=seg.closing_radius,
-            filter_by_size=seg.filter_by_size,
-            min_cellsize_gridpoint=seg.min_cellsize_gridpoint,
-            max_cellsize_gridpoint=seg.max_cellsize_gridpoint,
-            h_maxima=seg.h_maxima,
-            seed_carry_frames=seg.seed_carry_frames,
-            seed_carry_min_separation=seg.seed_carry_min_separation,
-            carried_exempt_size_filter=seg.carried_exempt_size_filter,
-            reflectivity_var=cfg.global_.tracking_field,
-            labels_var=CELL_LABELS_VAR,
-            z_level=cfg.global_.z_level,
+            **options.model_dump(),
+            method_params=getattr(options, f"{options.method}_params").model_dump(),
+            reflectivity_var=shared.tracking_field,
+            z_level=shared.z_level,
         )
+
+    @classmethod
+    def prior_inputs_for(cls, config: DetectionConfig) -> tuple[str, ...]:
+        """The seed-carry inputs, read only while the carry is on."""
+        return cls.prior_inputs if config.seed_carry_frames > 0 else ()
+
+    @classmethod
+    def method_line(cls, config: DetectionConfig) -> str:
+        return f"{config.method} · min_cellsize {config.min_cellsize_gridpoint}"
 
     def __init__(self) -> None:
         self._segmenter: RadarCellSegmenter | None = None
@@ -118,7 +108,7 @@ class DetectModule(BaseModule):
 
         carried = self._carried(context["prior_scans"], config)
         segmented = self._segmenter.segment(ds_2d, context["grid_ds"], carried)
-        labels = segmented[config.labels_var]
+        labels = segmented[CELL_LABELS_VAR]
         num_cells = int(labels.max().item())
         seed_carry = (
             tuple(int(age) for age in np.atleast_1d(labels.attrs["carry_age"]))
@@ -156,7 +146,8 @@ class DetectModule(BaseModule):
         projections = prior["projected_ds"]["cell_projections"]
         require(
             projections.sizes["frame_offset"] >= 2,
-            "seed_carry needs projector.max_projection_steps >= 1 (no one-step-ahead labels)",
+            "seed_carry needs params.projection.max_projection_steps >= 1 "
+            "(no one-step-ahead labels)",
         )
         advected = np.asarray(projections.isel(frame_offset=1).values)
         require(

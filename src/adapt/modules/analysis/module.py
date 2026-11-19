@@ -31,6 +31,7 @@ import xarray as xr
 from scipy.ndimage import center_of_mass
 from skimage.measure import regionprops
 
+from adapt.contracts import CELL_LABELS_VAR
 from adapt.utils.time import normalize_time_scalar
 
 __all__ = ["RadarCellAnalyzer"]
@@ -60,7 +61,7 @@ class RadarCellAnalyzer:
        - Geometric: center-of-mass of binary cell mask
        - Mass-weighted: reflectivity-weighted centroid
        - Max reflectivity: location of highest reflectivity
-       - Projection: forward-projected motion centroids (0-5 steps)
+       - Projection: forward-projected motion centroids (one per step in the dataset)
 
     2. **Area and Size**:
        - Cell area in km2 (computed from grid spacing)
@@ -81,23 +82,21 @@ class RadarCellAnalyzer:
 
     Configuration
     ==============
-    Config dict structure:
+    An ``AnalysisConfig`` (``adapt.modules.analysis.config``):
 
-    - `global` : dict, optional
-        - `tracking_field` : str
-            Canonical field the pipeline detects/tracks on (default: "reflectivity")
+    - `reflectivity_var` : str
+        Canonical field the pipeline detects/tracks on.
 
-    - `radar_variables` : list, optional
-        Whitelist of variables to analyze (default: common radar fields).
+    - `radar_variables` : tuple
+        Whitelist of variables to analyze.
         Only variables in this list AND present in dataset are included.
 
-    - `exclude_fields` : list, optional
+    - `exclude_fields` : tuple
         Variables to skip (metadata, projection, etc.). Takes precedence over
         whitelist.
 
-    - `projector` : dict, optional
-        - `max_projection_steps` : int, default 5
-            Number of forward projections to extract
+    - `adjacency_min_touching_boundary_pixels` : int
+        Touching boundary pixels that make two cells of a scan adjacent.
 
     Notes
     -----
@@ -110,7 +109,8 @@ class RadarCellAnalyzer:
 
     Examples
     --------
-    >>> config = {"radar_variables": ["reflectivity", "velocity"]}
+    >>> from adapt.modules.analysis.config import AnalysisConfig
+    >>> config = AnalysisConfig(reflectivity_var="reflectivity", z_level=2000.0)
     >>> analyzer = RadarCellAnalyzer(config)
     >>> df = analyzer.extract(ds_segmented)
     >>> print(df.columns)  # centroid locations, area, reflectivity stats, etc.
@@ -122,27 +122,19 @@ class RadarCellAnalyzer:
 
         Parameters
         ----------
-        config : InternalConfig
-            Fully validated runtime configuration.
+        config : AnalysisConfig
+            The module's options and what the run adds, validated.
 
         Notes
         -----
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-
-        Examples
-        --------
-        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
-        >>> config = resolve_config(ParamConfig())
-        >>> analyzer = RadarCellAnalyzer(config)
         """
         self.reflectivity_field = config.reflectivity_var
-        self.labels_field = config.labels_var
         self.radar_variables = config.radar_variables
         self.exclude_fields = config.exclude_fields
-        self.max_projection_steps = config.max_projection_steps
-        self._adjacency_min_touching = config.adjacency_min_touching
+        self._adjacency_min_touching = config.adjacency_min_touching_boundary_pixels
 
     def extract(self, ds: xr.Dataset, z_level: int | None = None) -> pd.DataFrame:
         """Extract geometric and statistical properties from all labeled cells.
@@ -217,12 +209,9 @@ class RadarCellAnalyzer:
         >>> print(df[['cell_label', 'cell_area_sqkm', 'radar_reflectivity_mean']])
         >>> df.to_sql('cells', conn, if_exists='append')  # Database storage
         """
-        # Get labels variable name from config
-        labels_name = self.labels_field
-
         # Extract reflectivity (already 2D)
         refl = ds[self.reflectivity_field].values
-        label_array = ds[labels_name].values
+        label_array = ds[CELL_LABELS_VAR].values
         pixel_area_km2 = self._pixel_area_km2(ds)
 
         # Get lat/lon grids
@@ -267,17 +256,16 @@ class RadarCellAnalyzer:
 
         Adjacency definition: two positive labels are adjacent if they touch
         along a shared boundary with at least N touching boundary pixel-edges,
-        where N is config-driven (`analyzer.adjacency_min_touching_boundary_pixels`).
+        where N is `params.analysis.adjacency_min_touching_boundary_pixels`.
         """
-        labels_name = self.labels_field
-        if labels_name not in ds.data_vars:
+        if CELL_LABELS_VAR not in ds.data_vars:
             raise ValueError(
-                f"Missing required labels variable '{labels_name}' for adjacency extraction"
+                f"Missing required labels variable '{CELL_LABELS_VAR}' for adjacency extraction"
             )
         if "time" not in ds.coords:
             raise ValueError("Missing required coordinate 'time' for adjacency extraction")
 
-        labels = ds[labels_name].values
+        labels = ds[CELL_LABELS_VAR].values
         if labels.ndim != 2:
             raise ValueError(
                 f"Expected 2D labels array for adjacency extraction, got shape={labels.shape}"
@@ -552,7 +540,7 @@ class RadarCellAnalyzer:
                     projection_centroids = []
 
                     # Extract centroids for each projection step
-                    for step_idx in range(min(projections.shape[0], self.max_projection_steps + 1)):
+                    for step_idx in range(projections.shape[0]):
                         proj_mask = projections[step_idx] == region.label
                         if np.any(proj_mask):
                             # Use reusable centroid function (already has lat/lon)

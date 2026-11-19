@@ -4,16 +4,19 @@
 """TargetSelectionModule: the run's cells so far -> one scan's ``selection`` row."""
 
 import json
-from types import SimpleNamespace
+from dataclasses import replace
 
 import pandas as pd
 import pytest
+import yaml
 
+from adapt.configuration.schemas.module_resolver import module_options
 from adapt.contracts import check_selection
 from adapt.execution.nodes.target_selection import TargetSelectionModule, TargetSelectionRun
 from adapt.modules.target_selection import TSEConfig, config_hash
 from adapt.utils.time import from_scan_iso
 from tests.helpers.pipeline_files import TARGET_SELECTION
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -105,18 +108,15 @@ def test_only_the_scans_up_to_this_one_count():
 
 
 def test_the_packaged_rule_is_the_default_and_parts_are_laid_over_it():
-    internal = SimpleNamespace(
-        module_params={"target_selection": {"duration": {"max_minutes": 15}}},
-        global_=SimpleNamespace(tracking_field="reflectivity"),
-    )
+    rules = module_options("target_selection", {"duration": {"max_minutes": 15}}, source="a test")
 
-    run = TargetSelectionModule.build_config(internal)
+    run = TargetSelectionModule.configure(rules, replace(SHARED, tracking_field="velocity"))
 
-    packaged = TargetSelectionModule.default_params()
+    packaged = yaml.safe_load(TargetSelectionModule.options_preset())["target_selection"]
     assert run.rules.duration.max_minutes == 15
     assert run.rules.switch.allow is packaged["switch"]["allow"]
-    assert run.tracking_field == "reflectivity"
-    assert "decided at the 2nd observation" in TargetSelectionModule.options_text()
+    assert run.tracking_field == "velocity"
+    assert "decided at the 2nd observation" in TargetSelectionModule.options_preset()
 
 
 def test_decisions_under_different_rules_are_stored_side_by_side():

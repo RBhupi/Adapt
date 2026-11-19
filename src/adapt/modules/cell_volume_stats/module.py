@@ -14,6 +14,8 @@ import warnings
 import numpy as np
 from scipy import ndimage
 
+from adapt.contracts import X_COORD, Y_COORD, Z_COORD
+
 from .config import CellVolumeStatsConfig
 
 
@@ -274,21 +276,20 @@ class CellVolumeStatsAlgorithm:
         order: extra dims (e.g. time) are reduced to their first index and the
         remaining axes are transposed to (z, y, x) — never positional indexing.
         """
-        c = self._c
         da = grid_ds[var]
-        extra = [d for d in da.dims if d not in (c.z_coord, c.y_coord, c.x_coord)]
+        extra = [d for d in da.dims if d not in (Z_COORD, Y_COORD, X_COORD)]
         if extra:
             da = da.isel({d: 0 for d in extra})
-        return da.transpose(c.z_coord, c.y_coord, c.x_coord).values
+        return da.transpose(Z_COORD, Y_COORD, X_COORD).values
 
     def compute_cell(self, grid_ds, cell_labels_2d, cell_label) -> dict:
         c = self._c
         mask_2d = np.asarray(cell_labels_2d) == cell_label
         npixels = int(mask_2d.sum())
-        z = grid_ds[c.z_coord].values
+        z = grid_ds[Z_COORD].values
         dbz_vol = self._zyx(grid_ds, c.reflectivity_var)[:, mask_2d]  # (nz, npixels)
-        dx_m = float(np.diff(grid_ds.coords[c.x_coord].values).mean())
-        dy_m = float(np.diff(grid_ds.coords[c.y_coord].values).mean())
+        dx_m = float(np.diff(grid_ds.coords[X_COORD].values).mean())
+        dy_m = float(np.diff(grid_ds.coords[Y_COORD].values).mean())
 
         row = {"cell_label": int(cell_label)}
         row.update(compute_volume_statistics(dbz_vol, z, npixels, dx_m, dy_m))

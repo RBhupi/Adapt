@@ -2,13 +2,13 @@
 # See LICENSE for terms and disclaimer.
 
 from adapt.contracts import (
-    CELL_LABELS_VAR,
     ProductTableWrite,
+    SharedConfig,
     check_cell_adjacency,
     check_cell_stats,
 )
 from adapt.execution.module_registry import registry
-from adapt.modules.analysis.config import AnalysisConfig
+from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisConfig, AnalysisOptions
 from adapt.modules.analysis.module import RadarCellAnalyzer
 from adapt.modules.base import BaseModule
 
@@ -24,8 +24,8 @@ class AnalysisModule(BaseModule):
     --------------
     projected_ds : xr.Dataset
         2D dataset with projections (output of ProjectionModule).
-    config : InternalConfig
-        Runtime configuration.
+    analysis_config : AnalysisConfig
+        The module's options and what ``configure`` adds for the run.
     scan_time : datetime
         Radar scan timestamp (from LoadModule).
 
@@ -39,14 +39,13 @@ class AnalysisModule(BaseModule):
 
     name = "analysis"
     summary = "2D per-cell statistics"
-    param_sections = ("analyzer",)
+    options_class = AnalysisOptions
     inputs = ["projected_ds", "analysis_config", "scan_time"]
     outputs = ["cell_stats", "cell_adjacency"]
     output_contracts = {
         "cell_stats": check_cell_stats,
         "cell_adjacency": check_cell_adjacency,
     }
-    config_class = AnalysisConfig
     persistence = (
         ProductTableWrite(
             key="cell_stats",
@@ -62,15 +61,30 @@ class AnalysisModule(BaseModule):
     )
 
     @classmethod
-    def build_config(cls, cfg) -> AnalysisConfig:
+    def configure(cls, options: AnalysisOptions, shared: SharedConfig) -> AnalysisConfig:
+        """The options, the run's field and level, and every variable left out.
+
+        The variables left out are the module's own, then the option's entries,
+        each once in that order (the same list on every run).
+
+        Raises
+        ------
+        ValueError
+            The run's tracking field is not among ``radar_variables``: tracking
+            reads its statistics, and would fail on the first scan with cells.
+        """
+        field = shared.tracking_field
+        if field not in options.radar_variables:
+            raise ValueError(
+                f"params.global.tracking_field {field!r} is not in "
+                f"params.analysis.radar_variables {list(options.radar_variables)} — analysis "
+                "would never compute the per-cell statistics tracking needs. Add it to the list."
+            )
+        excluded = tuple(dict.fromkeys((*ALWAYS_EXCLUDED, *options.exclude_fields)))
         return AnalysisConfig(
-            radar_variables=tuple(cfg.analyzer.radar_variables),
-            exclude_fields=tuple(cfg.analyzer.exclude_fields),
-            adjacency_min_touching=cfg.analyzer.adjacency_min_touching_boundary_pixels,
-            max_projection_steps=cfg.projector.max_projection_steps,
-            reflectivity_var=cfg.global_.tracking_field,
-            labels_var=CELL_LABELS_VAR,
-            z_level=cfg.global_.z_level,
+            **{**options.model_dump(), "exclude_fields": excluded},
+            reflectivity_var=field,
+            z_level=shared.z_level,
         )
 
     def __init__(self) -> None:

@@ -111,7 +111,6 @@ class TestScientistCanDetectCells:
         When: segmenter runs.
         Then: exactly two cell labels appear.
         """
-        from adapt.configuration.schemas.user import UserSegmenterConfig
         from adapt.modules.detection.module import RadarCellSegmenter
 
         refl = np.zeros((12, 12), dtype=np.float32)
@@ -120,7 +119,7 @@ class TestScientistCanDetectCells:
         ds = _reflectivity_ds(refl)
         config = make_detection_config(
             threshold=40,
-            segmenter=UserSegmenterConfig(filter_by_size=False),
+            filter_by_size=False,
         )
         result = RadarCellSegmenter(config).segment(ds)
         assert result["cell_labels"].values.max() == 2

@@ -3,8 +3,8 @@
 
 """Tests for resolve_module_configs — the registry-driven config engine.
 
-Iterates registered modules, calls each one's build_config, and returns a dict
-keyed by "<name>_config". Replaces the hardcoded materialize_module_configs.
+Asks each named module for its config (``configure`` of its validated options)
+and returns a dict keyed by "<name>_config".
 """
 
 import pytest
@@ -36,26 +36,36 @@ class TestResolveModuleConfigs:
         ):
             assert key in configs
 
-    def test_detection_method_params_match_internal_config(self, internal_config):
+    def test_detection_is_configured_from_the_runs_module_params(self, make_config):
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-        configs = resolve_module_configs(internal_config, _CORE)
+        options = {"method": "steiner_conv_strat", "steiner_conv_strat_params": {"intense": 45.0}}
+        configs = resolve_module_configs(make_config(params={"detection": options}), _CORE)
+
         detection = configs["detection_config"]
-        seg = internal_config.segmenter
-        assert detection.method == seg.method
-        assert detection.method_params == getattr(seg, f"{seg.method}_params").model_dump()
+        assert detection.method == "steiner_conv_strat"
+        assert detection.method_params == {
+            "intense": 45.0,
+            "peak_relation": "default",
+            "area_relation": "medium",
+            "bkg_rad": 11000.0,
+            "use_intense": True,
+        }
 
-    def test_analysis_cross_reference_to_projector(self, internal_config):
+    def test_analysis_config_does_not_depend_on_projections_options(self, make_config):
+        """Analysis takes the number of projection steps from the data it is given."""
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
 
-        configs = resolve_module_configs(internal_config, _CORE)
-        assert (
-            configs["analysis_config"].max_projection_steps
-            == internal_config.projector.max_projection_steps
+        default = resolve_module_configs(make_config(), _CORE)
+        other = resolve_module_configs(
+            make_config(params={"projection": {"max_projection_steps": 7}}), _CORE
         )
 
+        assert other["projection_config"].max_projection_steps == 7
+        assert other["analysis_config"] == default["analysis_config"]
+
     def test_module_returning_none_contributes_no_key(self, internal_config):
-        """A registered module whose build_config returns None adds no config key."""
+        """A module without options has no config: it adds no config key."""
         from adapt.configuration.schemas.module_resolver import resolve_module_configs
         from adapt.execution.module_registry import registry
         from adapt.modules.base import BaseModule
@@ -84,7 +94,7 @@ class TestResolveModuleConfigs:
             name = "unconfigurable_probe"
 
             @classmethod
-            def build_config(cls, internal_config):
+            def configure(cls, options, shared):
                 raise ValueError("unconfigurable_probe needs params it was not given")
 
             def run(self, context):

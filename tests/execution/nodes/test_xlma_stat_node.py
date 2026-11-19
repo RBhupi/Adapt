@@ -4,10 +4,13 @@
 """XlmaStatModule declarations + config building."""
 
 import pytest
-from pydantic import ValidationError
 
+from adapt.configuration.schemas.errors import ConfigError
+from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.nodes.xlma_stat import XlmaStatModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
+from tests.helpers.pipeline_files import MODULES
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -46,39 +49,41 @@ def test_config_has_no_clustering_or_projection_knobs():
     assert set(XlmaStatConfig.model_fields) == {"input_dir", "search_radius_m"}
 
 
-def test_build_config_reads_module_params(make_config, tmp_path):
+def test_a_run_configs_module_params_reach_the_module(make_config, tmp_path):
     (tmp_path / "flashes.nc").write_bytes(b"")
     cfg = make_config(
-        module_params={"xlma_stat": {"input_dir": str(tmp_path), "search_radius_m": 750.0}}
+        modules=[*MODULES, "xlma_stat"],
+        params={"xlma_stat": {"input_dir": str(tmp_path), "search_radius_m": 750.0}},
     )
-    xlma_cfg = XlmaStatModule.build_config(cfg)
-    assert isinstance(xlma_cfg, XlmaStatConfig)
-    assert xlma_cfg.input_dir == str(tmp_path)
-    assert xlma_cfg.search_radius_m == 750.0
+    xlma_cfg = resolve_module_configs(cfg, ["xlma_stat"])["xlma_stat_config"]
+    assert xlma_cfg == XlmaStatConfig(input_dir=str(tmp_path), search_radius_m=750.0)
 
 
-def test_build_config_without_input_dir_is_refused(make_config):
-    # Building a module's config means it is about to run: no folder, no run.
-    cfg = make_config(module_params={"xlma_stat": {}})
+def test_configure_without_input_dir_is_refused():
+    # Configuring a module means it is about to run: no folder, no run.
     with pytest.raises(ValueError, match=r"params: xlma_stat: \{input_dir"):
-        XlmaStatModule.build_config(cfg)
+        XlmaStatModule.configure(XlmaStatConfig(), SHARED)
 
 
-def test_build_config_with_a_missing_folder_is_refused(make_config, tmp_path):
-    cfg = make_config(module_params={"xlma_stat": {"input_dir": str(tmp_path / "absent")}})
+def test_configure_with_a_missing_folder_is_refused(tmp_path):
     with pytest.raises(ValueError, match="absent"):
-        XlmaStatModule.build_config(cfg)
+        XlmaStatModule.configure(XlmaStatConfig(input_dir=str(tmp_path / "absent")), SHARED)
 
 
-def test_build_config_rejects_a_mistyped_param(make_config):
-    cfg = make_config(module_params={"xlma_stat": {"search_radius": 750.0}})
-    with pytest.raises(ValidationError, match=r"search_radius\s+Extra inputs"):
-        XlmaStatModule.build_config(cfg)
+def test_a_mistyped_param_is_refused_when_the_run_is_configured(make_config):
+    with pytest.raises(ConfigError, match=r"params\.xlma_stat\.search_radius — unrecognized"):
+        make_config(modules=[*MODULES, "xlma_stat"], params={"xlma_stat": {"search_radius": 750.0}})
 
 
-def test_build_config_with_a_folder_holding_no_netcdf_is_refused(make_config, tmp_path):
+def test_configure_with_a_folder_holding_no_netcdf_is_refused(tmp_path):
     (tmp_path / "LYLOUT_240617_180000_0600.dat").write_text("raw ascii")
-    cfg = make_config(module_params={"xlma_stat": {"input_dir": str(tmp_path)}})
 
     with pytest.raises(ValueError, match=r"\*\.nc"):
-        XlmaStatModule.build_config(cfg)
+        XlmaStatModule.configure(XlmaStatConfig(input_dir=str(tmp_path)), SHARED)
+
+
+def test_configure_returns_the_options_of_a_folder_with_flash_sorted_files(tmp_path):
+    (tmp_path / "flashes.nc").write_bytes(b"")
+    options = XlmaStatConfig(input_dir=str(tmp_path))
+
+    assert XlmaStatModule.configure(options, SHARED) == options

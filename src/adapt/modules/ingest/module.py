@@ -48,21 +48,15 @@ class RadarDataLoader:
 
     Configuration
     =============
-    Expects config dict with two sub-dicts:
+    Takes an ``IngestConfig`` (``adapt.modules.ingest.config``): the options a
+    pipeline file sets under ``params: {ingest: ...}``, each described, with its
+    default and choices, on ``IngestOptions``:
 
-    - `reader` : dict
-        - `file_format` : str, file type (default: "nexrad_archive")
-
-    - `regridder` : dict
-        - `grid_shape` : tuple, (nz, ny, nx) vertical/horizontal grid points
-          (default: (41, 201, 201))
-        - `grid_limits` : tuple, ((z_min, z_max), (y_min, y_max), (x_min, x_max))
-          in meters from radar center (default: ((0, 20000), (-100000, 100000), (-100000, 100000)))
-        - `roi_func` : str, influence radius function (default: "dist_beam" - distance
-          from radar ray). Other options: "constant_distance", "dist"
-        - `min_radius` : float, minimum radius for influence (meters, default: 1750)
-        - `weighting_function` : str, interpolation weighting (default: "cressman")
-          Other options: "linear", "nearest", "barnes"
+    - `file_format`, `field_map`, `fields` : how a file is read, and which of
+      its variables are kept under which canonical names
+    - `grid_shape`, `grid_limits` : the Cartesian grid, (nz, ny, nx) points over
+      ((z_min, z_max), (y_min, y_max), (x_min, x_max)) in meters from the radar
+    - `roi_func`, `min_radius`, `weighting_function` : how Py-ART fills it
 
     Notes
     -----
@@ -74,10 +68,8 @@ class RadarDataLoader:
 
     Examples
     --------
-    >>> config = {
-    ...     "reader": {"file_format": "nexrad_archive"},
-    ...     "regridder": {"grid_shape": (41, 201, 201), "min_radius": 1750.0}
-    ... }
+    >>> from adapt.modules.ingest.config import IngestConfig
+    >>> config = IngestConfig(grid_shape=(41, 201, 201), min_radius=1750.0, z_level=2000.0)
     >>> loader = RadarDataLoader(config)
     >>> ds = loader.load_and_regrid("20250305_KLOT.gz")
     >>> print(ds.data_vars)  # reflectivity, velocity, etc.
@@ -88,20 +80,14 @@ class RadarDataLoader:
 
         Parameters
         ----------
-        config : InternalConfig
-            Fully validated runtime configuration.
+        config : IngestConfig
+            The module's validated options, as the ingest node configured them.
 
         Notes
         -----
         All parameters are read directly from config - no defaults,
         no .get() calls, no validation. Configuration is already
         complete and validated by Pydantic.
-
-        Examples
-        --------
-        >>> from adapt.configuration.schemas import resolve_config, ParamConfig
-        >>> config = resolve_config(ParamConfig())
-        >>> loader = RadarDataLoader(config)
         """
         self.file_format = config.file_format
         self.field_map = dict(config.field_map)
@@ -218,7 +204,7 @@ class RadarDataLoader:
         >>> print(ds.reflectivity.shape)  # (50, 250, 250)
         """
 
-        # Merge default regridder config with overrides
+        # Merge the configured grid options with overrides
         final_grid_kwargs = {
             "grid_shape": self.grid_shape,
             "grid_limits": self.grid_limits,
@@ -261,10 +247,10 @@ class RadarDataLoader:
                 raise ValueError(
                     f"Ingest field selection failed: canonical field(s) "
                     f"{', '.join(missing)} not present after applying "
-                    f"reader.field_map. Available: "
+                    f"params.ingest.field_map. Available: "
                     f"{sorted(str(v) for v in ds.data_vars)}. Fix "
-                    "reader.field_map / reader.fields in the run "
-                    "configuration."
+                    "params.ingest.field_map / params.ingest.fields in the "
+                    "pipeline file."
                 )
             ds = ds[list(self.fields)]
 

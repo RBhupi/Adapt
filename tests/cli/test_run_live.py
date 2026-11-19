@@ -93,7 +93,7 @@ def _echo():
 
     class _Echo(BaseModule):
         name = ECHO
-        config_class = _EchoConfig
+        options_class = _EchoConfig
         inputs = [f"{ECHO}_config"]
         outputs = ["cli_echo_rows"]
         persistence = (
@@ -103,8 +103,8 @@ def _echo():
         )
 
         @classmethod
-        def build_config(cls, internal_config) -> dict:
-            return _EchoConfig(**internal_config.module_params.get(cls.name, {})).model_dump()
+        def configure(cls, options: _EchoConfig, shared) -> dict:
+            return options.model_dump()
 
         def run(self, context: dict) -> dict:
             return {"cli_echo_rows": pd.DataFrame([context[f"{ECHO}_config"]])}
@@ -497,3 +497,35 @@ def test_radar_command_never_sends_over_a_stored_run(stored, adapt, monkeypatch)
 
     outcomes = _table(stored, "radar_commands")["outcome"].tolist()
     assert outcomes == ["TARGET_UNAVAILABLE", "PUBLISHED", "PUBLISHED"]
+
+
+@pytest.fixture
+def tagged(case, adapt, capsys):
+    """Run ``RUN_ID``: one scan through ``cli_echo`` with the tag "first", completed."""
+    root, _ = case
+    _live(case, modules=[PROBE, ECHO], params={ECHO: {"tag": "first"}})
+    assert adapt("run", "case", "--run-id", RUN_ID) == 0
+    capsys.readouterr()
+    return root
+
+
+def test_a_module_run_again_with_other_options_is_refused_and_its_rows_kept(tagged, adapt, capsys):
+    """``cli_echo``'s rows are keyed by scan alone: the pass would write over them."""
+    write_pipeline(tagged, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "second"}})
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 2
+
+    err = capsys.readouterr().err
+    assert f"run {RUN_ID} ran {ECHO} with other options" in err
+    assert f'  • params.{ECHO}.tag — recorded: "first"; this file: "second"' in err
+    assert "start a new run" in err
+    assert _table(tagged, "cli_echo")["tag"].tolist() == ["first"]
+
+
+def test_a_module_run_again_with_the_recorded_options_writes_the_same_rows(tagged, adapt):
+    before = _table(tagged, "cli_echo").to_json()
+    write_pipeline(tagged, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "first"}})
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert _table(tagged, "cli_echo").to_json() == before

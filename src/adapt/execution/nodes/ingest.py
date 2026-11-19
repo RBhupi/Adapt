@@ -4,10 +4,10 @@
 import numpy as np
 import xarray as _xr
 
-from adapt.contracts import NetcdfArtifact, check_grid_ds_2d
+from adapt.contracts import TIME_COORD, Z_COORD, NetcdfArtifact, SharedConfig, check_grid_ds_2d
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
-from adapt.modules.ingest.config import IngestConfig
+from adapt.modules.ingest.config import IngestConfig, IngestOptions
 from adapt.modules.ingest.module import RadarDataLoader
 
 
@@ -27,8 +27,8 @@ class LoadModule(BaseModule):
         Scan time owned by the source boundary (acquisition parse or replay
         source); seeded into the context by the processor. Never re-derived
         here — a missing value raises instead of substituting a clock.
-    config : InternalConfig
-        Runtime configuration (lazy-initialises the loader on first call).
+    ingest_config : IngestConfig
+        The module's options and what ``configure`` adds for the run.
 
     Context outputs
     ---------------
@@ -40,12 +40,11 @@ class LoadModule(BaseModule):
 
     name = "ingest"
     summary = "read + regrid radar volumes"
-    param_sections = ("reader", "regridder")
+    options_class = IngestOptions
     required_history = 1
     inputs = ["nexrad_file", "ingest_config", "scan_time"]
     outputs = ["grid_ds", "grid_ds_2d"]
     output_contracts = {"grid_ds_2d": check_grid_ds_2d}
-    config_class = IngestConfig
     persistence = (
         NetcdfArtifact(
             key="grid_ds",
@@ -55,21 +54,27 @@ class LoadModule(BaseModule):
     )
 
     @classmethod
-    def build_config(cls, cfg) -> IngestConfig:
-        return IngestConfig(
-            file_format=cfg.reader.file_format,
-            field_map=cfg.reader.field_map,
-            fields=tuple(cfg.reader.fields),
-            grid_shape=cfg.regridder.grid_shape,
-            grid_limits=cfg.regridder.grid_limits,
-            roi_func=cfg.regridder.roi_func,
-            min_radius=cfg.regridder.min_radius,
-            weighting_function=cfg.regridder.weighting_function,
-            radar=cfg.downloader.radar,
-            z_level=cfg.global_.z_level,
-            z_coord=cfg.global_.coord_names.z,
-            time_coord=cfg.global_.coord_names.time,
-        )
+    def configure(cls, options: IngestOptions, shared: SharedConfig) -> IngestConfig:
+        """The options, and the run's analysis level.
+
+        Raises
+        ------
+        ValueError
+            ``fields`` selects variables and leaves out the run's tracking
+            field: the modules after ingest would never see the field they run on.
+        """
+        field = shared.tracking_field
+        if options.fields and field not in options.fields:
+            raise ValueError(
+                f"params.global.tracking_field {field!r} is excluded by "
+                f"params.ingest.fields {list(options.fields)} — the tracked field would "
+                "never survive ingest. Add it to params.ingest.fields or clear the list."
+            )
+        return IngestConfig(**options.model_dump(), z_level=shared.z_level)
+
+    @classmethod
+    def method_line(cls, config: IngestConfig) -> str:
+        return f"regrid {config.weighting_function} · roi {config.roi_func}"
 
     def __init__(self) -> None:
         self._loader: RadarDataLoader | None = None
@@ -92,16 +97,13 @@ class LoadModule(BaseModule):
         if ds is None:
             raise RuntimeError(f"Ingest failed: load_and_regrid returned None for {filepath}")
 
-        z_level = config.z_level
-        z_name = config.z_coord
-        time_name = config.time_coord
-        z_idx = int(np.argmin(np.abs(ds[z_name].values - z_level)))
+        z_idx = int(np.argmin(np.abs(ds[Z_COORD].values - config.z_level)))
 
         ds_2d = _xr.Dataset()
         for var_name in ds.data_vars:
             var = ds[var_name]
-            if time_name in var.dims and z_name in var.dims:
-                ds_2d[var_name] = var.isel({time_name: 0, z_name: z_idx})
+            if TIME_COORD in var.dims and Z_COORD in var.dims:
+                ds_2d[var_name] = var.isel({TIME_COORD: 0, Z_COORD: z_idx})
             else:
                 ds_2d[var_name] = var
         for coord in ds.coords:

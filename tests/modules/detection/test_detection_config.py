@@ -3,7 +3,8 @@
 
 """Tests for DetectionConfig — the detection module's own config schema.
 
-Holds exactly the fields the RadarCellSegmenter consumes. Frozen.
+The module's options, plus the selected method's parameters and the shared
+values the RadarCellSegmenter consumes. Frozen.
 """
 
 import pytest
@@ -26,7 +27,6 @@ def _make() -> DetectionConfig:
         carried_exempt_size_filter=True,
         seed_carry_min_separation=3,
         reflectivity_var="reflectivity",
-        labels_var="cell_labels",
         z_level=2000.0,
     )
 
@@ -41,7 +41,6 @@ class TestDetectionConfig:
         assert cfg.max_cellsize_gridpoint is None
         assert cfg.h_maxima == 3.0
         assert cfg.reflectivity_var == "reflectivity"
-        assert cfg.labels_var == "cell_labels"
         assert cfg.z_level == 2000.0
 
     def test_is_frozen(self):

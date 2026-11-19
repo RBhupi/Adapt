@@ -16,6 +16,7 @@ import time
 
 import pytest
 
+from adapt.api import StoreClient
 from adapt.contracts import ContractViolation
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
@@ -99,7 +100,10 @@ def _config(pipeline_config, source_dir, modules):
             ),
             "modules": modules,
             # Seed carry needs the projection module, which these runs leave out.
-            "segmenter": pipeline_config.segmenter.model_copy(update={"seed_carry_frames": 0}),
+            "module_params": {
+                **pipeline_config.module_params,
+                "detection": {"seed_carry_frames": 0},
+            },
         }
     )
 
@@ -137,6 +141,20 @@ def test_run_record_lists_the_enabled_modules(pipeline_config, gate, tmp_path):
 
     environment = json.loads(_run_row(config)["environment_json"])
     assert environment["enabled_modules"] == [PROBE]
+
+
+def test_the_store_api_reads_the_tracking_field_from_the_run_record(
+    pipeline_config, gate, tmp_path
+):
+    """The record names the shared settings ``global_``, the key the API reads."""
+    gate.set()
+    config = _config(pipeline_config, _scan_dir(tmp_path), [PROBE])
+
+    PipelineOrchestrator(config).start()
+
+    with StoreClient(config.base_dir) as client:
+        assert client.run_tracking_field(config.run_id) == config.global_.tracking_field
+        assert client.run_config(config.run_id)["global_"] == config.global_.model_dump()
 
 
 def test_run_registered_is_set_once_the_running_run_is_recorded(pipeline_config, gate, tmp_path):
@@ -220,7 +238,7 @@ def test_error_after_the_run_is_recorded_finalizes_it_failed(
     gate.set()
     config = _config(pipeline_config, _scan_dir(tmp_path), [PROBE])
 
-    def _boom(self, config, enabled_modules):
+    def _boom(self, lines):
         raise RuntimeError("synthetic header failure")
 
     monkeypatch.setattr(RunReporter, "methods", _boom)

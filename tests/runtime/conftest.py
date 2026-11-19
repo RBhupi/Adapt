@@ -8,14 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from adapt.configuration.schemas.internal import InternalConfig
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.persistence.execution_history import StoreExecutionHistory
-from adapt.persistence.store import Store, init_store
+from adapt.persistence.store import Store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.processor import RadarProcessor
+from tests.helpers.run_configs import new_run_config
 
 
 @pytest.fixture
@@ -23,19 +21,6 @@ def temp_dir():
     d = tempfile.mkdtemp()
     yield Path(d)
     shutil.rmtree(d)
-
-
-@pytest.fixture
-def store_root(temp_dir):
-    """An initialized store root (registry.db + logs/ + collections/).
-
-    The registry connection is released here, before ``temp_dir`` removes the
-    directory: Windows refuses to delete ``registry.db`` while it is open, and
-    the autouse reset in ``tests/conftest.py`` only tears down after ``temp_dir``.
-    """
-    root = init_store(temp_dir / "store")
-    yield root
-    StoreRegistry.close_all()
 
 
 @pytest.fixture
@@ -105,21 +90,10 @@ def make_scan_message(store_env, temp_dir):
 
 @pytest.fixture
 def pipeline_config(store_root) -> InternalConfig:
-    """InternalConfig for pipeline tests; base_dir is an initialized store root."""
-    param = ParamConfig()
-    user = UserConfig(radar="TEST_RADAR", base_dir=str(store_root))
-    config_dict = resolve_config(param, user).model_dump()
-    config_dict["run_id"] = "test-run"
-    # The modules of a plain NEXRAD run; a test of another set says so.
-    config_dict["modules"] = [
-        "ingest",
-        "detection",
-        "projection",
-        "analysis",
-        "tracking",
-        "cell_volume_stats",
-    ]
-    return InternalConfig.model_validate(config_dict)
+    """The config of a new realtime run of radar TEST_RADAR in the store at
+    ``store_root``: the modules of a plain NEXRAD run (a test of another set
+    says so), every setting and option at its default."""
+    return new_run_config(store_root)
 
 
 # made for processor tests

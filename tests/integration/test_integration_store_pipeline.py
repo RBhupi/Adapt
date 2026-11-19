@@ -8,8 +8,8 @@ detection → tracking → enrichment → store) on three consecutive Level-II
 volumes, then proves the store contract end to end: the exact on-disk layout,
 every object cataloged with checksum + lineage back to its raw volume,
 complete-scan semantics, and every dashboard workflow (timeline, rasters,
-hover, tracks, movie with per-frame closes, target selection, volume stats,
-lightning postprocess) through the public StoreClient only.
+hover, tracks, movie with per-frame closes, target selection, volume stats)
+through the public StoreClient only.
 
 Volumes come from ``ADAPT_REALDATA_DIR`` (a directory of ``*_V06`` files) when
 set, else three consecutive volumes are downloaded from the NEXRAD archive.
@@ -25,16 +25,12 @@ import os
 import queue
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from adapt.api.store_client import StoreClient
-from adapt.configuration.schemas.internal import InternalConfig
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
 from adapt.consumers.live._utils import cells_for_scan
+from adapt.downloaders.nexrad import parse_scan_time
 from adapt.persistence.errors import StoreError
 from adapt.persistence.execution_history import StoreExecutionHistory
 from adapt.persistence.store import Store, init_store
@@ -42,6 +38,8 @@ from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.processor import RadarProcessor
 from adapt.runtime.sources import LocalDirectorySource
+from adapt.utils.time import to_scan_iso
+from tests.helpers.run_configs import new_run_config
 
 pytestmark = pytest.mark.integration
 
@@ -95,12 +93,16 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
     with pytest.raises(StoreError, match="already initialized"):
         init_store(root)
 
-    param = ParamConfig()
-    user = UserConfig(radar=radar, base_dir=str(root))
-    config_dict = resolve_config(param, user).model_dump()
     run_id = f"2026AUG13-1731-{radar}"
-    config_dict["run_id"] = run_id
-    config = InternalConfig.model_validate(config_dict)
+    run = {
+        "source": "local_directory",
+        "source_dir": str(volumes[0].parent),
+        "radar": radar,
+        "mode": "historical",
+        "start_time": to_scan_iso(parse_scan_time(volumes[0].name)),
+        "end_time": to_scan_iso(parse_scan_time(volumes[-1].name)),
+    }
+    config = new_run_config(root, run=run, run_id=run_id)
 
     # ── real run through the store composition ───────────────────────────────
     store = Store.open(root)
@@ -120,14 +122,7 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
     history = StoreExecutionHistory(registry)
     acquirer = StoreAcquirer(collection, run_id)
 
-    source = LocalDirectorySource(
-        SimpleNamespace(
-            source_dir=str(volumes[0].parent),
-            downloader=SimpleNamespace(min_file_size=1),
-        ),
-        result_queue=queue.Queue(),
-        acquire=acquirer,
-    )
+    source = LocalDirectorySource(config, result_queue=queue.Queue(), acquire=acquirer)
     source.run()
 
     proc = RadarProcessor(
@@ -150,7 +145,12 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
     # ── exact layout after the run: nothing else ever appears ────────────────
     assert _visible(root) == {"registry.db", "logs", "collections"}
     assert _visible(root / "collections") == {radar}
-    assert _visible(root / "collections" / radar) == {"catalog.db", "products.db", "objects"}
+    assert _visible(root / "collections" / radar) == {
+        "catalog.db",
+        "products.db",
+        "decisions.db",
+        "objects",
+    }
 
     client = StoreClient(root)
     try:
@@ -298,34 +298,6 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
                 raise_errors=True,
                 backdrop_var="reflectivity",
             )
-
-        # ── lightning postprocess over the finished run (after-the-fact) ──────
-        pytest.importorskip("pyproj")
-        from adapt.runtime.postprocessor import PostProcessor
-        from tests.helpers.lma import write_flash_sorted_nc
-
-        registry_2 = StoreRegistry.get_instance(root)
-        store_2 = Store.open(root)
-        collection_2 = store_2.collection(radar)
-        origin = registry_2.get_collection(radar)
-        assert origin["location_lat"] is not None  # recorded from the first grid
-        lma_dir = tmp_path / "lma"
-        lma_dir.mkdir()
-        minute = timeline[-1].scan_time.strftime("%y%m%d_%H%M")
-        write_flash_sorted_nc(
-            lma_dir / f"LYLOUT_{minute}00_0600_map.nc",
-            timeline[-1].scan_time.strftime("%Y-%m-%dT%H:%M:10"),
-            2,
-            lat=origin["location_lat"],
-            lon=origin["location_lon"],
-        )
-        lma_config = config.model_copy(
-            update={"module_params": {"xlma_stat": {"input_dir": str(lma_dir)}}}
-        )
-        PostProcessor(collection_2, registry_2, run_id, lma_config).run(modules=["xlma_stat"])
-        assert "xlma_stat_minutes" in set(client.tables(radar)["table_name"])
-        store_2.close()
-        registry_2.close()
 
         # ── store health + registry lifecycle read-back ───────────────────────
         Store.open(root).validate_collection(radar)

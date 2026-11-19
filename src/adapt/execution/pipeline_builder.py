@@ -94,24 +94,23 @@ def catalog_module_names() -> list[str]:
     return names
 
 
-def resolve_enabled_modules(all_modules: list, modules: list[str] | None = None) -> list:
+def resolve_enabled_modules(all_modules: list, modules: list[str]) -> list:
     """Filter ``all_modules`` to the ``modules`` list, in ``all_modules``' order.
 
-    ``None`` enables every module. Every listed name must be a real module.
+    Every listed name must be a real module.
 
     Parameters
     ----------
     all_modules : list
         All registered module instances (each with ``name``/``inputs``/``outputs``).
-    modules : list[str], optional
+    modules : list[str]
         The run's module list.
     """
     by_name = {m.name: m for m in all_modules}
-    for n in modules or []:
+    for n in modules:
         if n not in by_name:
             raise ValueError(f"Unknown module '{n}' in modules. Available: {', '.join(by_name)}")
-    enabled = set(by_name) if modules is None else set(modules)
-    return [m for m in all_modules if m.name in enabled]
+    return [m for m in all_modules if m.name in modules]
 
 
 def stored_output_keys() -> frozenset[str]:
@@ -131,8 +130,23 @@ def carried_keys(modules: list) -> frozenset[str]:
     return frozenset(key for module in modules for key in module.inputs if key in module.outputs)
 
 
+def _prior_inputs(module: Any, configs: Mapping[str, Any]) -> tuple[str, ...]:
+    """The outputs of earlier scans ``module`` reads: what its options make it
+    read (``prior_inputs_for`` its built config), or what it declares without one."""
+    key = config_key(module.name)
+    if key not in configs:
+        return module.prior_inputs
+    return type(module).prior_inputs_for(configs[key])
+
+
+def prior_keys(modules: list, configs: Mapping[str, Any]) -> frozenset[str]:
+    """The outputs the runtime keeps of each scan for the scans that follow: what
+    the modules read back from earlier scans (``configs`` as for ``scan_graph``)."""
+    return frozenset(key for module in modules for key in _prior_inputs(module, configs))
+
+
 def scan_graph(
-    modules: list, configs: Mapping[str, Any] | None = None, *, stored_run: bool = False
+    modules: list, configs: Mapping[str, Any], *, stored_run: bool = False
 ) -> list[Node]:
     """The one per-scan graph of ``modules``, as the processor runs it.
 
@@ -140,21 +154,26 @@ def scan_graph(
     ``STORE_VIEWS`` and each module's own carried state (``carried_keys``); every
     other input must be another listed module's output.
     Over a stored run (``stored_run``) an input may also be any output a
-    registered module stores: the runtime reads it back, scan by scan. With
-    ``configs`` (each module's built config, by ``config_key``), a module reads
-    what its options make it read (``inputs_for``); without, what it declares.
+    registered module stores: the runtime reads it back, scan by scan. A module
+    with a config in ``configs`` (each module's built config, by ``config_key``)
+    reads what its options make it read (``inputs_for``, ``prior_inputs_for``);
+    one without, what it declares.
+
+    What a module reads of earlier scans (``prior_scans``) must be an output of a
+    listed module, itself included: the runtime keeps it from scan to scan and
+    never reads it back from the store, stored run or not.
 
     Raises
     ------
     ValueError
-        Two modules declare one output key, or an input has no source — naming
-        the module that produces it, when one is registered but not listed.
+        Two modules declare one output key, or an input (of this scan or of
+        earlier scans) has no source — naming the module that produces it, when
+        one is registered but not listed.
     """
-    if configs is not None:
-        for module in modules:
-            key = config_key(module.name)
-            if key in configs:
-                module.inputs = type(module).inputs_for(configs[key])
+    for module in modules:
+        key = config_key(module.name)
+        if key in configs:
+            module.inputs = type(module).inputs_for(configs[key])
     provided = SCAN_SEEDS | STORE_VIEWS | {config_key(m.name) for m in modules}
     provided |= carried_keys(modules)
     if stored_run:
@@ -174,4 +193,16 @@ def scan_graph(
                     f"'{elsewhere[key]}' produces — list '{elsewhere[key]}' too, "
                     f"or remove '{module.name}'"
                 )
+    for module in modules:
+        for key in _prior_inputs(module, configs):
+            if key in produced:
+                continue
+            reads = f"Module '{module.name}' reads output '{key}' of earlier scans"
+            if key not in elsewhere:
+                raise ValueError(f"{reads}, which no registered module produces")
+            raise ValueError(
+                f"{reads}, which module '{elsewhere[key]}' produces — list "
+                f"'{elsewhere[key]}' under modules:, or change {module.name}'s options so "
+                f"it does not read it (adapt config --show {module.name})"
+            )
     return GraphBuilder(modules, provided=provided).build()

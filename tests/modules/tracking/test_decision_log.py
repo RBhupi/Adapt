@@ -66,7 +66,7 @@ def test_perfect_continuation_is_one_assigned_pair_with_its_evidence():
 
 
 def test_overlap_rejection_is_recorded_with_its_numbers(make_tracking_config):
-    tracker = CellTracker(make_tracking_config(tracker={"max_overlap_mismatch": 0.1}))
+    tracker = CellTracker(make_tracking_config(max_overlap_mismatch=0.1))
     tracker.track(*_cells_scan(T0, {1: (0, 4)}), scan_id="scan0")
     proj = np.zeros((8, 8), dtype=np.int32)
     proj[2:4, 0:4] = 1

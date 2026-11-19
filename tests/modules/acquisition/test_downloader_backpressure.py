@@ -11,7 +11,6 @@ from queue import Queue
 
 import pytest
 
-from adapt.configuration.schemas.user import UserDownloaderConfig
 from adapt.modules.acquisition.module import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
@@ -19,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 def _downloader(make_config, q, fake_gateway, fake_aws_conn, scans, high=10, frac=0.3):
     cfg = make_config(
-        downloader=UserDownloaderConfig(max_queue_size=high, queue_resume_fraction=frac)
+        params={"downloader": {"max_queue_size": high, "queue_resume_fraction": frac}}
     )
     return AwsNexradDownloader(
         cfg, result_queue=q, acquire=fake_gateway, conn=fake_aws_conn(scans), sleeper=lambda _: None

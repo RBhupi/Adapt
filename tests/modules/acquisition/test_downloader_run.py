@@ -10,8 +10,11 @@ def test_run_exits_after_historical_complete(fake_scan, fake_aws_conn, fake_gate
     scans = [fake_scan("one")]
 
     config = make_config(
-        start_time="2024-01-01T00:00:00Z",
-        end_time="2024-01-01T01:00:00Z",
+        run={
+            "mode": "historical",
+            "start_time": "2024-01-01T00:00:00Z",
+            "end_time": "2024-01-01T01:00:00Z",
+        }
     )
 
     d = AwsNexradDownloader(

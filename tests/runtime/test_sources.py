@@ -12,16 +12,10 @@ import queue
 
 import pytest
 
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
+from adapt.configuration.schemas.internal import InternalConfig
+from tests.helpers.run_configs import new_run_config
 
 pytestmark = pytest.mark.unit
-
-
-def _config(tmp_path, **user_kw):
-    user = UserConfig(base_dir=str(tmp_path), radar="KLOT", **user_kw)
-    return resolve_config(ParamConfig(), user)
 
 
 class TestSourceRegistry:
@@ -67,14 +61,21 @@ class TestSourceRegistry:
 WINDOW = {"start_time": "2024-01-01T12:00:00Z", "end_time": "2024-01-01T13:00:00Z"}
 
 
-def _local(tmp_path, src_dir, **downloader):
-    return _config(
-        tmp_path,
-        source="local_directory",
-        source_dir=str(src_dir),
-        mode="historical",
-        downloader={**WINDOW, **downloader},
-    )
+@pytest.fixture
+def local(store_root):
+    """Factory: the config of a historical KLOT run that reads a folder, over ``WINDOW``."""
+
+    def _local(src_dir):
+        run = {
+            "source": "local_directory",
+            "radar": "KLOT",
+            "mode": "historical",
+            **WINDOW,
+            "source_dir": str(src_dir),
+        }
+        return new_run_config(store_root, run=run)
+
+    return _local
 
 
 def _folder(tmp_path, *names: str):
@@ -86,13 +87,13 @@ def _folder(tmp_path, *names: str):
 
 
 class TestLocalDirectorySource:
-    def test_queues_files_in_chronological_order(self, tmp_path, store_env):
+    def test_queues_files_in_chronological_order(self, tmp_path, store_env, local):
         from adapt.runtime.sources import LocalDirectorySource
 
         # NEXRAD-style names embed the timestamp; lexical sort == chronological
         src_dir = _folder(tmp_path, "KLOT20240101_120500_V06", "KLOT20240101_120000_V06")
 
-        cfg = _local(tmp_path, src_dir)
+        cfg = local(src_dir)
         q: queue.Queue = queue.Queue()
         src = LocalDirectorySource(config=cfg, result_queue=q, acquire=store_env.acquirer)
         src.run()
@@ -112,14 +113,15 @@ class TestLocalDirectorySource:
         assert src.is_historical_complete() is True
         assert src.get_historical_progress() == (2, 2)
 
-    def test_missing_source_dir_raises(self, tmp_path):
+    def test_missing_source_dir_raises(self, tmp_path, local):
         from adapt.runtime.sources import LocalDirectorySource
 
-        cfg = _config(tmp_path, source="local_directory")  # source_dir is None
+        # No pipeline file gives this (it must name the folder): a hand-made config.
+        cfg = InternalConfig.model_validate({**local(tmp_path).model_dump(), "source_dir": None})
         with pytest.raises(ValueError, match="source_dir"):
             LocalDirectorySource(config=cfg, result_queue=queue.Queue(), acquire=object())
 
-    def test_only_files_in_the_run_window_are_queued(self, tmp_path, store_env):
+    def test_only_files_in_the_run_window_are_queued(self, tmp_path, store_env, local):
         from adapt.runtime.sources import LocalDirectorySource
 
         src_dir = _folder(
@@ -131,7 +133,7 @@ class TestLocalDirectorySource:
         )
         q: queue.Queue = queue.Queue()
         src = LocalDirectorySource(
-            config=_local(tmp_path, src_dir), result_queue=q, acquire=store_env.acquirer
+            config=local(src_dir), result_queue=q, acquire=store_env.acquirer
         )
         src.run()
 
@@ -142,13 +144,13 @@ class TestLocalDirectorySource:
         assert names == ["KLOT20240101_120000_V06", "KLOT20240101_130000_V06"]
         assert src.get_historical_progress() == (2, 2)
 
-    def test_a_hidden_file_is_ignored(self, tmp_path, store_env):
+    def test_a_hidden_file_is_ignored(self, tmp_path, store_env, local):
         from adapt.runtime.sources import LocalDirectorySource
 
         src_dir = _folder(tmp_path, "KLOT20240101_120000_V06", ".DS_Store")
         q: queue.Queue = queue.Queue()
         src = LocalDirectorySource(
-            config=_local(tmp_path, src_dir), result_queue=q, acquire=store_env.acquirer
+            config=local(src_dir), result_queue=q, acquire=store_env.acquirer
         )
         src.run()
 
@@ -159,7 +161,7 @@ class TestLocalDirectorySource:
         ["KHTX20240101_120000_V06", "notes.txt"],
         ids=["another radar", "no scan time"],
     )
-    def test_a_file_not_named_for_the_radar_is_refused_when_built(self, tmp_path, name):
+    def test_a_file_not_named_for_the_radar_is_refused_when_built(self, tmp_path, local, name):
         from adapt.configuration.schemas.errors import ConfigError
         from adapt.runtime.sources import LocalDirectorySource
 
@@ -167,10 +169,10 @@ class TestLocalDirectorySource:
 
         with pytest.raises(ConfigError, match=name):
             LocalDirectorySource(
-                config=_local(tmp_path, src_dir), result_queue=queue.Queue(), acquire=object()
+                config=local(src_dir), result_queue=queue.Queue(), acquire=object()
             )
 
-    def test_a_folder_with_no_file_in_the_window_is_refused_when_built(self, tmp_path):
+    def test_a_folder_with_no_file_in_the_window_is_refused_when_built(self, tmp_path, local):
         from adapt.configuration.schemas.errors import ConfigError
         from adapt.runtime.sources import LocalDirectorySource
 
@@ -178,21 +180,19 @@ class TestLocalDirectorySource:
 
         with pytest.raises(ConfigError, match="2024-01-01T12:00:00Z"):
             LocalDirectorySource(
-                config=_local(tmp_path, src_dir), result_queue=queue.Queue(), acquire=object()
+                config=local(src_dir), result_queue=queue.Queue(), acquire=object()
             )
 
-    def test_a_folder_that_does_not_exist_is_refused_when_built(self, tmp_path):
+    def test_a_folder_that_does_not_exist_is_refused_when_built(self, tmp_path, local):
         from adapt.configuration.schemas.errors import ConfigError
         from adapt.runtime.sources import LocalDirectorySource
 
         absent = tmp_path / "absent"
 
         with pytest.raises(ConfigError, match=str(absent)):
-            LocalDirectorySource(
-                config=_local(tmp_path, absent), result_queue=queue.Queue(), acquire=object()
-            )
+            LocalDirectorySource(config=local(absent), result_queue=queue.Queue(), acquire=object())
 
-    def test_check_refuses_the_same_folders_without_building_the_source(self, tmp_path):
+    def test_check_refuses_the_same_folders_without_building_the_source(self, tmp_path, local):
         """The cli checks the source before the run starts, through the source class."""
         from adapt.configuration.schemas.errors import ConfigError
         from adapt.runtime.sources import LocalDirectorySource
@@ -200,4 +200,4 @@ class TestLocalDirectorySource:
         src_dir = _folder(tmp_path, "KHTX20240101_120000_V06")
 
         with pytest.raises(ConfigError, match="KHTX20240101_120000_V06"):
-            LocalDirectorySource.check(_local(tmp_path, src_dir))
+            LocalDirectorySource.check(local(src_dir))

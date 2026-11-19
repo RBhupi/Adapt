@@ -24,21 +24,21 @@ def test_loader_with_custom_grid_shape(make_ingest_config):
 
 def test_loader_with_custom_weighting_function(make_ingest_config):
     """Loader respects weighting function config."""
-    config = make_ingest_config(regridder={"weighting_function": "barnes"})
+    config = make_ingest_config(weighting_function="barnes")
     loader = RadarDataLoader(config)
     assert loader.weighting_function == "barnes"
 
 
 def test_loader_with_custom_min_radius(make_ingest_config):
     """Loader respects min_radius config."""
-    config = make_ingest_config(regridder={"min_radius": 2000.0})
+    config = make_ingest_config(min_radius=2000.0)
     loader = RadarDataLoader(config)
     assert loader.min_radius == 2000.0
 
 
 def test_loader_with_custom_roi_func(make_ingest_config):
     """Loader respects roi_func config."""
-    config = make_ingest_config(regridder={"roi_func": "dist"})
+    config = make_ingest_config(roi_func="dist")
     loader = RadarDataLoader(config)
     assert loader.roi_func == "dist"
 

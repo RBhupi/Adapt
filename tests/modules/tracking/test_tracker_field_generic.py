@@ -9,12 +9,17 @@ run needs zero tracker edits — and that a missing stat column fails loudly
 naming the analyzer whitelist.
 """
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
+from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.module import CellTracker
+from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
 
@@ -60,12 +65,14 @@ def _labels():
     return labels
 
 
-def test_tracker_runs_on_a_non_reflectivity_field(make_tracking_config):
-    config = make_tracking_config(
-        **{"global": {"tracking_field": "pressure"}},
-        radar_variables=["pressure"],
-    )
-    tracker = CellTracker(config)
+def _pressure_tracker() -> CellTracker:
+    """A tracker of a run whose tracking field is ``pressure``."""
+    shared = replace(SHARED, tracking_field="pressure")
+    return CellTracker(TrackingModule.configure(TrackingOptions(), shared))
+
+
+def test_tracker_runs_on_a_non_reflectivity_field():
+    tracker = _pressure_tracker()
 
     tracked, _events = tracker.track(
         _scan(_T1, _labels(), "pressure"), _stats(_T1, 1, "pressure"), scan_id=_SCAN1
@@ -77,26 +84,18 @@ def test_tracker_runs_on_a_non_reflectivity_field(make_tracking_config):
     assert tracked.loc[0, "mean_reflectivity"] == 850.0
 
 
-def test_tracker_raises_naming_whitelist_when_stat_columns_missing(make_tracking_config):
-    config = make_tracking_config(
-        **{"global": {"tracking_field": "pressure"}},
-        radar_variables=["pressure"],
-    )
-    tracker = CellTracker(config)
+def test_tracker_raises_naming_whitelist_when_stat_columns_missing():
+    tracker = _pressure_tracker()
     stats_without_pressure = _stats(_T1, 1, "reflectivity")
 
     with pytest.raises(ValueError, match="radar_variables"):
         tracker.track(_scan(_T1, _labels(), "pressure"), stats_without_pressure, scan_id=_SCAN1)
 
 
-def test_empty_scan_needs_no_stat_columns(make_tracking_config):
+def test_empty_scan_needs_no_stat_columns():
     # Zero-cell scans hand the analyzer's empty structural stub to the
     # tracker; the stat-column check must not fire on an empty frame.
-    config = make_tracking_config(
-        **{"global": {"tracking_field": "pressure"}},
-        radar_variables=["pressure"],
-    )
-    tracker = CellTracker(config)
+    tracker = _pressure_tracker()
     empty = pd.DataFrame(
         columns=[
             "cell_label",

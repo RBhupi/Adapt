@@ -98,11 +98,7 @@ def test_fraction_exceeds_one_beyond_one_scan_gap(constant_flow, projection_modu
 
 def test_empty_projection_minute_dimension(constant_flow, make_projection_config):
     """A grid step larger than the horizon window yields an empty projection dim."""
-    from adapt.configuration.schemas.user import UserProjectorConfig
-
-    config = make_projection_config(
-        projector=UserProjectorConfig(registration_step_minutes=5, projection_horizon_minutes=3)
-    )
+    config = make_projection_config(registration_step_minutes=5, projection_horizon_minutes=3)
     out = RadarCellProjector(config).project(_pair("2024-05-18T19:00:00", "2024-05-18T19:01:00"))
 
     assert "projection_minutes" in out
@@ -111,11 +107,7 @@ def test_empty_projection_minute_dimension(constant_flow, make_projection_config
 
 def test_epoch_aligned_forward_grid(constant_flow, make_projection_config):
     """step=2 keeps a stable 2-minute grid (19:08, 19:10, 19:12), not per-scan offsets."""
-    from adapt.configuration.schemas.user import UserProjectorConfig
-
-    config = make_projection_config(
-        projector=UserProjectorConfig(registration_step_minutes=2, projection_horizon_minutes=6)
-    )
+    config = make_projection_config(registration_step_minutes=2, projection_horizon_minutes=6)
     out = RadarCellProjector(config).project(_pair("2024-05-18T19:00:00", "2024-05-18T19:06:00"))
 
     minutes = pd.to_datetime(out["projection_minutes"]["projection_minute"].values)

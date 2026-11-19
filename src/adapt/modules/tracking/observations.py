@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.contracts import stat_column
+from adapt.contracts import CELL_LABELS_VAR, stat_column
 from adapt.modules.tracking.config import TrackingConfig
 from adapt.modules.tracking.latent import LatentTrack
 from adapt.modules.tracking.lineage import identity_score
@@ -111,15 +111,15 @@ def extract_cells(
     ds: xr.Dataset, stats: pd.DataFrame, cfg: TrackingConfig, grid: Grid
 ) -> list[Cell]:
     """Cells of one scan, in label order, with the configured field's stats."""
-    labels = ds[cfg.labels_var].values
+    labels = ds[CELL_LABELS_VAR].values
     field = ds[cfg.field_var].values
     mean_col = stat_column(cfg.field_var, "mean")
     max_col = stat_column(cfg.field_var, "max")
     if not stats.empty and (mean_col not in stats.columns or max_col not in stats.columns):
         raise ValueError(
             f"Tracking: cell_stats is missing {mean_col!r}/{max_col!r} for the configured "
-            f"tracking field {cfg.field_var!r}. The analyzer whitelist "
-            "(analyzer.radar_variables) must include it."
+            f"tracking field {cfg.field_var!r}. The variables analysis computes statistics "
+            "for (params.analysis.radar_variables) must include it."
         )
     by_label = {int(r["cell_label"]): r for _, r in stats.iterrows()}
     cells = []

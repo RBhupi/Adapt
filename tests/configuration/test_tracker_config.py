@@ -1,19 +1,19 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Tracker v2 parameters: defaults, overrides reach the tracker, legacy keys fail loudly."""
+"""Tracker v2 parameters: defaults, overrides reach the tracker, bad values fail loudly."""
 
 import pytest
 
 from adapt.configuration.schemas.errors import ConfigError
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.configuration.schemas.module_resolver import module_options, resolve_module_configs
+from adapt.modules.tracking.config import TrackingOptions
 
 pytestmark = pytest.mark.unit
 
 
 def test_physical_limits_and_rule_defaults():
-    t = ParamConfig().tracker
+    t = TrackingOptions()
     assert (t.max_speed_ms, t.max_acceleration_ms2) == (40.0, 0.04)
     assert (t.growth_max_km, t.growth_size_km) == (2.0, 12.0)
     assert (t.residual_weight, t.heading_weight) == (0.25, 1.0)
@@ -22,7 +22,7 @@ def test_physical_limits_and_rule_defaults():
 
 
 def test_rule_thresholds_are_in_their_valid_ranges():
-    t = ParamConfig().tracker
+    t = TrackingOptions()
     assert 0.0 < t.max_overlap_mismatch <= 1.0
     assert t.max_link_cost > 0.0
     assert 0.0 < t.split_overlap_threshold <= 1.0
@@ -30,32 +30,18 @@ def test_rule_thresholds_are_in_their_valid_ranges():
 
 
 def test_override_reaches_the_tracker(make_config):
-    cfg = TrackingModule.build_config(
-        make_config(tracker={"max_link_cost": 1.5, "latent_scans": 3, "polarity": -1})
-    )
+    given = {"max_link_cost": 1.5, "latent_scans": 3, "polarity": -1}
+    cfg = resolve_module_configs(make_config(params={"tracking": given}), ["tracking"])[
+        "tracking_config"
+    ]
     assert (cfg.max_link_cost, cfg.latent_scans, cfg.polarity) == (1.5, 3, -1)
 
 
-@pytest.mark.parametrize(
-    ("legacy", "replacement"),
-    [
-        ("minimum_candidate_overlap", "max_overlap_mismatch"),
-        ("projected_hull_buffer_km", "growth_max_km"),
-        ("max_speed_multiplier", "max_acceleration_ms2"),
-        ("heading_change_penalty_weight", "heading_weight"),
-        ("length_scale", "residual_weight"),
-    ],
-)
-def test_legacy_key_fails_naming_its_replacement(make_config, legacy, replacement):
-    with pytest.raises(ConfigError, match=replacement):
-        make_config(tracker={legacy: 1.0})
-
-
-def test_polarity_must_be_a_sign(make_config):
+def test_polarity_must_be_a_sign():
     with pytest.raises(ConfigError):
-        make_config(tracker={"polarity": 2})
+        module_options("tracking", {"polarity": 2}, source="a test")
 
 
-def test_negative_latency_is_rejected(make_config):
+def test_negative_latency_is_rejected():
     with pytest.raises(ConfigError):
-        make_config(tracker={"latent_scans": -1})
+        module_options("tracking", {"latent_scans": -1}, source="a test")

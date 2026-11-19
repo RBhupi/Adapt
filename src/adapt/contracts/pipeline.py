@@ -8,6 +8,8 @@ function depends on. This module has zero adapt imports so contracts
 can be imported from anywhere without creating import cycles.
 """
 
+from dataclasses import dataclass
+
 # Keys the processor provides to every per-scan module; not produced by any module.
 # ``wall_time`` is the machine's UTC time as the module that reads it starts: for
 # a module that acts on the outside world (is this scan still fresh enough to
@@ -24,6 +26,20 @@ STORE_VIEWS = frozenset({"cells_so_far", "tracks_so_far"})
 def config_key(module: str) -> str:
     """The context key under which the runtime provides ``module``'s config."""
     return f"{module}_config"
+
+
+@dataclass(frozen=True)
+class SharedConfig:
+    """The values of a run that belong to no single module.
+
+    Every module's ``configure`` is handed them; a module takes what it needs
+    into its own config.
+    """
+
+    tracking_field: str  # the field the run detects, projects and tracks cells on
+    z_level: float  # analysis altitude (m)
+    max_scan_gap_minutes: float  # the largest gap between two scans any stage pairs across
+    source: str  # where the scans come from; "stored_run" over a run the store already has
 
 
 class ContractViolation(RuntimeError):

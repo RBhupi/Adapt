@@ -9,10 +9,9 @@ import pytest
 import xarray as xr
 
 from adapt.configuration.schemas.internal import InternalConfig
-from adapt.configuration.schemas.param import ParamConfig
-from adapt.configuration.schemas.resolve import resolve_config
-from adapt.configuration.schemas.user import UserConfig
+from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.nodes.ingest import LoadModule
+from tests.helpers.run_configs import new_run_config
 
 
 # ---- AwsNexradDownloader fixtures ----
@@ -275,14 +274,12 @@ def temp_dir():
 
 
 @pytest.fixture
-def radar_config(temp_dir) -> InternalConfig:
-    """InternalConfig for radar module tests."""
-    param = ParamConfig()
-    user = UserConfig(base_dir=str(temp_dir), radar="TEST_RADAR")
-    return resolve_config(param, user)
+def radar_config(store_root) -> InternalConfig:
+    """The config of a new run of radar TEST_RADAR, for radar module tests."""
+    return new_run_config(store_root)
 
 
 @pytest.fixture
 def ingest_module_config_from_radar(radar_config):
-    """IngestConfig derived from radar_config."""
-    return LoadModule.build_config(radar_config)
+    """IngestConfig as a run of radar_config configures ingest."""
+    return resolve_module_configs(radar_config, [LoadModule.name])["ingest_config"]

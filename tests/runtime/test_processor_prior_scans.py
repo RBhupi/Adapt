@@ -113,6 +113,40 @@ def test_prior_scans_reaches_back_only_as_far_as_the_modules_need(
     assert third["history"] == 1
 
 
+class _DeepHistoryModule(BaseModule):
+    """Reads three scans back (four frames): deeper than any catalog module."""
+
+    name = "deep_history_probe"
+    outputs = ["deep_history_probe_out"]
+    required_history = 4
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+def test_history_reaches_back_as_far_as_the_most_demanding_module_needs(
+    tmp_path, monkeypatch, make_processor, pipeline_config, store_env
+):
+    """How far the history goes is the modules' need, not a separate setting."""
+    registry.register(_DeepHistoryModule)
+    try:
+        config = pipeline_config.model_copy(update={"modules": ["ingest", "deep_history_probe"]})
+        proc = make_processor(config=config)
+        core = _Recorder({"grid_ds": _fake_ds(), "grid_ds_2d": _fake_ds()})
+        monkeypatch.setattr(proc._executor, "run", core)
+        times = [T1 + timedelta(minutes=5 * i) for i in range(5)]
+
+        for i, scan_time in enumerate(times):
+            proc.process_file(_msg(store_env, tmp_path, f"f{i}", scan_time=scan_time))
+    finally:
+        registry.unregister("deep_history_probe")
+
+    fourth, fifth = core.calls[3], core.calls[4]
+    assert [p["scan_time"] for p in fourth["context"]["prior_scans"]] == times[:3]
+    assert fourth["history"] == 3
+    assert [p["scan_time"] for p in fifth["context"]["prior_scans"]] == times[1:4]
+
+
 def test_single_scan_modules_still_get_the_previous_scan(
     tmp_path, monkeypatch, make_processor, pipeline_config, store_env, caplog
 ):
@@ -154,6 +188,36 @@ def test_history_entries_do_not_retain_prior_scans(
     proc.process_file(_msg(store_env, tmp_path, "f2", scan_time=T2))
 
     assert "prior_scans" not in proc._scan_history[-1]
+
+
+def test_what_is_kept_of_a_scan_is_what_the_modules_options_make_them_read_back(
+    tmp_path, monkeypatch, make_processor, pipeline_config, store_env
+):
+    """With the seed carry off detection reads nothing back, so its carry ages and
+    cell count are not kept (nor saved in the checkpoint); projection still reads
+    the labels."""
+    no_carry = {**pipeline_config.module_params, "detection": {"seed_carry_frames": 0}}
+    proc = make_processor(config=pipeline_config.model_copy(update={"module_params": no_carry}))
+    core = _wire(proc, monkeypatch)
+
+    proc.process_file(_msg(store_env, tmp_path, "f1", scan_time=T1))
+    proc.process_file(_msg(store_env, tmp_path, "f2", scan_time=T2))
+
+    (kept,) = core.calls[1]["context"]["prior_scans"]
+    assert set(kept) == {"segmented_ds", "scan_id", "scan_time"}
+
+
+def test_with_the_seed_carry_on_the_carry_ages_and_cell_count_are_kept_of_a_scan(
+    tmp_path, monkeypatch, make_processor, store_env
+):
+    proc = make_processor()
+    core = _wire(proc, monkeypatch)
+
+    proc.process_file(_msg(store_env, tmp_path, "f1", scan_time=T1))
+    proc.process_file(_msg(store_env, tmp_path, "f2", scan_time=T2))
+
+    (kept,) = core.calls[1]["context"]["prior_scans"]
+    assert set(kept) == {"segmented_ds", "seed_carry", "num_cells", "scan_id", "scan_time"}
 
 
 def test_each_modules_fate_in_a_scan_is_recorded(tmp_path, monkeypatch, make_processor, store_env):
