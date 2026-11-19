@@ -337,7 +337,7 @@ class PipelineOrchestrator:
             maximum_scan_time=max(scan_times) if scan_times else 0.0,
             slowest_stages=slowest,
             module_stats=module_stats,
-            failures=int(m.counter_total("errors_total")),
+            failures=0 if self.processor is None else self.processor.failed_scans,
         )
 
     def _create_source(self):

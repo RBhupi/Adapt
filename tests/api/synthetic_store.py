@@ -28,7 +28,7 @@ from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
-from tests.helpers.tracking_store import going_on, persist_tracking
+from tests.helpers.tracking_store import VIEWS, going_on, persist_tracking
 
 COLLECTION = "KTST"
 RUN_1 = "run-1"
@@ -145,7 +145,7 @@ def build_synthetic_store(tmp_path) -> SimpleNamespace:
         )
 
     _begin(RUN_1)
-    router = StoreOutputRouter(collection)
+    router = StoreOutputRouter(collection, VIEWS)
     acquirer = StoreAcquirer(collection, RUN_1)
 
     raw_dir = tmp_path / "raw"
@@ -218,7 +218,7 @@ def persist_scan(built: SimpleNamespace, index: int, run_id: str, uid: str) -> N
     )
     result = scan_result(index, uid, going_on_events(uid))
     built.lifecycles[run_id] = _persist(
-        collection, StoreOutputRouter(collection), meta, result, built.lifecycles[run_id]
+        collection, StoreOutputRouter(collection, VIEWS), meta, result, built.lifecycles[run_id]
     )
     store.close()
 

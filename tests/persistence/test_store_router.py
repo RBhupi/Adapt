@@ -15,13 +15,20 @@ from adapt.contracts.persistence import (
     NetcdfArtifact,
     PersistenceMeta,
     ProductTableWrite,
+    ProductView,
     ScanRecord,
 )
 from adapt.modules.tracking.tables import Lifecycle
 from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store
-from tests.helpers.tracking_store import TRACKING_TABLES, going_on, no_adjacency, tracking_outputs
+from tests.helpers.tracking_store import (
+    TRACKING_TABLES,
+    VIEWS,
+    going_on,
+    no_adjacency,
+    tracking_outputs,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -117,7 +124,7 @@ def raw_artifact_id(collection):
 
 @pytest.fixture
 def router(collection):
-    return StoreOutputRouter(collection)
+    return StoreOutputRouter(collection, VIEWS)
 
 
 def _products_rows(collection, sql):
@@ -287,7 +294,7 @@ class TestProductTableWrite:
 
 
 class TestProductView:
-    """The tracking module's ``cells_by_scan`` view over its tables and cell_stats."""
+    """The ``cells_by_scan`` view tracking declares: its cells, and every table with their key."""
 
     def test_a_scan_with_cells_is_linked_to_the_view(self, router, collection, raw_artifact_id):
         modules = [_module("analysis", TABLE_SPEC), _module("tracking", *TRACKING_TABLES)]
@@ -307,12 +314,71 @@ class TestProductView:
 
         assert "cells_by_scan" not in collection.catalog.scan_products(RUN, SID)
 
-    def test_cells_without_a_table_the_view_reads_are_refused(
+    def test_cells_without_statistics_are_still_in_the_view(
         self, router, collection, raw_artifact_id
     ):
-        # cell_stats was never written: the view could not be read.
-        with pytest.raises(StoreError, match="cell_stats"):
+        # No module wrote cell_stats: the view has the cells, with what tracking knows.
+        router.persist([_module("tracking", *TRACKING_TABLES)], _tracking_result(), _meta())
+
+        rows = _products_rows(collection, "SELECT * FROM cells_by_scan")
+        assert [row["cell_uid"] for row in rows] == ["u1"]
+        assert "cell_area_sqkm" not in rows[0]
+        assert "cells_by_scan" in collection.catalog.scan_products(RUN, SID)
+
+    def test_a_table_another_module_writes_later_joins_the_view(
+        self, router, collection, raw_artifact_id
+    ):
+        router.persist([_module("tracking", *TRACKING_TABLES)], _tracking_result(), _meta())
+        volume = ProductTableWrite(
+            key="volume_rows", table="cell_volume_stats", primary_key=TABLE_SPEC.primary_key
+        )
+
+        # A writer that persists only that module, as a pass over a stored run does.
+        StoreOutputRouter(collection, VIEWS).persist(
+            [_module("cell_volume_stats", volume)],
+            {"volume_rows": pd.DataFrame({"cell_label": [1], "cell_top_m": [9000.0]})},
+            _meta(),
+        )
+
+        rows = _products_rows(collection, "SELECT * FROM cells_by_scan")
+        assert [(row["cell_uid"], row["cell_top_m"]) for row in rows] == [("u1", 9000.0)]
+
+    def test_cells_without_a_table_the_view_reads_are_refused(self, collection, raw_artifact_id):
+        # The view's computed column reads a table no module ever wrote.
+        view = ProductView(
+            name="cells",
+            rows_from="cell_stats",
+            computed=(("n_events", "(SELECT COUNT(*) FROM cell_events)"),),
+            reads=("cell_events",),
+        )
+        router = StoreOutputRouter(collection, (view,))
+
+        with pytest.raises(StoreError, match="cells.*cell_events"):
+            router.persist(
+                [_module("analysis", TABLE_SPEC, view)],
+                {"cell_stats": pd.DataFrame({"cell_label": [1], "cell_area_sqkm": [10.0]})},
+                _meta(),
+            )
+
+    def test_a_view_the_router_was_not_given_is_refused(self, collection, raw_artifact_id):
+        router = StoreOutputRouter(collection, ())
+
+        with pytest.raises(StoreError, match="cells_by_scan"):
             router.persist([_module("tracking", *TRACKING_TABLES)], _tracking_result(), _meta())
+
+    def test_a_router_rebuilds_a_view_left_by_other_code(self, router, collection, raw_artifact_id):
+        modules = [_module("analysis", TABLE_SPEC), _module("tracking", *TRACKING_TABLES)]
+        router.persist(modules, _tracking_result(), _meta())
+        conn = sqlite3.connect(collection.products_path)
+        conn.execute("DROP VIEW cells_by_scan")
+        conn.execute("CREATE VIEW cells_by_scan AS SELECT cell_uid FROM cell_identity")
+        conn.commit()
+        conn.close()
+
+        StoreOutputRouter(collection, VIEWS)
+
+        rows = _products_rows(collection, "SELECT * FROM cells_by_scan")
+        assert rows[0]["cell_area_sqkm"] == 10.0
 
 
 class TestScanPass:

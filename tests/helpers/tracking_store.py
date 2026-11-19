@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from adapt.contracts.persistence import PersistenceMeta, ScanRecord
+from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView, ScanRecord
 from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.tracking.tables import Lifecycle, scan_tables
@@ -14,8 +14,10 @@ from adapt.persistence.output_router import StoreOutputRouter
 
 # The tracking module's tables and the view over them (not its NetCDF or decisions).
 TRACKING_TABLES = tuple(
-    spec for spec in TrackingModule.persistence if hasattr(spec, "table") or hasattr(spec, "select")
+    spec for spec in TrackingModule.persistence if isinstance(spec, ProductTableWrite | ProductView)
 )
+# The views a collection's writer is given (the pipeline gives the catalog's).
+VIEWS = tuple(spec for spec in TRACKING_TABLES if isinstance(spec, ProductView))
 _TABLES = (
     SimpleNamespace(name="analysis", persistence=AnalysisModule.persistence),
     SimpleNamespace(name="tracking", persistence=TRACKING_TABLES),
@@ -93,7 +95,7 @@ class TrackedScans:
     def __init__(self, collection, run_id: str, lifecycle: Lifecycle | None = None) -> None:
         self._collection = collection
         self._run_id = run_id
-        self._router = StoreOutputRouter(collection)
+        self._router = StoreOutputRouter(collection, VIEWS)
         self._lifecycle = Lifecycle() if lifecycle is None else lifecycle
 
     def write(

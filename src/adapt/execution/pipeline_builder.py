@@ -26,6 +26,7 @@ from adapt.contracts import (
     STORE_VIEWS,
     NetcdfArtifact,
     ProductTableWrite,
+    ProductView,
     config_key,
 )
 from adapt.execution.graph.builder import GraphBuilder
@@ -121,6 +122,18 @@ def stored_output_keys() -> frozenset[str]:
         for name in registry.list_modules()
         for spec in registry.get(name).persistence
         if isinstance(spec, NetcdfArtifact | ProductTableWrite)
+    )
+
+
+def product_views() -> tuple[ProductView, ...]:
+    """The views the registered modules declare. A collection's writer is given
+    all of them: a table joins a view whether or not the run lists the module
+    that declares it."""
+    return tuple(
+        spec
+        for name in registry.list_modules()
+        for spec in registry.get(name).persistence
+        if isinstance(spec, ProductView)
     )
 
 

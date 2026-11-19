@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from adapt.modules.xlma_stat.masks import scan_minute_masks
+from adapt.modules.xlma_stat.masks import scan_cell_labels, scan_minute_masks
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 
 pytestmark = pytest.mark.unit
@@ -106,3 +106,22 @@ def test_a_scan_without_cells_has_no_real_mask():
 
     assert pd.Timestamp("2024-05-18T19:06:00") in minutes  # the advected frame stays
     assert all(m.interpolation_fraction > 0 for m in scan_minute_masks(ds, T_0306))
+
+
+def test_the_scans_own_cells_are_named_by_their_label():
+    ds = make_analysis_ds(
+        "2024-05-18T19:03:00",
+        "2024-05-18T19:00:00",
+        cell_labels=cell_block(col=6),
+        cell_uids=["uid-A", "uid-B"],
+    )
+
+    assert scan_cell_labels(ds) == {"uid-A": 1, "uid-B": 2}
+
+
+def test_a_scan_without_tracked_cells_names_none():
+    ds = make_analysis_ds(
+        "2024-05-18T19:03:00", "2024-05-18T19:00:00", cell_labels=cell_block(col=6), cell_uids=[]
+    ).drop_vars("cell_uid")
+
+    assert scan_cell_labels(ds) == {}

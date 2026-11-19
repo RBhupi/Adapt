@@ -3,6 +3,7 @@
 
 """Unit tests for _timeseries pure helper functions."""
 
+import pandas as pd
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -151,3 +152,54 @@ def test_build_ts_title_empty_group_returns_group_name():
 
     title = build_ts_title("ZDR", {})
     assert title == "ZDR"
+
+
+class TestHasValues:
+    """A variable is drawn for a track only when the track has a value of it."""
+
+    @pytest.fixture
+    def has_values(self):
+        from adapt.consumers.live._timeseries import has_values
+
+        return has_values
+
+    def test_a_variable_with_a_value_is_drawn(self, has_values):
+        track = pd.DataFrame({"cell_top_m": [float("nan"), 9600.0]})
+
+        assert has_values(track, "cell_top_m") is True
+
+    def test_a_variable_without_any_value_is_not_drawn(self, has_values):
+        # The column is there (the view carries it) but no scan of the track has it.
+        track = pd.DataFrame({"cell_top_m": [float("nan"), None]})
+
+        assert has_values(track, "cell_top_m") is False
+
+    def test_a_variable_the_track_does_not_carry_is_not_drawn(self, has_values):
+        track = pd.DataFrame({"cell_area_sqkm": [1.0]})
+
+        assert has_values(track, "cell_top_m") is False
+
+
+class TestNoDataHint:
+    """What an empty plot says: which module to list, when its columns are not there."""
+
+    @pytest.fixture
+    def hint(self):
+        from adapt.consumers.live._timeseries import no_data_hint
+
+        return no_data_hint
+
+    def test_volume_columns_no_module_wrote_name_the_module(self, hint):
+        assert hint(["cell_top_m"], {"cell_area_sqkm"}) == "no data — enable cell_volume_stats"
+
+    def test_volume_columns_without_a_value_are_plain_no_data(self, hint):
+        # The module ran (the cells carry the column); this track has no value of it.
+        assert hint(["cell_top_m"], {"cell_area_sqkm", "cell_top_m"}) == "no data"
+
+    def test_lightning_columns_that_are_not_there_name_the_module(self, hint):
+        assert hint(["flash_count"], {"cell_area_sqkm"}) == (
+            "no data — list xlma_stat under modules:"
+        )
+
+    def test_any_other_variable_is_plain_no_data(self, hint):
+        assert hint(["cell_area_sqkm"], set()) == "no data"

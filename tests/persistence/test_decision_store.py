@@ -183,7 +183,9 @@ def test_router_dispatches_decision_writes_without_a_scan_product(collection):
         name = "tracking"
         persistence = (DecisionTableWrite(key="tracking_decisions"),)
 
-    StoreOutputRouter(collection).persist([_Module()], {"tracking_decisions": _tracking()}, META)
+    StoreOutputRouter(collection, ()).persist(
+        [_Module()], {"tracking_decisions": _tracking()}, META
+    )
     assert len(_rows(collection.decisions_path, "select * from tracking_scans")) == 1
     assert _rows(collection.products_path, "select * from table_schemas") == []
 
@@ -193,7 +195,7 @@ def test_router_skips_when_the_key_is_absent(collection):
         name = "tracking"
         persistence = (DecisionTableWrite(key="tracking_decisions"),)
 
-    StoreOutputRouter(collection).persist([_Module()], {}, META)
+    StoreOutputRouter(collection, ()).persist([_Module()], {}, META)
     assert _rows(collection.decisions_path, "select * from tracking_scans") == []
 
 

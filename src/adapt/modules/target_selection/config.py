@@ -14,7 +14,9 @@ with ``TSEConfig.model_validate``. A rule has five parts, each a section:
 
 ``snapshot`` says which derived per-cell values the gates and weights can use.
 Gates and weights name columns of the per-cell snapshot: every numeric column of
-cells_by_scan and the track summary, plus ``age_seconds``, ``field_max`` (the
+cells_by_scan (the columns of every table keyed by run, scan and cell label:
+analysis's statistics and, when that module is listed, cell_volume_stats') and
+the track summary, plus ``age_seconds``, ``field_max`` (the
 run's tracking field), ``growth_rate_sqkm_per_min``, ``origin_is_split`` and the
 ``trend_<column>_per_min`` columns. Every decision is recorded
 in the ``target_selection`` table. Unknown keys raise; every key is required except

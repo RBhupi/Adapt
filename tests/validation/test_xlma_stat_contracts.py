@@ -29,12 +29,11 @@ _MINUTES_REQUIRED = (
 )
 
 _SCAN_REQUIRED = (
-    "cell_uid",
-    "scan_time",
-    "n_minutes",
-    "n_lightning_minutes",
-    "flash_count",
-    "lightning_source_count",
+    "cell_label",
+    "xlma_n_minutes",
+    "xlma_n_lightning_minutes",
+    "xlma_flash_count",
+    "xlma_lightning_source_count",
 )
 
 
@@ -56,12 +55,11 @@ def _minutes_df() -> pd.DataFrame:
 def _scan_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "cell_uid": ["abc123"],
-            "scan_time": ["2024-01-01T00:03:00Z"],
-            "n_minutes": [3],
-            "n_lightning_minutes": [1],
-            "flash_count": [3],
-            "lightning_source_count": [120],
+            "cell_label": [1],
+            "xlma_n_minutes": [3],
+            "xlma_n_lightning_minutes": [1],
+            "xlma_flash_count": [3],
+            "xlma_lightning_source_count": [120],
         }
     )
 

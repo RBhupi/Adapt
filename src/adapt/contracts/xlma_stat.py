@@ -24,12 +24,11 @@ _MINUTES_REQUIRED = (
 )
 
 _SCAN_REQUIRED = (
-    "cell_uid",
-    "scan_time",
-    "n_minutes",
-    "n_lightning_minutes",
-    "flash_count",
-    "lightning_source_count",
+    "cell_label",
+    "xlma_n_minutes",
+    "xlma_n_lightning_minutes",
+    "xlma_flash_count",
+    "xlma_lightning_source_count",
 )
 
 

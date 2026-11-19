@@ -10,7 +10,11 @@ import pytest
 from adapt.execution.graph.builder import data_edges
 from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
-from adapt.execution.pipeline_builder import _ensure_modules_registered, scan_graph
+from adapt.execution.pipeline_builder import (
+    _ensure_modules_registered,
+    product_views,
+    scan_graph,
+)
 from adapt.modules.base import BaseModule
 
 pytestmark = pytest.mark.unit
@@ -34,6 +38,12 @@ def _live_modules() -> list[BaseModule]:
 def _skipped(history: int) -> set[str]:
     """Names of the modules skipped on a scan with ``history`` usable prior scans."""
     return set(GraphExecutor(scan_graph(_live_modules(), {})).run({}, history=history).skipped)
+
+
+def test_the_views_of_every_catalog_module_are_listed():
+    _ensure_modules_registered()
+
+    assert [view.name for view in product_views()] == ["cells_by_scan"]
 
 
 def test_first_scan_runs_the_modules_that_need_no_earlier_scan():

@@ -9,7 +9,6 @@ masks -> both table frames, attributed to the cell at the radar origin.
 
 from datetime import UTC, datetime
 
-import pandas as pd
 import pytest
 
 from adapt.execution.nodes.xlma_stat import XlmaStatModule
@@ -57,9 +56,54 @@ def test_run_on_flash_sorted_netcdf_produces_both_tables(tmp_path):
     scan = result["xlma_stat_scan_rows"]
     assert (minutes["cell_uid"] == "CELL_A").all()
     assert int(minutes["flash_count"].sum()) == 3
-    assert (scan["cell_uid"] == "CELL_A").all()
-    assert pd.Timestamp(scan.iloc[0]["scan_time"]) == pd.Timestamp("2024-05-18T12:01:30")
-    assert scan.iloc[0]["n_minutes"] == 3
+    assert list(scan["cell_label"]) == [1]  # CELL_A is cell 1 of this scan
+    assert scan.iloc[0]["xlma_flash_count"] == 3
+    assert scan.iloc[0]["xlma_n_minutes"] == 3
+
+
+def test_a_scan_on_the_minute_gives_each_cell_one_row(tmp_path):
+    """The scan at 12:02:00 owns the minutes before it and its own minute. Its time
+    is known to the second, the time its masks were advected to more finely: they
+    are still one scan, and the cell has one row for all of its lightning."""
+    ds = make_analysis_ds(
+        "2024-05-18T12:02:00",
+        "2024-05-18T11:59:00",
+        cell_labels=cell_block(col=9),
+        cell_uids=["CELL_A"],
+        minute_labels={
+            "2024-05-18T12:00:00": cell_block(col=9),
+            "2024-05-18T12:01:00": cell_block(col=9),
+            "2024-05-18T12:02:00": cell_block(col=9),
+        },
+        registration_uids=["CELL_A"],
+    ).assign_attrs(
+        radar_latitude=40.0,
+        radar_longitude=-88.0,
+        registration_target_scan_time="2024-05-18T12:02:00.412000",
+    )
+    write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:01:10", 1)  # a minute before
+    write_flash_sorted_nc(tmp_path / "b.nc", "2024-05-18T12:02:10", 1)  # the scan's own minute
+
+    result = XlmaStatModule().run(
+        _run_context(
+            tmp_path, analysis_ds=ds, scan_time=datetime(2024, 5, 18, 12, 2, 0, tzinfo=UTC)
+        )
+    )
+
+    scan = result["xlma_stat_scan_rows"]
+    assert list(scan["cell_label"]) == [1]
+    assert scan.iloc[0]["xlma_flash_count"] == 2
+    assert scan.iloc[0]["xlma_n_lightning_minutes"] == 2
+    assert scan.iloc[0]["xlma_n_minutes"] == 3
+
+
+def test_the_minutes_a_scan_owns_are_counted_whether_or_not_they_had_lightning(tmp_path):
+    write_flash_sorted_nc(tmp_path / "a.nc", "2024-05-18T12:00:10", 1)  # one of three minutes
+
+    scan = XlmaStatModule().run(_run_context(tmp_path))["xlma_stat_scan_rows"]
+
+    assert scan.iloc[0]["xlma_n_lightning_minutes"] == 1
+    assert scan.iloc[0]["xlma_n_minutes"] == 3
 
 
 def test_non_netcdf_files_are_ignored(tmp_path):

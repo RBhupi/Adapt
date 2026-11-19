@@ -31,18 +31,19 @@ def test_module_consumes_geometry_it_never_computes():
     assert XlmaStatModule.inputs == ["xlma_stat_config", "analysis_ds", "scan_time"]
 
 
-def test_output_tables_are_keyed_by_run_and_time():
-    m = XlmaStatModule()
-    assert m.persistence[0].primary_key == (
-        "run_id",
-        "time",
-        "cell_uid",
-    )
-    assert m.persistence[1].primary_key == (
-        "run_id",
-        "scan_time",
-        "cell_uid",
-    )
+def test_minute_rows_are_keyed_by_cell_uid_and_minute():
+    assert XlmaStatModule.persistence[0].primary_key == ("run_id", "time", "cell_uid")
+
+
+def test_scan_rows_are_keyed_like_every_per_cell_table():
+    """Run, scan and cell label: the key of ``cells_by_scan``, so each cell's
+    lightning is read beside its uid, statistics and volume."""
+    from adapt.execution.nodes.analysis import AnalysisModule
+
+    cell_stats = AnalysisModule.persistence[0]
+
+    assert XlmaStatModule.persistence[1].primary_key == cell_stats.primary_key
+    assert XlmaStatModule.persistence[1].primary_key == ("run_id", "scan_id", "cell_label")
 
 
 def test_config_has_no_clustering_or_projection_knobs():

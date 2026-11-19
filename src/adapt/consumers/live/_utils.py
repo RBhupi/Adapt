@@ -208,11 +208,11 @@ def _visible_uids_in_scan(
     return {uid_map[lbl] for lbl in unique if lbl in uid_map}
 
 
-def require_scan_identity(df, table: str = "cells_by_scan") -> None:
-    """Raise with recreate guidance when a per-scan frame predates scan identity."""
+def require_scan_identity(df) -> None:
+    """Raise with recreate guidance when a ``cells_by_scan`` frame predates scan identity."""
     if "scan_id" not in df.columns:
         raise ValueError(
-            f"{table} carries no scan_id column — the repository predates "
+            "cells_by_scan carries no scan_id column — the repository predates "
             "scan identity. Recreate it (delete and rerun the pipeline)."
         )
 

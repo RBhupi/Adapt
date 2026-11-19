@@ -59,18 +59,22 @@ class ProductTableWrite:
 
 @dataclass(frozen=True)
 class ProductView:
-    """A read-only products.db view over product tables: ``SELECT`` text ``select``.
+    """A read-only products.db view of the tables that share one key.
 
-    The view has a row for every row of table ``rows_from``, so each scan with
-    rows there is linked to the view by name and readers can wait for it like
-    any other product. ``reads`` names the other tables the SELECT uses: all of
-    them must exist by the time ``rows_from`` is first written.
+    The view has a row for every row of the scan-granular table ``rows_from``,
+    and carries the columns of every product table with the same primary key,
+    whichever module wrote it. Each scan with rows in ``rows_from`` is linked to
+    the view by name, so readers can wait for it like any other product.
+
+    ``computed`` adds columns as (name, SQL expression) pairs. An expression may
+    use ``rows_from`` and the declaring module's own tables ``reads``, naming
+    every column with its table; the view exists once all of them do.
     """
 
     name: str
-    select: str
     rows_from: str
-    reads: tuple[str, ...]
+    computed: tuple[tuple[str, str], ...] = ()
+    reads: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

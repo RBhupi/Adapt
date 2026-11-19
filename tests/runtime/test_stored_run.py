@@ -23,6 +23,7 @@ from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc
 from tests.helpers.pipeline_files import MODULES
 from tests.helpers.queue_msg import msg
+from tests.helpers.tracking_store import VIEWS
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -72,7 +73,7 @@ def _moving_cell(scan: int):
 @pytest.fixture
 def stored_run(store_env, tmp_path):
     """Three scans acquired by the run; the last two have their analysis NetCDF."""
-    router = StoreOutputRouter(store_env.collection)
+    router = StoreOutputRouter(store_env.collection, VIEWS)
     messages = [msg(store_env, tmp_path, f"raw-{i}", scan_time=t) for i, t in enumerate(_T)]
     for scan in (1, 2):
         meta = PersistenceMeta(
@@ -129,12 +130,13 @@ def test_a_module_reads_what_it_needs_back_from_the_store(
 
     assert len(scans) == 1
     s = scans[0]
-    assert s["cell_uid"] == "uid-A"
+    assert s["scan_id"] == stored_run[2]["scan_id"]
+    assert s["cell_label"] == 1  # uid-A is cell 1 of the 19:06 scan
     assert s["scan_time"] == "2024-05-18T19:06:00Z"
     assert s["scan_time_unix"] is not None
-    assert s["flash_count"] == 2  # equals the sum of its member minute rows
-    assert s["n_minutes"] == 3  # 19:04, 19:05 advected + 19:06 real mask
-    assert s["n_lightning_minutes"] == 1
+    assert s["xlma_flash_count"] == 2  # equals the sum of its member minute rows
+    assert s["xlma_n_minutes"] == 3  # 19:04, 19:05 advected + 19:06 real mask
+    assert s["xlma_n_lightning_minutes"] == 1
     assert all(r["run_id"] == store_env.run_id for r in [*minutes, *scans])
 
 

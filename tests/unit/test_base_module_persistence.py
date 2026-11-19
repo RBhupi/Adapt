@@ -66,3 +66,21 @@ class TestBaseModulePersistence:
         tables = [s.table for s in TrackingModule.persistence if isinstance(s, ProductTableWrite)]
         assert tables == ["cell_identity", "cell_events", "cell_tracks"]
         assert {type(s) for s in CellVolumeStatsModule.persistence} == {ProductTableWrite}
+
+    def test_the_cell_view_names_only_tracking_tables(self):
+        """Tracking gives the view its rows and three flags; the tables of other
+        modules join it by their key, without tracking naming them."""
+        from adapt.contracts import ProductTableWrite, ProductView
+        from adapt.execution.nodes.tracking import TrackingModule
+
+        (view,) = (s for s in TrackingModule.persistence if isinstance(s, ProductView))
+        own = {s.table for s in TrackingModule.persistence if isinstance(s, ProductTableWrite)}
+
+        assert view.name == "cells_by_scan"
+        assert view.rows_from == "cell_identity"
+        assert {view.rows_from, *view.reads} <= own
+        assert [name for name, _ in view.computed] == [
+            "is_split_source_here",
+            "is_merge_source_here",
+            "is_terminated_after_here",
+        ]

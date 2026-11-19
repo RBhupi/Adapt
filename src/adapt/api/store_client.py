@@ -485,7 +485,11 @@ class StoreClient:
         return self._track_from_row(row)
 
     def cells(self, run_id: str, collection: str) -> pd.DataFrame:
-        """One run's full per-scan cell table, time-ordered; empty before tracking."""
+        """One run's full per-scan cell table, time-ordered; empty before tracking.
+
+        The ``cells_by_scan`` view: one row per tracked cell and scan, with the
+        columns of every product table keyed (run_id, scan_id, cell_label).
+        """
         return self._tracking_frame(
             collection,
             "SELECT * FROM cells_by_scan WHERE run_id = ? ORDER BY scan_time",

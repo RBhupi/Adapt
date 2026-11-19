@@ -13,7 +13,7 @@ import pytest
 from adapt.persistence.errors import StoreError
 from adapt.persistence.products import SchemaLedger
 from adapt.persistence.store import Store, init_store
-from tests.helpers.tracking_store import TrackedScans
+from tests.helpers.tracking_store import VIEWS, TrackedScans
 
 pytestmark = pytest.mark.unit
 
@@ -48,7 +48,7 @@ def collection(tmp_path):
 
 @pytest.fixture
 def ledger(collection):
-    return SchemaLedger(collection.products_path, collection.catalog)
+    return SchemaLedger(collection.products_path, collection.catalog, VIEWS)
 
 
 @pytest.fixture

@@ -38,14 +38,20 @@ class StoreOutputRouter:
     Dispatch: NetcdfArtifact → object named for its run, module and source file
     (rewritten in place when the run writes the scan again) + catalog row +
     lineage to the scan's raw volume + scan-product link; ProductTableWrite →
-    products.db rows (frozen first-frame schema) + table link; ProductView → the
-    view + a link for each scan that has rows in it.
+    products.db rows (frozen first-frame schema) + table link; ProductView → a
+    link for each scan that has rows in it.
+
+    ``views`` are the views of the collection, whichever module declares them:
+    the store keeps each one the join of the tables that now share its key, so
+    a table written by a module that declares none still joins it.
     """
 
-    def __init__(self, collection: Collection) -> None:
+    def __init__(self, collection: Collection, views: Iterable[ProductView]) -> None:
         self._collection = collection
         self._objects = ObjectStore(collection.objects_dir, collection.catalog)
-        self._ledger = SchemaLedger(collection.products_path, collection.catalog)
+        self._views = tuple(views)
+        self._ledger = SchemaLedger(collection.products_path, collection.catalog, self._views)
+        self._ledger.build_views()
 
     def persist(self, modules: Iterable, result: dict, meta: PersistenceMeta) -> None:
         for module in modules:
@@ -156,13 +162,17 @@ class StoreOutputRouter:
         """Link the scan to the view when the table its rows come from was written for it."""
         if spec.rows_from not in self._collection.catalog.scan_products(meta.run_id, meta.scan_id):
             return
+        if spec not in self._views:
+            raise StoreError(
+                f"View '{spec.name}' is not one of the views this collection's writer was "
+                f"given, yet scan '{meta.scan_id}' has '{spec.rows_from}' rows"
+            )
         missing = [t for t in (spec.rows_from, *spec.reads) if self._ledger.frozen(t) is None]
         if missing:
             raise StoreError(
                 f"View '{spec.name}' reads table(s) {', '.join(missing)}, never written in "
                 f"this collection, yet scan '{meta.scan_id}' has '{spec.rows_from}' rows"
             )
-        self._ledger.ensure_view(spec.name, spec.select)
         self._collection.catalog.link_scan_product(
             meta.run_id, meta.scan_id, spec.name, table_name=spec.name
         )

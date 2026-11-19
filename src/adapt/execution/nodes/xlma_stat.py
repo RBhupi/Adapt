@@ -12,9 +12,15 @@ tracking; this node never projects cells, interpolates masks, or estimates
 motion). Two tables result:
 
 - ``xlma_stat_minutes`` — the authoritative association, one row per
-  ``(cell_uid, minute)``, with the mask's scan provenance.
-- ``xlma_stat_scan`` — radar-aligned aggregate, one row per
-  ``(cell_uid, scan)``, derived only from the minute rows.
+  ``(cell_uid, minute)``, with the mask's scan provenance. Every attributed
+  flash is here.
+- ``xlma_stat_scan`` — radar-aligned aggregate of the minutes a scan owns, one
+  row per cell of that scan with lightning, derived only from the minute rows.
+  Its key is the key of every per-cell table (run, scan, cell label), so the
+  ``cells_by_scan`` view carries its ``xlma_*`` columns beside the cell's uid.
+  The minutes before a scan hold the previous scan's cells: lightning of a cell
+  that is no longer in the scan (its track ended or merged away) has no row
+  here and stays in the minute rows.
 
 It runs scan by scan like any module: beside a live run, or later over a stored
 run (``run.source: stored_run``), where it reads each scan's analysis dataset
@@ -35,8 +41,10 @@ from adapt.contracts import (
 )
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
+from adapt.modules.xlma_stat.aggregate import cell_scan_rows
+from adapt.modules.xlma_stat.attribution import UNATTRIBUTED
 from adapt.modules.xlma_stat.config import XlmaStatConfig
-from adapt.modules.xlma_stat.masks import scan_minute_masks
+from adapt.modules.xlma_stat.masks import scan_cell_labels, scan_minute_masks
 from adapt.modules.xlma_stat.module import XlmaStatistics
 from adapt.modules.xlma_stat.reader import read_flash_sorted_frames
 
@@ -66,8 +74,7 @@ class XlmaStatModule(BaseModule):
         ProductTableWrite(
             key="xlma_stat_scan_rows",
             table="xlma_stat_scan",
-            primary_key=("run_id", "scan_time", "cell_uid"),
-            index_columns=("cell_uid", "scan_time"),
+            primary_key=("run_id", "scan_id", "cell_label"),
         ),
     )
 
@@ -103,13 +110,23 @@ class XlmaStatModule(BaseModule):
             float(analysis_ds.attrs["radar_latitude"]),
             float(analysis_ds.attrs["radar_longitude"]),
         )
-        minutes_df, scan_df = XlmaStatistics(config).compute(flashes, sources, masks, radar_origin)
+        minutes_df, by_uid = XlmaStatistics(config).compute(flashes, sources, masks, radar_origin)
+        cells = scan_cell_labels(analysis_ds)
+        scan_df = cell_scan_rows(by_uid, cells)
+        ended = [uid for uid in by_uid["cell_uid"] if uid not in cells and uid != UNATTRIBUTED]
         logger.info(
-            "xlma_stat: %d minute masks -> %d (cell, minute) rows, %d (cell, scan) rows",
+            "xlma_stat: %d minute masks -> %d (cell, minute) rows, %d cell rows of this scan",
             len(masks),
             len(minutes_df),
             len(scan_df),
         )
+        if ended:
+            logger.info(
+                "xlma_stat: %d cell(s) with lightning are no longer in this scan; their "
+                "lightning is in xlma_stat_minutes only: %s",
+                len(ended),
+                ", ".join(ended),
+            )
         return {
             "xlma_stat_minutes_rows": minutes_df,
             "xlma_stat_scan_rows": scan_df,

@@ -123,7 +123,7 @@ class TestRunAndWriteFixC:
         store = Store.open(root)
         coll = store.collection("KTST")
         writer = TableWriter(
-            SchemaLedger(coll.products_path, coll.catalog),
+            SchemaLedger(coll.products_path, coll.catalog, ()),
             CellVolumeStatsModule.persistence[0],
             owner_module="cell_volume_stats",
         )

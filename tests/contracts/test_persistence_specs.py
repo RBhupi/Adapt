@@ -22,6 +22,15 @@ def test_specs_are_frozen_value_types():
     assert ProductTableWrite(key="r", table="t", primary_key=("run_id",)).index_columns == ()
 
 
+def test_a_view_names_its_row_table_and_needs_nothing_else():
+    from adapt.contracts import ProductView
+
+    view = ProductView(name="cells_by_scan", rows_from="cell_identity")
+
+    assert view.computed == ()
+    assert view.reads == ()
+
+
 def test_all_spec_types_exported():
     from adapt import contracts
 

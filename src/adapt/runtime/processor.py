@@ -47,6 +47,7 @@ from adapt.execution.pipeline_builder import (
     _ensure_modules_registered,
     carried_keys,
     prior_keys,
+    product_views,
     resolve_enabled_modules,
     scan_graph,
 )
@@ -138,6 +139,10 @@ class RadarProcessor(threading.Thread):
         self._current_scan_id: str | None = None
         self._stop_event = threading.Event()
         self._contract_violated = False
+        # The scans that failed, whatever broke: a module, storing what a module
+        # returned, or the scan's own record. The run's summary and exit code are
+        # told from it, with or without metrics.
+        self._failed_scans = 0
         self.output_lock = threading.Lock()
 
         # One graph over every enabled per-scan module. Module instances live as
@@ -154,7 +159,7 @@ class RadarProcessor(threading.Thread):
         nodes = scan_graph(modules, self._module_configs, stored_run=self._stored_run)
         self._modules = [n.module for n in nodes]
         self._executor = GraphExecutor(nodes, observability=self._obs)
-        self._router = StoreOutputRouter(collection)
+        self._router = StoreOutputRouter(collection, product_views())
 
         # Rolling history, newest last: of each complete scan, its identity and
         # the outputs the modules, as configured, read back from earlier scans.
@@ -207,6 +212,11 @@ class RadarProcessor(threading.Thread):
         """True if stop() has been called or a ContractViolation forced stop."""
         return self._stop_event.is_set()
 
+    @property
+    def failed_scans(self) -> int:
+        """How many scans this processor failed to process."""
+        return self._failed_scans
+
     def contract_violated(self) -> bool:
         """True once a ContractViolation forced this processor to stop."""
         return self._contract_violated
@@ -256,6 +266,7 @@ class RadarProcessor(threading.Thread):
                         logger.info("Skipped %d already-analyzed files", _skip_count)
                         _skip_count = 0
             except Exception:
+                self._failed_scans += 1
                 logger.exception("Failed to process file: %s", filepath)
             finally:
                 self.input_queue.task_done()
@@ -315,6 +326,8 @@ class RadarProcessor(threading.Thread):
                     ok = self._run_scan(
                         filepath, file_id, queue_wait_s, scan_span, scan_id, queued_scan_time
                     )
+                if not ok:
+                    self._failed_scans += 1
                 # The scan span has closed; split this scan's drained spans into the module
                 # spans (one module_history batch) and the scan span itself (carries n_cells).
                 all_spans = self._obs.drain_spans()

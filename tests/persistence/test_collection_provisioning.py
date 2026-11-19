@@ -115,7 +115,7 @@ class TestCollectionProvisioning:
 def _freeze_one_table(store) -> None:
     coll = store.collection("KILX")
     writer = TableWriter(
-        SchemaLedger(coll.products_path, coll.catalog),
+        SchemaLedger(coll.products_path, coll.catalog, ()),
         ProductTableWrite(key="s", table="cell_stats", primary_key=("run_id", "cell_label")),
         owner_module="analysis",
     )

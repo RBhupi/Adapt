@@ -170,7 +170,8 @@ class PipelineProvenance(AdaptBaseModel):
     file: str = Field(description="Path of the pipeline file")
     content: dict[str, Any] = Field(
         description="The file's sections as validated: run (launcher settings included), "
-        "modules and params"
+        "modules, and params with the command line's settings (--set) laid over them; "
+        "overrides lists those settings as given"
     )
 
 

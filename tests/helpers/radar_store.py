@@ -41,7 +41,7 @@ from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
 from tests.helpers.run_configs import new_run_config
-from tests.helpers.tracking_store import persist_tracking
+from tests.helpers.tracking_store import VIEWS, persist_tracking
 
 COLLECTION = "KTST"
 RUN = "2026JUN01-1200-KTST"
@@ -218,7 +218,7 @@ def add_run(built: SimpleNamespace, run_id: str, volume_scans: tuple[int, ...]) 
             environment_json="{}",
         )
     )
-    router = StoreOutputRouter(collection)
+    router = StoreOutputRouter(collection, VIEWS)
     acquirer = StoreAcquirer(collection, run_id)
     scan_ids = []
     lifecycle = Lifecycle()
@@ -246,7 +246,9 @@ def add_volume_stats(built: SimpleNamespace, run_id: str, index: int) -> None:
     store = Store.open(built.root)
     meta = _meta(run_id, index, built.scan_ids[index])
     ds = _analysis_ds(SCAN_TIMES[index], projected=index > 0, absent_frame=built.absent_frame)
-    StoreOutputRouter(store.collection(COLLECTION)).persist([_VOLUME], _result(index, ds), meta)
+    StoreOutputRouter(store.collection(COLLECTION), VIEWS).persist(
+        [_VOLUME], _result(index, ds), meta
+    )
     store.close()
 
 

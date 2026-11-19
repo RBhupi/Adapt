@@ -33,25 +33,16 @@ from adapt.modules.tracking.tables import (
     scan_tables,
 )
 
-# One row per cell of a scan: its identity joined to its statistics, plus the
-# flags a later scan's events set on it (it split, merged away, or ended).
-_CELLS_BY_SCAN = """
-SELECT *,
-    EXISTS (SELECT 1 FROM cell_events e WHERE e.run_id = cell_identity.run_id
-            AND e.source_scan_id = cell_identity.scan_id
-            AND e.source_cell_uid = cell_identity.cell_uid
-            AND e.event_type = 'SPLIT') AS is_split_source_here,
-    EXISTS (SELECT 1 FROM cell_events e WHERE e.run_id = cell_identity.run_id
-            AND e.source_scan_id = cell_identity.scan_id
-            AND e.source_cell_uid = cell_identity.cell_uid
-            AND e.event_type = 'MERGE') AS is_merge_source_here,
-    EXISTS (SELECT 1 FROM cell_events e WHERE e.run_id = cell_identity.run_id
-            AND e.source_scan_id = cell_identity.scan_id
-            AND e.source_cell_uid = cell_identity.cell_uid
-            AND e.event_type = 'TERMINATION') AS is_terminated_after_here
-FROM cell_identity
-LEFT JOIN cell_stats USING (run_id, scan_id, scan_time, scan_time_unix, cell_label)
-"""
+
+def _is_source_of(event_type: str) -> str:
+    """SQL: a later scan's ``event_type`` event names this cell of ``cell_identity``
+    as its source."""
+    return (
+        "EXISTS (SELECT 1 FROM cell_events e WHERE e.run_id = cell_identity.run_id"
+        " AND e.source_scan_id = cell_identity.scan_id"
+        " AND e.source_cell_uid = cell_identity.cell_uid"
+        f" AND e.event_type = '{event_type}')"
+    )
 
 
 @dataclass(frozen=True)
@@ -91,8 +82,9 @@ class TrackingModule(BaseModule):
         Per-cell observations for the current scan with cell_uid/cell_label.
     cell_identity : pd.DataFrame
         One row per cell: its label, its uid and what is known of it at this
-        scan (age, neighbours, how it began). Stored as ``cell_identity``; the
-        ``cells_by_scan`` view joins it to ``cell_stats``.
+        scan (age, neighbours, how it began). Stored as ``cell_identity``, the
+        rows of the ``cells_by_scan`` view: every table with this key (run, scan,
+        cell label) is read through it, whichever module wrote it.
     cell_events : pd.DataFrame
         Lineage event rows: CONTINUE, SPLIT, MERGE, INITIATION, TERMINATION,
         LATENT (a track kept for resumption) and RESUMED, each naming the scan
@@ -164,11 +156,18 @@ class TrackingModule(BaseModule):
             primary_key=("run_id", "cell_uid"),
             integer_columns=TRACK_INTEGER_COLUMNS,
         ),
+        # One row per cell of a scan: its identity, the columns of every table
+        # with the same key, and the flags a later scan's events set on it (it
+        # split, merged away, or ended).
         ProductView(
             name="cells_by_scan",
-            select=_CELLS_BY_SCAN,
             rows_from="cell_identity",
-            reads=("cell_stats", "cell_events"),
+            computed=(
+                ("is_split_source_here", _is_source_of("SPLIT")),
+                ("is_merge_source_here", _is_source_of("MERGE")),
+                ("is_terminated_after_here", _is_source_of("TERMINATION")),
+            ),
+            reads=("cell_events",),
         ),
         DecisionTableWrite(key="tracking_decisions"),
     )

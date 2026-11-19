@@ -34,6 +34,9 @@ from adapt.consumers.live._renderer import (
 )
 from adapt.consumers.live._timers import AfterHandles
 from adapt.consumers.live._timeseries import (
+    LIGHTNING_PREFIXES as _LIGHTNING_PREFIXES,
+)
+from adapt.consumers.live._timeseries import (
     apply_time_axis as _apply_time_axis_fn,
 )
 from adapt.consumers.live._timeseries import (
@@ -44,6 +47,12 @@ from adapt.consumers.live._timeseries import (
 )
 from adapt.consumers.live._timeseries import (
     draw_scan_marker as _draw_scan_marker_fn,
+)
+from adapt.consumers.live._timeseries import (
+    has_values as _has_values_fn,
+)
+from adapt.consumers.live._timeseries import (
+    no_data_hint as _no_data_hint_fn,
 )
 from adapt.consumers.live._timeseries import (
     style_ts_ax as _style_ts_ax_fn,
@@ -60,12 +69,6 @@ from adapt.consumers.live._utils import (
     safe_close,
 )
 from adapt.consumers.live._view_mode import Camera, ScanViewState
-from adapt.consumers.live._volume_stats import (
-    load_track_volume_stats as _load_track_volume_stats_fn,
-)
-from adapt.consumers.live._volume_stats import (
-    merge_volume_stats as _merge_volume_stats_fn,
-)
 from adapt.consumers.live._widgets import _CompactToolbar
 from adapt.contracts import stat_column
 
@@ -98,14 +101,6 @@ _HV_KEYS = (
     "vel_mean",
     "sw_mean",
 )
-
-# Plot-group variables with these prefixes come from the cell_volume_stats
-# cell_volume_stats table — empty unless that module ran (see _volume_stats).
-_VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
-
-# Plot-group variables with these prefixes come from the xlma_stat_minutes extension
-# table — empty unless xlma_stat ran over the run (see _lightning).
-_LIGHTNING_PREFIXES = ("flash_", "source_", "lightning_")
 
 
 class ScanViewTab:
@@ -920,13 +915,6 @@ class ScanViewTab:
         group_names = self.ctx.cfg().get("plot_assignments", ["Area", "Reflectivity", "ZDR"])
         axes = [ax1, ax2, ax3]
 
-        # Variables referenced by the selected groups — used to decide whether the
-        # cell_volume_stats table must be joined onto each track's history.
-        needed_vars: set[str] = set()
-        for gname in group_names:
-            grp = self.ctx.cfg().get("plot_groups", {}).get(gname, {})
-            needed_vars.update(grp.get("variables", []))
-
         collection = self.ctx.collection()
         # _current_scan_ts comes from the artifact's canonical scan_time attr
         # and is always tz-aware UTC; re-wrapping with tz= would raise.
@@ -940,6 +928,7 @@ class ScanViewTab:
             for v in self.ctx.cfg().get("plot_groups", {}).get(g, {}).get("variables", [])
         )
 
+        columns: set[str] = set()  # what the selected tracks carry
         for uid, slot in self._selected_cells.items():
             color = self._color_slots[slot % len(self._color_slots)]
             history_df = self._track_history(uid)
@@ -951,27 +940,21 @@ class ScanViewTab:
                 continue
 
             track_df = history_df.sort_values("scan_time")
-            # Join 3D volume stats (e.g. cloud-top height) only when a selected
-            # group needs columns that cells_by_scan does not carry.
-            if needed_vars - set(track_df.columns) and self._current_run_id:
+            if needs_lightning and self._current_run_id:
                 client = self.ctx.client()
-                vol_df = _load_track_volume_stats_fn(
-                    client, collection, self._current_run_id, track_df
-                )
-                track_df = _merge_volume_stats_fn(track_df, vol_df)
-                if needs_lightning:
-                    try:
-                        known = set(client.tables(collection)["table_name"])
-                        if "xlma_stat_minutes" in known:
-                            lma_df = client.table(
-                                "xlma_stat_minutes",
-                                collection,
-                                run_id=self._current_run_id,
-                                filters={"cell_uid": uid},
-                            )
-                            track_df = _merge_lightning_fn(track_df, lma_df)
-                    except Exception:
-                        logger.exception("Failed to load lightning for %s", uid)
+                try:
+                    known = set(client.tables(collection)["table_name"])
+                    if "xlma_stat_minutes" in known:
+                        lma_df = client.table(
+                            "xlma_stat_minutes",
+                            collection,
+                            run_id=self._current_run_id,
+                            filters={"cell_uid": uid},
+                        )
+                        track_df = _merge_lightning_fn(track_df, lma_df)
+                except Exception:
+                    logger.exception("Failed to load lightning for %s", uid)
+            columns.update(track_df.columns)
             t = pd.to_datetime(track_df["scan_time"], utc=True)
 
             for ax, group_name in zip(axes, group_names, strict=False):
@@ -982,7 +965,7 @@ class ScanViewTab:
                     group.get("labels", []),
                     strict=False,
                 ):
-                    if var not in track_df.columns:
+                    if not _has_values_fn(track_df, var):
                         continue
                     ax.plot(
                         t,
@@ -998,17 +981,10 @@ class ScanViewTab:
             rich_title = _build_ts_title_fn(group_name, group)
             self._style_ts_ax(ax, "", rich_title)
             if not ax.get_lines():
-                group_vars = group.get("variables", [])
-                if any(v.startswith(_LIGHTNING_PREFIXES) for v in group_vars):
-                    msg = "no data — list xlma_stat under modules:"
-                elif any(v.startswith(_VOLUME_STATS_PREFIXES) for v in group_vars):
-                    msg = "no data — enable cell_volume_stats"
-                else:
-                    msg = "no data"
                 ax.text(
                     0.5,
                     0.5,
-                    msg,
+                    _no_data_hint_fn(group.get("variables", []), columns),
                     transform=ax.transAxes,
                     ha="center",
                     va="center",

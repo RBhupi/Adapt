@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from adapt.modules.xlma_stat.aggregate import cell_scan_rows
 from adapt.modules.xlma_stat.config import XlmaStatConfig
 from adapt.modules.xlma_stat.module import MinuteMask, XlmaStatistics
 
@@ -119,7 +120,6 @@ def test_scan_table_aggregates_member_minutes():
     )
 
     row = scan_df.set_index("cell_uid").loc["uid-A"]
-    assert pd.Timestamp(row["scan_time"]) == pd.Timestamp("2024-05-18T19:03")
     assert row["flash_count"] == 2
     assert row["n_minutes"] == 3  # minutes the scan's masks cover
     assert row["n_lightning_minutes"] == 1  # only 19:02 had uid-A lightning
@@ -144,7 +144,7 @@ def test_empty_flashes_returns_empty_frames_with_columns():
     assert minutes_df.empty and scan_df.empty
     for col in ("cell_uid", "time", "flash_count", "interpolation_fraction"):
         assert col in minutes_df.columns
-    for col in ("cell_uid", "scan_time", "flash_count", "n_minutes"):
+    for col in ("cell_uid", "flash_count", "n_minutes"):
         assert col in scan_df.columns
 
 
@@ -152,3 +152,75 @@ def test_a_scan_without_minute_masks_has_no_rows():
     minutes_df, scan_df = _compute([_flash(1, "2024-05-18T19:02:00")], _sources([1]), [])
 
     assert minutes_df.empty and scan_df.empty
+
+
+def _scan_rows_of_two_cells():
+    """Scan 19:03: one flash each for uid-A and for a cell (uid-gone) that is no
+    longer in the scan, and one flash no cell was near."""
+    labels = np.zeros((21, 21), dtype=np.int32)
+    labels[9:12, 9:12] = 1  # uid-A on the radar
+    labels[9:12, 2:5] = 2  # uid-gone, 7 km west
+    mask = MinuteMask(
+        minute_time=pd.Timestamp("2024-05-18T19:02"),
+        cell_labels=labels,
+        x=_GRID,
+        y=_GRID,
+        cell_uid_lut=np.array(["NONE", "uid-A", "uid-gone"], dtype=np.str_),
+        source_scan_time=pd.Timestamp("2024-05-18T19:00"),
+        target_scan_time=pd.Timestamp("2024-05-18T19:03"),
+        interpolation_fraction=2 / 3,
+    )
+    west = -88.0 - 7.0 / 85.4  # about 7 km west of the radar at 40 N
+    _, by_uid = _compute(
+        [
+            _flash(1, "2024-05-18T19:02:10"),
+            _flash(2, "2024-05-18T19:02:20", lon=west),
+            _flash(3, "2024-05-18T19:02:30", lat=40.08),  # 9 km north: no cell
+        ],
+        _sources([1, 2, 3]),
+        [mask],
+    )
+    return by_uid
+
+
+def test_the_scans_cells_get_their_lightning_by_cell_label():
+    by_uid = _scan_rows_of_two_cells()
+
+    rows = cell_scan_rows(by_uid, {"uid-A": 4})  # uid-A is cell 4 of this scan
+
+    assert list(rows["cell_label"]) == [4]
+    row = rows.iloc[0]
+    assert row["xlma_flash_count"] == 1
+    assert row["xlma_lightning_source_count"] == 2
+    assert row["xlma_n_minutes"] == 1
+    assert row["xlma_n_lightning_minutes"] == 1
+    assert pd.Timestamp(row["xlma_first_lightning_minute"]) == pd.Timestamp("2024-05-18T19:02")
+
+
+def test_scan_rows_carry_no_identity_the_store_gives():
+    """The uid and the scan time are the scan's: the cell table and the writer hold them."""
+    rows = cell_scan_rows(_scan_rows_of_two_cells(), {"uid-A": 4})
+
+    assert "cell_uid" not in rows.columns
+    assert "scan_time" not in rows.columns
+    assert all(name == "cell_label" or name.startswith("xlma_") for name in rows.columns)
+
+
+def test_lightning_of_a_cell_that_is_no_longer_in_the_scan_has_no_scan_row():
+    """uid-gone had a flash on its way to this scan but is not one of its cells:
+    the flash stays in the minute rows only."""
+    by_uid = _scan_rows_of_two_cells()
+    assert {"uid-A", "uid-gone", "UNATTRIBUTED"} <= set(by_uid["cell_uid"])
+
+    rows = cell_scan_rows(by_uid, {"uid-A": 4})
+
+    assert len(rows) == 1
+
+
+def test_a_scan_without_lightning_has_no_scan_rows():
+    _, by_uid = _compute([], _sources([]), _MASKS)
+
+    rows = cell_scan_rows(by_uid, {"uid-A": 1})
+
+    assert rows.empty
+    assert "cell_label" in rows.columns and "xlma_flash_count" in rows.columns

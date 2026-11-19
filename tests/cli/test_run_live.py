@@ -14,6 +14,7 @@ import logging
 import signal
 import subprocess
 import sys
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -30,7 +31,7 @@ from tests.helpers.pipeline_files import (
 from tests.helpers.tracking_store import TRACKING_TABLES, tracking_outputs
 
 from adapt.api import StoreClient
-from adapt.contracts import ProductTableWrite
+from adapt.contracts import PersistenceMeta, ProductTableWrite
 from adapt.execution.module_registry import registry
 from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
@@ -38,6 +39,8 @@ from adapt.execution.nodes.ingest import LoadModule
 from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.base import BaseModule
 from adapt.modules.tracking.tables import Lifecycle
+from adapt.persistence.products import SchemaLedger, TableWriter
+from adapt.persistence.store import Store
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -376,6 +379,49 @@ def test_a_run_with_failed_scans_exits_1_and_does_not_claim_success(case, adapt,
     assert _run(root, RUN_ID).status == "completed"
 
 
+def test_failed_scans_are_told_with_metrics_switched_off(case, adapt, probe, capsys):
+    """Whether a scan failed is a fact of the run, not a metric."""
+    _live(case, params={"logging": {"metrics": False}})
+    probe.append(lambda: 1 / 0)  # every scan fails inside the module
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 1
+
+    out = capsys.readouterr()
+    assert "SUCCESS" not in out.out + out.err
+    assert "Scans that failed: 1" in out.out
+
+
+def test_a_scan_whose_rows_the_store_refuses_fails_the_run(case, adapt, capsys):
+    """The module ran, but its table cannot be written: in this collection it
+    belongs to another module."""
+    root, _ = case
+    store = Store.open(root)
+    collection = store.collection("KTST")
+    taken = ProductTableWrite(key="rows", table="cli_echo", primary_key=("run_id", "scan_id"))
+    TableWriter(
+        SchemaLedger(collection.products_path, collection.catalog, ()), taken, owner_module="other"
+    ).write(
+        pd.DataFrame({"tag": ["theirs"]}),
+        PersistenceMeta(
+            scan_time=datetime(2024, 5, 18, 11, 0, tzinfo=UTC),
+            scan_id="an-older-scan",
+            run_id="2024MAY18-1100-KTST",
+            source_file="KTST20240518_110000_V06",
+            collection_id="KTST",
+        ),
+    )
+    store.close()
+    _live(case, modules=[ECHO])
+
+    assert adapt("run", "case", "--run-id", RUN_ID) == 1
+
+    out = capsys.readouterr()
+    assert "SUCCESS" not in out.out + out.err
+    assert "Scans that failed: 1" in out.out
+    with StoreClient(root) as client:
+        assert client.scans("KTST", run_id=RUN_ID) == []  # no scan of the run is complete
+
+
 def test_continuing_a_run_needs_the_files_radar(case, adapt, capsys):
     root, _ = case
     _live(case)
@@ -444,6 +490,24 @@ def test_the_stored_runs_own_tables_are_left_as_they_were(stored, adapt):
     assert adapt("run", "later", "--run-id", RUN_ID) == 0
 
     assert _table(stored, "cells_by_scan").to_json() == before
+
+
+def test_a_rule_may_gate_on_a_volume_statistic(stored, adapt):
+    """Volume statistics are columns of the cells target selection reads: the
+    cell's top is 9500, 9600 and 9700 m over the three scans."""
+    tall = {
+        **TARGET_SELECTION,
+        "entry": {"gates": [{"field": "cell_top_m", "op": "ge", "value": 9650.0}]},
+    }
+    write_pipeline(
+        stored, "tall", run=STORED, modules=["target_selection"], params={"target_selection": tall}
+    )
+
+    assert adapt("run", "tall", "--run-id", RUN_ID) == 0
+
+    chosen = _table(stored, "target_selection")["cell_uid"]
+    assert chosen.notna().tolist() == [False, False, True]
+    assert chosen.iloc[-1] == radar_store.UID_A
 
 
 def test_another_rule_over_the_same_run_is_kept_beside_the_first(stored, adapt):

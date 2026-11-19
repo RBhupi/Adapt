@@ -62,7 +62,7 @@ class RunSummary:
     slowest_stages: tuple[tuple[str, float], ...]  # (module, total_seconds) desc
     # Per-module aggregates for the console summary: (module, calls, total_seconds) desc.
     module_stats: tuple[tuple[str, int, float], ...] = ()
-    failures: int = 0  # module execution failures (errors_total counter)
+    failures: int = 0  # scans that failed, in a module or while its outputs were stored
 
 
 @dataclass(frozen=True, slots=True)

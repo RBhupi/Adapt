@@ -16,6 +16,7 @@ import xarray as xr
 from adapt.execution.graph.executor import GraphRun
 from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
+from adapt.persistence.errors import StoreError
 from adapt.runtime.processor import RadarProcessor
 from tests.helpers.fake_graph import NEEDS_PRIOR_SCAN
 from tests.helpers.queue_msg import msg as _msg
@@ -232,6 +233,41 @@ def test_each_modules_fate_in_a_scan_is_recorded(tmp_path, monkeypatch, make_pro
     assert fates["tracking"]["status"] == "skipped"
     assert fates["tracking"]["reason"] == "too few prior scans"
     assert store_env.collection.catalog.scan_is_complete(store_env.run_id, first["scan_id"])
+
+
+def test_a_failed_scan_is_counted_once_whatever_else_breaks(
+    tmp_path, monkeypatch, make_processor, store_env
+):
+    """A module failed, and then the scan's pass could not be recorded either:
+    still one failed scan."""
+    proc = make_processor()
+    graph = _wire(proc, monkeypatch)
+    good_run = graph.__call__
+
+    def fail(context, *, history, before_node=None, after_node=None):
+        run = good_run(context, history=history, after_node=after_node)
+        return GraphRun(run.context, run.skipped, {"analysis": ValueError("kaboom")})
+
+    def unrecordable(*args, **kwargs):
+        raise StoreError("the catalog cannot be written")
+
+    monkeypatch.setattr(proc._executor, "run", fail)
+    monkeypatch.setattr(store_env.collection.catalog, "record_scan_pass", unrecordable)
+
+    assert proc.process_file(_msg(store_env, tmp_path, "f1", scan_time=T1)) is False
+
+    assert proc.failed_scans == 1
+
+
+def test_scans_that_complete_are_not_counted_as_failed(
+    tmp_path, monkeypatch, make_processor, store_env
+):
+    proc = make_processor()
+    _wire(proc, monkeypatch)
+
+    assert proc.process_file(_msg(store_env, tmp_path, "f1", scan_time=T1)) is True
+
+    assert proc.failed_scans == 0
 
 
 def test_a_scan_with_a_failed_module_is_a_scan_that_never_arrived(

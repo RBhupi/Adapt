@@ -6,13 +6,30 @@
 Single temporal unit: a 1-minute accumulation bin on lightning time. Each
 attributed flash (and all of its sources, by the one-flash-one-denominator
 rule) rolls up to exactly one ``(cell_uid, time)`` minute row; scan rows are
-derived only from the minute rows (association happens once).
+derived only from the minute rows (association happens once), and the scan's
+own cells get theirs by cell label (``cell_scan_rows``).
 """
 
 from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
+
+# What a scan row says of one cell's lightning in the minutes the scan owns.
+SCAN_VALUE_COLUMNS = (
+    "n_minutes",
+    "n_lightning_minutes",
+    "flash_count",
+    "lightning_source_count",
+    "mean_flash_rate_per_min",
+    "max_flash_rate_per_min",
+    "first_lightning_minute",
+    "last_lightning_minute",
+    "total_flash_energy",
+    "max_source_alt_m",
+    "max_flash_area_km2",
+    "mean_interpolation_fraction",
+)
 
 
 def floor_to_minute(times: pd.DatetimeIndex | pd.Series) -> pd.DatetimeIndex:
@@ -75,36 +92,50 @@ def aggregate_minutes(flashes: pd.DataFrame, sources: pd.DataFrame) -> pd.DataFr
     return df
 
 
-def aggregate_scans(
-    minutes_df: pd.DataFrame, n_minutes_per_scan: Mapping[pd.Timestamp, int]
-) -> pd.DataFrame:
-    """Roll minute rows up to one row per ``(cell_uid, scan_time)``.
+def aggregate_scans(minutes_df: pd.DataFrame, n_minutes: int) -> pd.DataFrame:
+    """Roll the minute rows of ONE scan up to one row per ``cell_uid``.
 
-    A minute belongs to the scan its mask was advected toward
-    (``target_scan_time``). ``n_minutes_per_scan`` is the number of minute
-    masks each scan owns, so consumers can tell quiet minutes from missing
-    coverage.
+    ``minutes_df`` holds the lightning of the minutes a scan owns: the minutes
+    advected toward it and, when its time is on the minute grid, its own.
+    ``n_minutes`` is how many minute masks the scan owns, so consumers can tell
+    quiet minutes from missing coverage.
     """
-    keys = ["cell_uid", "target_scan_time"]
-    g = minutes_df.groupby(keys, sort=True)
-    df = (
-        pd.DataFrame(
-            {
-                "n_lightning_minutes": g.size(),
-                "flash_count": g["flash_count"].sum(),
-                "lightning_source_count": g["lightning_source_count"].sum(),
-                "mean_flash_rate_per_min": g["flash_rate_per_min"].mean(),
-                "max_flash_rate_per_min": g["flash_rate_per_min"].max(),
-                "first_lightning_minute": g["time"].min(),
-                "last_lightning_minute": g["time"].max(),
-                "total_flash_energy": g["total_flash_energy"].sum(),
-                "max_source_alt_m": g["max_source_alt_m"].max(),
-                "max_flash_area_km2": g["max_flash_area_km2"].max(),
-                "mean_interpolation_fraction": g["interpolation_fraction"].mean(),
-            }
-        )
-        .reset_index()
-        .rename(columns={"target_scan_time": "scan_time"})
-    )
-    df["n_minutes"] = df["scan_time"].map(lambda t: n_minutes_per_scan[pd.Timestamp(t)])
+    g = minutes_df.groupby("cell_uid", sort=True)
+    df = pd.DataFrame(
+        {
+            "n_lightning_minutes": g.size(),
+            "flash_count": g["flash_count"].sum(),
+            "lightning_source_count": g["lightning_source_count"].sum(),
+            "mean_flash_rate_per_min": g["flash_rate_per_min"].mean(),
+            "max_flash_rate_per_min": g["flash_rate_per_min"].max(),
+            "first_lightning_minute": g["time"].min(),
+            "last_lightning_minute": g["time"].max(),
+            "total_flash_energy": g["total_flash_energy"].sum(),
+            "max_source_alt_m": g["max_source_alt_m"].max(),
+            "max_flash_area_km2": g["max_flash_area_km2"].max(),
+            "mean_interpolation_fraction": g["interpolation_fraction"].mean(),
+        }
+    ).reset_index()
+    df["n_minutes"] = n_minutes
     return df
+
+
+def cell_scan_rows(scan_df: pd.DataFrame, cell_labels: Mapping[str, int]) -> pd.DataFrame:
+    """The scan rows of the cells the scan has, one per ``cell_label``.
+
+    ``scan_df`` holds one row per cell uid with lightning in the scan's minutes
+    (``aggregate_scans``); ``cell_labels`` names the scan's own cells, uid ->
+    label. The minutes before a scan carry the previous scan's cells, so a uid
+    that is no longer one of the scan's cells (its track ended or merged away)
+    has no row here, nor have the flashes no cell was near: their lightning is
+    in the minute rows.
+
+    A row carries no uid and no scan time: the scan's cell table and the store
+    hold them. Every value column is named ``xlma_<value>``: the rows are read
+    beside what other modules wrote for the same cells, where each column name
+    may be used once.
+    """
+    of_scan = scan_df[scan_df["cell_uid"].isin(cell_labels)]
+    rows = of_scan[list(SCAN_VALUE_COLUMNS)].add_prefix("xlma_")
+    rows.insert(0, "cell_label", of_scan["cell_uid"].map(cell_labels).astype(int))
+    return rows.reset_index(drop=True)

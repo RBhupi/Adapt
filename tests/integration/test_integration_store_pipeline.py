@@ -6,8 +6,9 @@
 adapt init → REAL pipeline run (source → acquisition gateway → ingest →
 detection → tracking → enrichment → store) on three consecutive Level-II
 volumes, then proves the store contract end to end: the exact on-disk layout,
-every object cataloged with checksum + lineage back to its raw volume,
-complete-scan semantics, and every dashboard workflow (timeline, rasters,
+every object accounted for (artifacts with checksum + lineage back to their raw
+volume, and the run's checkpoint), which modules ran on which scan, and every
+dashboard workflow (timeline, rasters,
 hover, tracks, movie with per-frame closes, target selection, volume stats)
 through the public StoreClient only.
 
@@ -23,6 +24,7 @@ Excluded from default CI (integration marker); run locally:
 import hashlib
 import os
 import queue
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -154,21 +156,30 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
 
     client = StoreClient(root)
     try:
-        # ── every object cataloged: checksum + lineage to the raw volume ─────
+        expected_ids = [hashlib.sha256(v.read_bytes()).hexdigest()[:16] for v in volumes]
+
+        # ── every object accounted for: the artifacts, with checksum, and the
+        # run's one checkpoint (taken after its last scan; earlier ones are removed) ──
         artifacts = client.artifacts(radar)
         rows_by_object = {row["object_name"]: row for row in artifacts}
+        assert Counter(row["artifact_type"] for row in artifacts) == {
+            "raw_volume": _N_VOLUMES,
+            "gridded3d": _N_VOLUMES,
+            "segmentation2d": _N_VOLUMES - 1,  # the first scan has no scan before it
+        }
+        checkpoints = client.sql("SELECT scan_id, object_name FROM catalog.run_checkpoints", radar)
+        assert list(checkpoints["scan_id"]) == [expected_ids[-1]]
         objects_dir = root / "collections" / radar / "objects"
-        object_files = sorted(
-            p
+        object_files = {
+            p.relative_to(objects_dir).as_posix(): p
             for p in objects_dir.rglob("*")
             if p.is_file() and ".staging" not in p.relative_to(objects_dir).parts
-        )
-        assert len(object_files) >= _N_VOLUMES * 3  # raw + gridded3d + segmentation2d(2..N)
-        for object_file in object_files:
-            # KeyError = uncataloged object
-            row = rows_by_object[object_file.relative_to(objects_dir).as_posix()]
-            assert row["checksum_sha256"] == hashlib.sha256(object_file.read_bytes()).hexdigest()
-            assert row["size_bytes"] == object_file.stat().st_size
+        }
+        assert set(object_files) == {*rows_by_object, *checkpoints["object_name"]}
+        for object_name, row in rows_by_object.items():
+            content = object_files[object_name].read_bytes()
+            assert row["checksum_sha256"] == hashlib.sha256(content).hexdigest()
+            assert row["size_bytes"] == len(content)
         orphans = client.sql(
             "SELECT a.artifact_id, a.artifact_type FROM catalog.artifacts a"
             " WHERE a.artifact_type != 'raw_volume' AND NOT EXISTS ("
@@ -180,16 +191,25 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         )
         assert orphans.empty, f"artifacts without raw lineage:\n{orphans}"
 
-        # ── scans: content identity; pairs complete, the first stays pending ──
-        expected_ids = [hashlib.sha256(v.read_bytes()).hexdigest()[:16] for v in volumes]
+        # ── scans: content identity; every scan completes. On the first, the
+        # modules that need the scan before it are skipped, with the rest done ──
         complete = client.scans(radar, run_id=run_id)
-        assert [s.scan_id for s in complete] == expected_ids[1:]
-        statuses = client.sql("SELECT scan_id, status FROM catalog.scans", radar)
-        by_scan = dict(zip(statuses["scan_id"], statuses["status"], strict=True))
-        assert by_scan[expected_ids[0]] == "pending"  # first scan has no pair → no analysis
+        assert [s.scan_id for s in complete] == expected_ids
+        first = client.sql(
+            f"SELECT module, status FROM catalog.scan_modules WHERE scan_id = '{expected_ids[0]}'",
+            radar,
+        )
+        assert dict(zip(first["module"], first["status"], strict=True)) == {
+            "ingest": "done",
+            "detection": "done",
+            "cell_volume_stats": "done",
+            "projection": "skipped",
+            "analysis": "skipped",
+            "tracking": "skipped",
+        }
 
-        # ── dashboard timeline + rasters (in-memory, fd-stable) ──────────────
-        timeline = client.scan_timeline(radar, run_id)
+        # ── dashboard timeline (the scans that have cells) + rasters (in-memory, fd-stable) ──
+        timeline = client.scan_timeline(radar, run_id, "cells_by_scan")
         assert [ref.scan_id for ref in timeline] == expected_ids[1:]
         baseline_fds = _open_fds()
         for _ in range(15):
@@ -200,8 +220,8 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         assert _open_fds() <= baseline_fds + 2  # frequent reads retain no handles
 
         # ── live-follow watermark ─────────────────────────────────────────────
-        assert client.scans_since(radar, run_id, after=timeline[0]) == timeline[1:]
-        assert client.scans_since(radar, run_id, after=timeline[-1]) == []
+        assert client.scans_since(radar, run_id, "cells_by_scan", after=timeline[0]) == timeline[1:]
+        assert client.scans_since(radar, run_id, "cells_by_scan", after=timeline[-1]) == []
 
         # ── cells, hover helper, tracks, graph ────────────────────────────────
         cells = client.cells(run_id, radar)
@@ -236,7 +256,9 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         assert "cell_volume_stats" in known_tables
         vol = client.table("cell_volume_stats", radar, run_id=run_id)
         assert not vol.empty
-        assert {"run_id", "scan_id", "cell_uid"} <= set(vol.columns)
+        assert {"run_id", "scan_id", "cell_label"} <= set(vol.columns)
+        # ... whose columns each tracked cell carries beside its uid
+        assert cells["cell_volume_km3"].notna().all()
 
         # ── movie export: one frame per scan, raster closed per frame ─────────
         from adapt.consumers.live._movie import MovieSpec, write_movie_frames
@@ -257,6 +279,7 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
 
         view = ViewState(
             var_name="reflectivity",
+            backdrop_var="reflectivity",
             vmin=10.0,
             vmax=60.0,
             bg_alpha=0.35,
@@ -303,7 +326,7 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         Store.open(root).validate_collection(radar)
         progress = client.pipeline_progress(radar)
         assert progress["status"] == "completed"
-        assert progress["complete_scans"] == len(timeline)
+        assert progress["complete_scans"] == _N_VOLUMES
         assert client.is_pipeline_running(radar) is False
     finally:
         client.close()

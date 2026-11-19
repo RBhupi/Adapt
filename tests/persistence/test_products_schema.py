@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite
+from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView
 from adapt.persistence.errors import StoreError
 from adapt.persistence.products import SchemaLedger, TableDeclaration, TableWriter
 from adapt.persistence.store import Store, init_store
@@ -53,7 +53,7 @@ def collection(tmp_path):
 
 @pytest.fixture
 def ledger(collection):
-    return SchemaLedger(collection.products_path, collection.catalog)
+    return SchemaLedger(collection.products_path, collection.catalog, ())
 
 
 @pytest.fixture
@@ -124,17 +124,26 @@ class TestFirstFrameFreeze:
             frozen_names
         )
 
+    def test_a_table_whose_first_write_fails_is_not_left_half_made(self, ledger, collection):
+        spec = ProductTableWrite(
+            key="stats",
+            table="cell_stats",
+            primary_key=("run_id", "scan_id", "cell_label"),
+            index_columns=("no_such_column",),
+        )
+
+        with pytest.raises(StoreError, match="cell_stats.*no_such_column"):
+            TableWriter(ledger, spec, owner_module="analysis").write(_frame(), _scan_meta())
+
+        assert _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cell_stats'") == []
+        assert _snapshot(collection.products_path, "cell_stats") is None
+        assert _snapshot(collection.catalog.db_path, "cell_stats") is None
+
     def test_reserved_table_names_rejected(self, ledger):
         for reserved in ("table_schemas", "annotations"):
             spec = ProductTableWrite(key="x", table=reserved, primary_key=("run_id",))
             with pytest.raises(StoreError, match=reserved):
                 TableWriter(ledger, spec, owner_module="rogue")
-
-    def test_a_view_cannot_take_the_name_of_a_table(self, writer, ledger):
-        writer.write(_frame(), _scan_meta())
-
-        with pytest.raises(StoreError, match="cell_stats"):
-            ledger.ensure_view("cell_stats", "SELECT 1")
 
 
 class TestEnforcement:
@@ -246,7 +255,7 @@ def _freeze_with_first_frame(tmp_path, name, frame):
     store = Store.open(root)
     try:
         collection = store.collection("KILX")
-        ledger = SchemaLedger(collection.products_path, collection.catalog)
+        ledger = SchemaLedger(collection.products_path, collection.catalog, ())
         TableWriter(ledger, SPEC, owner_module="analysis").write(frame, _scan_meta())
         return _frozen_types(collection, "cell_stats")
     finally:
@@ -307,3 +316,310 @@ class TestDeterministicFreeze:
         )
 
         writer.write(_frame(pixel_count=[60.0, float("nan")]), _scan_meta())
+
+
+# -- the view over the tables that share a key ---------------------------------
+
+CELL_KEY = ("run_id", "scan_id", "cell_label")
+CELLS = ProductView(name="cells", rows_from="cell_identity")
+FLAGGED = ProductView(
+    name="cells",
+    rows_from="cell_identity",
+    computed=(
+        (
+            "has_event",
+            "EXISTS (SELECT 1 FROM cell_events e WHERE e.run_id = cell_identity.run_id"
+            " AND e.scan_id = cell_identity.scan_id AND e.cell_label = cell_identity.cell_label)",
+        ),
+    ),
+    reads=("cell_events",),
+)
+
+
+def _ledger(collection, *views: ProductView) -> SchemaLedger:
+    return SchemaLedger(collection.products_path, collection.catalog, views)
+
+
+def _write(ledger, table, columns: dict, *, key=CELL_KEY, scan_id="abc123") -> None:
+    """Write rows of ``columns`` to ``table`` (owned by a module named for it)."""
+    spec = ProductTableWrite(key=table, table=table, primary_key=key)
+    TableWriter(ledger, spec, owner_module=table).write(pd.DataFrame(columns), _scan_meta(scan_id))
+
+
+def _identity(ledger, labels=(1, 2)) -> None:
+    _write(ledger, "cell_identity", {"cell_label": list(labels), "cell_uid": ["A", "B"]})
+
+
+def _view(collection, name="cells") -> pd.DataFrame:
+    conn = sqlite3.connect(collection.products_path)
+    try:
+        return pd.read_sql_query(f"SELECT * FROM {name} ORDER BY cell_label", conn)
+    finally:
+        conn.close()
+
+
+class TestViewOverTablesWithOneKey:
+    def test_a_view_has_a_row_for_every_row_of_its_table(self, collection):
+        _identity(_ledger(collection, CELLS))
+
+        cells = _view(collection)
+
+        assert list(cells["cell_label"]) == [1, 2]
+        assert list(cells["cell_uid"]) == ["A", "B"]
+
+    def test_a_table_with_the_same_key_adds_its_columns_to_the_view(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+        _identity(ledger)
+
+        cells = _view(collection)
+
+        assert list(cells["cell_uid"]) == ["A", "B"]
+        assert list(cells["area"]) == [10.5, 20.5]
+
+    def test_a_table_first_written_after_the_view_adds_its_columns(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        assert "volume" not in _view(collection).columns
+
+        _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "volume": [3.0, 4.0]})
+
+        assert list(_view(collection)["volume"]) == [3.0, 4.0]
+
+    def test_a_table_with_another_key_is_left_out_of_the_view(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+
+        _write(
+            ledger, "cell_tracks", {"cell_uid": ["A"], "n_scans": [4]}, key=("run_id", "cell_uid")
+        )
+
+        assert "n_scans" not in _view(collection).columns
+
+    def test_a_row_missing_from_a_joined_table_keeps_its_place_with_nulls(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        _write(ledger, "cell_stats", {"cell_label": [2], "area": [20.5]})
+        _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "volume": [3.0, 4.0]})
+
+        cells = _view(collection)
+
+        assert pd.isna(cells["area"][0]) and cells["area"][1] == 20.5
+        assert list(cells["volume"]) == [3.0, 4.0]
+
+    def test_the_scan_columns_appear_once(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+        _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "volume": [3.0, 4.0]})
+
+        columns = list(_view(collection).columns)
+
+        assert len(columns) == len(set(columns))
+        for name in ("run_id", "scan_id", "cell_label", "scan_time", "scan_time_unix"):
+            assert columns.count(name) == 1
+
+    def test_columns_follow_the_tables_in_name_order(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "volume": [3.0, 4.0]})
+        _identity(ledger)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+
+        columns = list(_view(collection).columns)
+
+        assert columns == [
+            "cell_label",
+            "cell_uid",
+            "run_id",
+            "scan_id",
+            "scan_time",
+            "scan_time_unix",
+            "area",
+            "volume",
+        ]
+
+    def test_a_table_repeating_a_column_of_the_view_is_refused_and_not_created(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+
+        with pytest.raises(StoreError, match="cells.*area.*cell_stats.*cell_volume_stats"):
+            _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "area": [1.0, 2.0]})
+
+        assert (
+            _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cell_volume_stats'")
+            == []
+        )
+        assert _snapshot(collection.products_path, "cell_volume_stats") is None
+        assert list(_view(collection)["area"]) == [10.5, 20.5]
+
+    def test_a_table_with_the_name_of_a_computed_column_is_refused(self, collection):
+        ledger = _ledger(collection, FLAGGED)
+        _write(ledger, "cell_events", {"cell_label": [1], "kind": ["SPLIT"]})
+        _identity(ledger)
+
+        with pytest.raises(StoreError, match="cells.*has_event.*cell_stats"):
+            _write(ledger, "cell_stats", {"cell_label": [1, 2], "has_event": [0, 1]})
+
+    def test_a_computed_column_is_worked_out_for_each_row(self, collection):
+        ledger = _ledger(collection, FLAGGED)
+        _identity(ledger)
+        _write(ledger, "cell_events", {"cell_label": [1], "kind": ["SPLIT"]})
+
+        cells = _view(collection)
+
+        assert list(cells["has_event"]) == [1, 0]
+        assert list(cells.columns)[-1] == "has_event"
+
+    def test_the_view_waits_for_the_tables_its_computed_columns_read(self, collection):
+        ledger = _ledger(collection, FLAGGED)
+
+        _identity(ledger)
+
+        assert _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cells'") == []
+
+    def test_a_computed_column_that_cannot_be_read_is_refused(self, collection):
+        broken = ProductView(
+            name="cells", rows_from="cell_identity", computed=(("bad", "no_such_column + 1"),)
+        )
+
+        with pytest.raises(StoreError, match="cells.*no_such_column"):
+            _identity(_ledger(collection, broken))
+
+        assert (
+            _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cell_identity'") == []
+        )
+
+    def test_a_view_cannot_take_the_name_of_a_table(self, collection):
+        # The table is older than the declaration of the view.
+        _write(_ledger(collection), "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+        taken = ProductView(name="cell_stats", rows_from="cell_identity")
+
+        with pytest.raises(StoreError, match="cell_stats"):
+            _identity(_ledger(collection, taken))
+
+    def test_a_view_of_rows_that_are_not_per_scan_is_refused(self, collection):
+        per_run = ProductView(name="tracks", rows_from="cell_tracks")
+
+        with pytest.raises(StoreError, match="tracks.*cell_tracks"):
+            _write(
+                _ledger(collection, per_run),
+                "cell_tracks",
+                {"cell_uid": ["A"], "n_scans": [4]},
+                key=("run_id", "cell_uid"),
+            )
+
+    def test_a_reader_with_an_open_connection_sees_the_added_columns(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        reader = sqlite3.connect(collection.products_path)
+        try:
+            before = [d[0] for d in reader.execute("SELECT * FROM cells").description]
+
+            _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+
+            after = [d[0] for d in reader.execute("SELECT * FROM cells").description]
+        finally:
+            reader.close()
+        assert "area" not in before
+        assert "area" in after
+
+    def test_a_view_left_by_other_code_is_replaced_when_the_views_are_built(self, collection):
+        _identity(_ledger(collection))
+        conn = sqlite3.connect(collection.products_path)
+        conn.execute("CREATE VIEW cells AS SELECT cell_uid FROM cell_identity")
+        conn.commit()
+        conn.close()
+
+        _ledger(collection, CELLS).build_views()
+
+        assert "cell_label" in _view(collection).columns
+
+    def test_building_the_views_again_changes_nothing_in_the_file(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        before = _rows(collection, "PRAGMA schema_version")
+
+        ledger.build_views()
+
+        assert _rows(collection, "PRAGMA schema_version") == before
+
+
+class TestViewNamesAreUnambiguous:
+    """SQLite compares names without regard to case and renames a repeated column
+    silently (``name:1``); every such repeat is refused instead."""
+
+    def test_columns_that_differ_only_in_case_are_refused(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+
+        with pytest.raises(StoreError, match="cells.*Area.*cell_stats.*cell_volume_stats"):
+            _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "Area": [1.0, 2.0]})
+
+    def test_two_computed_columns_of_one_name_are_refused(self, collection):
+        twice = ProductView(
+            name="cells", rows_from="cell_identity", computed=(("flag", "1"), ("flag", "2"))
+        )
+
+        with pytest.raises(StoreError, match="cells.*flag"):
+            _identity(_ledger(collection, twice))
+
+    def test_a_table_cannot_take_the_name_of_a_view(self, collection):
+        # Written before the view's own table: the view does not exist yet.
+        with pytest.raises(StoreError, match="cells.*view"):
+            _write(_ledger(collection, CELLS), "cells", {"cell_label": [1, 2], "area": [1.0, 2.0]})
+
+        assert _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cells'") == []
+
+    def test_two_views_of_one_name_are_refused(self, collection):
+        other = ProductView(name="cells", rows_from="cell_stats")
+
+        with pytest.raises(StoreError, match="cells"):
+            _ledger(collection, CELLS, other)
+
+    def test_one_view_declared_twice_is_one_view(self, collection):
+        _identity(_ledger(collection, CELLS, CELLS))
+
+        assert list(_view(collection)["cell_uid"]) == ["A", "B"]
+
+    def test_a_table_with_the_key_in_another_order_is_joined(self, collection):
+        ledger = _ledger(collection, CELLS)
+        _identity(ledger)
+
+        _write(
+            ledger,
+            "cell_volume_stats",
+            {"cell_label": [1, 2], "volume": [3.0, 4.0]},
+            key=("run_id", "cell_label", "scan_id"),
+        )
+
+        assert list(_view(collection)["volume"]) == [3.0, 4.0]
+
+    def test_a_clash_among_tables_older_than_the_view_is_told_when_the_view_is_first_built(
+        self, collection
+    ):
+        """Before the view's own table exists nothing joins the others, so a repeat
+        among them is found, and refused, with the write that would build the view."""
+        ledger = _ledger(collection, CELLS)
+        _write(ledger, "cell_stats", {"cell_label": [1, 2], "area": [10.5, 20.5]})
+        _write(ledger, "cell_volume_stats", {"cell_label": [1, 2], "area": [1.0, 2.0]})
+
+        with pytest.raises(StoreError, match="cells.*area.*cell_stats.*cell_volume_stats"):
+            _identity(ledger)
+
+        assert (
+            _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'cell_identity'") == []
+        )
+
+    def test_a_table_named_like_a_view_in_other_case_is_refused(self, collection):
+        with pytest.raises(StoreError, match="Cells.*view"):
+            _write(_ledger(collection, CELLS), "Cells", {"cell_label": [1, 2], "area": [1.0, 2.0]})
+
+        assert _rows(collection, "SELECT name FROM sqlite_master WHERE name = 'Cells'") == []
+
+    def test_two_views_whose_names_differ_only_in_case_are_refused(self, collection):
+        other = ProductView(name="CELLS", rows_from="cell_stats")
+
+        with pytest.raises(StoreError, match="CELLS"):
+            _ledger(collection, CELLS, other)

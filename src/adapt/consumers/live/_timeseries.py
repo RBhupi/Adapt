@@ -3,9 +3,36 @@
 
 """Time-series axis helpers for the dashboard — no Tk, no self references."""
 
+from collections.abc import Collection, Sequence
+
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import pandas as pd
+
+# Plot-group variables with these prefixes are cell_volume_stats columns of
+# cells_by_scan: not there unless that module ran in the collection.
+_VOLUME_STATS_PREFIXES = ("cell_top", "cell_base", "cell_depth", "cell_volume", "cell_eth", "vol_")
+
+# Plot-group variables with these prefixes come from the xlma_stat_minutes table:
+# not there unless xlma_stat ran over the run (see _lightning).
+LIGHTNING_PREFIXES = ("flash_", "source_", "lightning_")
+
+
+def has_values(track_df: pd.DataFrame, var: str) -> bool:
+    """True when the track carries ``var`` with a value in at least one scan."""
+    return var in track_df.columns and bool(track_df[var].notna().any())
+
+
+def no_data_hint(variables: Sequence[str], columns: Collection[str]) -> str:
+    """What a plot of ``variables`` with nothing drawn says, given the ``columns``
+    the selected tracks carry: the module to list when its columns are not there."""
+    absent = [var for var in variables if var not in columns]
+    if any(var.startswith(LIGHTNING_PREFIXES) for var in absent):
+        return "no data — list xlma_stat under modules:"
+    if any(var.startswith(_VOLUME_STATS_PREFIXES) for var in absent):
+        return "no data — enable cell_volume_stats"
+    return "no data"
 
 
 def style_ts_ax(ax, ylabel: str, title: str) -> None:

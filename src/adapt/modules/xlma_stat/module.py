@@ -13,12 +13,12 @@ minute rows).
 """
 
 import logging
-from collections import Counter
 
 import numpy as np
 import pandas as pd
 
 from adapt.modules.xlma_stat.aggregate import (
+    SCAN_VALUE_COLUMNS,
     aggregate_minutes,
     aggregate_scans,
     floor_to_minute,
@@ -60,22 +60,7 @@ _MINUTES_COLUMNS = [
     "max_attribution_dist_m",
 ]
 
-_SCAN_COLUMNS = [
-    "cell_uid",
-    "scan_time",
-    "n_minutes",
-    "n_lightning_minutes",
-    "flash_count",
-    "lightning_source_count",
-    "mean_flash_rate_per_min",
-    "max_flash_rate_per_min",
-    "first_lightning_minute",
-    "last_lightning_minute",
-    "total_flash_energy",
-    "max_source_alt_m",
-    "max_flash_area_km2",
-    "mean_interpolation_fraction",
-]
+_SCAN_COLUMNS = ["cell_uid", *SCAN_VALUE_COLUMNS]
 
 
 class XlmaStatistics:
@@ -91,7 +76,10 @@ class XlmaStatistics:
         minute_masks: list[MinuteMask],
         radar_origin: tuple[float, float],
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Return ``(xlma_stat_minutes, xlma_stat_scan)`` frames."""
+        """Return the minute rows (``xlma_stat_minutes``) and, derived from them,
+        one row per cell uid with lightning in the scan's minutes.
+
+        ``minute_masks`` are the masks ONE scan owns (``scan_minute_masks``)."""
         if not minute_masks or flashes.empty:
             return self._empty_frames()
 
@@ -156,8 +144,7 @@ class XlmaStatistics:
         )
 
         minutes_df = aggregate_minutes(flashes, sources_attr)
-        n_minutes_per_scan = Counter(pd.Timestamp(m.target_scan_time) for m in minute_masks)
-        scan_df = aggregate_scans(minutes_df, n_minutes_per_scan)
+        scan_df = aggregate_scans(minutes_df, len(minute_masks))
         return minutes_df[_MINUTES_COLUMNS], scan_df[_SCAN_COLUMNS]
 
     @staticmethod

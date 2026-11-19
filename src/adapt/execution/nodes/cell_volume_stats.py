@@ -5,9 +5,10 @@
 
 One row per segmented cell, keyed (run_id, scan_id, cell_label) in the
 cell_volume_stats table: it needs the cells' labels, not their track identity,
-so it does not wait for tracking. Join it to ``cells_by_scan`` on
-(run_id, scan_id, cell_label) to reach a cell's uid. The 3D grid is ingest's
-in-memory ``grid_ds``.
+so it does not wait for tracking. That key is the key of the ``cells_by_scan``
+view, so every tracked cell's row there carries these columns beside its uid;
+no column name here may repeat one of another table with the key. The 3D grid
+is ingest's in-memory ``grid_ds``.
 
 Output columns (authoritative — documented here, schema inferred from the frame):
   run_id, scan_time, cell_label                               : index

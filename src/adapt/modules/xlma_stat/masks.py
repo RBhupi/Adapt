@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-__all__ = ["MinuteMask", "scan_minute_masks"]
+__all__ = ["MinuteMask", "scan_cell_labels", "scan_minute_masks"]
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,15 @@ class MinuteMask:
     source_scan_time: pd.Timestamp  # scan whose labels the mask carries
     target_scan_time: pd.Timestamp  # scan the mask was advected toward
     interpolation_fraction: float  # 0.0 = real segmentation, (0, 1] = advected
+
+
+def scan_cell_labels(analysis_ds: xr.Dataset) -> dict[str, int]:
+    """The scan's own cells: uid -> cell label. Empty for a scan without tracked
+    cells (it has no ``cell_uid`` lookup)."""
+    if "cell_uid" not in analysis_ds:
+        return {}
+    lut = analysis_ds["cell_uid"].values.astype(str)
+    return {str(uid): label for label, uid in enumerate(lut) if label > 0}
 
 
 def scan_minute_masks(analysis_ds: xr.Dataset, scan_time: datetime) -> list[MinuteMask]:
