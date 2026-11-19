@@ -13,8 +13,15 @@ the module's own options model.
 
 ``load_pipeline_file`` reads and validates a file; ``pipeline_run`` turns it
 into a run's config. The folder that holds the file is the store root.
+
+The command line may set options of ``params`` for one run (``--set
+params.<module or section>.<option>=<value>``): ``load_pipeline_file`` lays
+them over the file's before it validates, so they are checked, used and
+recorded exactly as if the file had said them.
 """
 
+import copy
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -46,6 +53,7 @@ __all__ = [
     "RunSection",
     "load_pipeline_file",
     "param_section_models",
+    "pipeline_source",
 ]
 
 # Downloader settings the run section owns; ``params.downloader`` must not set them.
@@ -145,6 +153,11 @@ class PipelineFile(AdaptBaseModel):
     run: RunSection
     modules: tuple[str, ...]
     params: dict[str, dict[str, Any]]
+    overrides: tuple[str, ...] = Field(
+        default=(),
+        description="The settings the command line gave (--set), in order, already laid "
+        "over params; the file itself never holds this key",
+    )
 
     @field_validator("modules", mode="before")
     @classmethod
@@ -235,8 +248,54 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         return mapping
 
 
-def load_pipeline_file(path: str | Path) -> PipelineFile:
-    """Read and validate the pipeline file at ``path``.
+_SETTING = "params.<module or section>.<option>=<value>"
+
+
+def pipeline_source(path: str | Path, overrides: Sequence[str]) -> str:
+    """How a refusal names where the settings came from: the file, and the
+    command line's settings when it gave any."""
+    return f"pipeline file {path}" + (f" with --set {', '.join(overrides)}" if overrides else "")
+
+
+def _setting(given: str) -> tuple[list[str], Any]:
+    """The keys under ``params`` and the value of one ``--set`` setting."""
+    target, equals, written = given.partition("=")
+    keys = target.split(".")
+    if not equals or len(keys) < 3 or keys[0] != "params" or not all(keys):
+        raise ConfigError(
+            f"--set {given}: a setting has the form {_SETTING}, with the option's path as "
+            "'adapt config --show' and the pipeline file give it, e.g. "
+            "params.tracking.max_speed_ms=35"
+        )
+    try:
+        value = yaml.load(written, Loader=_UniqueKeyLoader)  # as the file would read it
+    except (yaml.YAMLError, _RepeatedKey) as exc:
+        raise ConfigError(f"--set {given}: the value is not valid YAML: {exc}") from exc
+    return keys[1:], value
+
+
+def _with_settings(params: dict[str, Any], overrides: Sequence[str]) -> dict[str, Any]:
+    """``params`` with each ``--set`` setting laid over it, in the order given."""
+    params = copy.deepcopy(params)
+    for given in overrides:
+        keys, value = _setting(given)
+        at = params
+        for depth, key in enumerate(keys[:-1], start=1):
+            if at.get(key) is None:
+                at[key] = {}
+            if not isinstance(at[key], dict):
+                raise ConfigError(
+                    f"--set {given}: params.{'.'.join(keys[:depth])} is not a mapping of "
+                    f"options, so it has no '{keys[depth]}'"
+                )
+            at = at[key]
+        at[keys[-1]] = value
+    return params
+
+
+def load_pipeline_file(path: str | Path, overrides: Sequence[str] = ()) -> PipelineFile:
+    """Read and validate the pipeline file at ``path``, with the command line's
+    ``overrides`` (``--set`` settings) laid over its ``params``.
 
     Raises
     ------
@@ -244,7 +303,8 @@ def load_pipeline_file(path: str | Path) -> PipelineFile:
         ``path`` does not exist.
     ConfigError
         The file is not YAML, gives a key twice, is not a mapping of sections, or
-        fails validation — the message names the file and each offending key.
+        fails validation — the message names the file and each offending key. Or
+        a setting does not have the form ``params.<key>.<option>=<value>``.
     """
     text = Path(path).read_text(encoding="utf-8")
     try:
@@ -258,4 +318,14 @@ def load_pipeline_file(path: str | Path) -> PipelineFile:
             f"Pipeline file {path} must be a mapping of sections (run, modules, params); "
             f"got {type(data).__name__}"
         )
-    return validated(PipelineFile, data, source=f"pipeline file {path}")
+    if "overrides" in data:
+        raise ConfigError(
+            f"Pipeline file {path}: 'overrides' is not a section of the file — an option "
+            f"is set for one run on the command line: --set {_SETTING}"
+        )
+    # Settings are laid over a params section the file has (empty when all of it
+    # is commented out); a file without the section is refused as it is.
+    if overrides and "params" in data and isinstance(data["params"], dict | None):
+        params = _with_settings(data["params"] or {}, overrides)
+        data = {**data, "params": params, "overrides": list(overrides)}
+    return validated(PipelineFile, data, source=pipeline_source(path, overrides))

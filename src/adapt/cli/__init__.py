@@ -113,11 +113,12 @@ def _confirm(prompt: str) -> bool:
 
 
 def _run_cmd(args: argparse.Namespace) -> None:
-    from adapt.cli._run import run
+    from adapt.cli._run import RunFlags, run
 
     if args.skip_failed and args.run_id is None:
         raise ConfigError("--skip-failed applies to a run that is resumed: name it with --run-id")
-    if not run(args.name, args.run_id, verbose=args.verbose, skip_failed=args.skip_failed):
+    flags = RunFlags(verbose=args.verbose, skip_failed=args.skip_failed)
+    if not run(args.name, args.run_id, args.overrides, flags):
         sys.exit(1)
 
 
@@ -129,7 +130,7 @@ def _run_cmd(args: argparse.Namespace) -> None:
 def _graph_cmd(args: argparse.Namespace) -> None:
     from adapt.cli._graph import graph
 
-    print(graph(args.name), end="")
+    print(graph(args.name, args.overrides), end="")
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +160,19 @@ class _Version(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
         print(f"{parser.prog} {__version__}\nInstalled at: {Path(adapt.__file__).parent}")
         parser.exit()
+
+
+def _add_set(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="params.KEY.OPTION=VALUE",
+        help="Set an option for this run, over what the file says: KEY is a module or a "
+        "params section, e.g. --set params.tracking.max_speed_ms=35. May be given more "
+        "than once; a later setting of the same option holds.",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -222,6 +236,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Resuming --run-id: do not try again the scans the run failed before.",
     )
     run.add_argument("-v", "--verbose", action="store_true", help="DEBUG logging.")
+    _add_set(run)
     run.set_defaults(func=_run_cmd)
 
     graph = commands.add_parser(
@@ -232,6 +247,7 @@ def _parser() -> argparse.ArgumentParser:
         "with 'adapt graph NAME > NAME.mmd'.",
     )
     graph.add_argument("name", help="Pipeline file ./NAME.yaml, given as NAME or NAME.yaml.")
+    _add_set(graph)
     graph.set_defaults(func=_graph_cmd)
 
     dashboard = commands.add_parser(

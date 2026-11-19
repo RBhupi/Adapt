@@ -10,6 +10,7 @@ message. Nothing runs and no store is read: the current folder only has to
 hold the file, named with or without its extension (``adapt graph nexrad.yaml``).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from adapt.cli._run import pipeline_path
@@ -30,8 +31,9 @@ _STORE = "store"
 Edge = tuple[str, str, str]  # (source node, target node, data key)
 
 
-def graph(name: str) -> str:
-    """Mermaid flowchart of ``./NAME.yaml``: its modules and the data between them.
+def graph(name: str, overrides: Sequence[str]) -> str:
+    """Mermaid flowchart of ``./NAME.yaml`` with the command line's ``overrides``
+    (``--set`` settings) laid over it: its modules and the data between them.
 
     Raises
     ------
@@ -39,7 +41,7 @@ def graph(name: str) -> str:
         The file is missing or invalid, or a run of it would be refused.
     """
     path = pipeline_path(Path.cwd(), name, "graph")
-    pipeline = load_pipeline_file(path)
+    pipeline = load_pipeline_file(path, overrides)
     catalog_module_names()  # registers every catalog module
     wired = {module.name: module for module in configured_modules(pipeline, path)}
     modules = [wired[name] for name in pipeline.modules]

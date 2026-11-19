@@ -20,11 +20,16 @@ on with the scan after its last complete one, exactly as if it had not stopped.
 ``run.source: stored_run`` runs the listed modules over a run the store already
 has (``--run-id`` names it): nothing is acquired, and what those modules read
 from modules not listed is read back from the store.
+
+``--set params.<module or section>.<option>=<value>`` sets an option for this
+run, over what the file says; the run records it. A resumed run keeps the
+options it recorded, so ``--set`` is refused there.
 """
 
 import logging
 import signal
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,7 +43,7 @@ from adapt.persistence.store import Store
 from adapt.runtime.orchestrator import PipelineOrchestrator
 from adapt.runtime.sources import source_registry
 
-__all__ = ["pipeline_path", "run"]
+__all__ = ["RunFlags", "pipeline_path", "run"]
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +58,18 @@ class _Ending:
     interrupted: bool
 
 
-def run(name: str, run_id: str | None, *, verbose: bool, skip_failed: bool = False) -> bool:
-    """Run ``./NAME.yaml``; return whether it succeeded (exit code 0).
+@dataclass(frozen=True)
+class RunFlags:
+    """``verbose``: DEBUG logging. ``skip_failed``: resuming a run, leave the
+    scans it failed before as they are instead of trying them again."""
 
-    ``skip_failed``: resuming run ``run_id``, leave the scans it failed before
-    as they are instead of trying them again.
+    verbose: bool
+    skip_failed: bool
+
+
+def run(name: str, run_id: str | None, overrides: Sequence[str], flags: RunFlags) -> bool:
+    """Run ``./NAME.yaml`` with the command line's ``overrides`` (``--set``
+    settings) laid over it; return whether it succeeded (exit code 0).
 
     Raises
     ------
@@ -68,7 +80,7 @@ def run(name: str, run_id: str | None, *, verbose: bool, skip_failed: bool = Fal
     """
     root = Store.open(Path.cwd()).root
     path = pipeline_path(root, name, "run")
-    pipeline = load_pipeline_file(path)
+    pipeline = load_pipeline_file(path, overrides)
     config = run_config(pipeline, path, run_id)  # configures every module
     if config.source not in source_registry.names():
         raise ConfigError(
@@ -76,13 +88,13 @@ def run(name: str, run_id: str | None, *, verbose: bool, skip_failed: bool = Fal
             f"registered source. Registered sources: {', '.join(source_registry.names())}"
         )
     source_registry.get(config.source).check(config)  # e.g. the folder a local run reads
-    if verbose:
+    if flags.verbose:
         logging_ = config.logging.model_copy(update={"level": "DEBUG", "console_level": "DEBUG"})
         config = config.model_copy(update={"logging": logging_})
     check_single_instance()
     write_pid()
     try:
-        orchestrator = PipelineOrchestrator(config, skip_failed=skip_failed)
+        orchestrator = PipelineOrchestrator(config, skip_failed=flags.skip_failed)
         ending = _supervise(orchestrator, pipeline.run.max_runtime_minutes)
     finally:
         remove_pid()

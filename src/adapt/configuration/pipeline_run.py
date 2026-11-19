@@ -21,7 +21,11 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from adapt.configuration.pipeline_file import PipelineFile, param_section_models
+from adapt.configuration.pipeline_file import (
+    PipelineFile,
+    param_section_models,
+    pipeline_source,
+)
 from adapt.configuration.schemas.errors import ConfigError, OptionsRefused, together, validated
 from adapt.configuration.schemas.internal import InternalConfig, PipelineProvenance
 from adapt.configuration.schemas.module_resolver import (
@@ -88,7 +92,7 @@ def run_config(pipeline: PipelineFile, path: Path, run_id: str | None = None) ->
         config = _internal_config(pipeline, path, _new_run_id(pipeline, path))
     else:
         config = _named_run_config(pipeline, path, run_id)
-    _configure(path, config)
+    _configure(_told_by(pipeline, path), config)
     return config
 
 
@@ -103,17 +107,24 @@ def configured_modules(pipeline: PipelineFile, path: Path) -> list:
     ConfigError
         The file's settings do not configure every module, or an input has no source.
     """
-    return _configure(path, _internal_config(pipeline, path, run_id=""))
+    return _configure(_told_by(pipeline, path), _internal_config(pipeline, path, run_id=""))
 
 
-def _configure(path: Path, config: InternalConfig) -> list:
-    """Build every listed module's config from ``config`` and wire their graph."""
+def _told_by(pipeline: PipelineFile, path: Path) -> str:
+    """How a refusal begins: the file, and the command line's settings when it gave any."""
+    source = pipeline_source(path, pipeline.overrides)
+    return source[:1].upper() + source[1:]
+
+
+def _configure(told_by: str, config: InternalConfig) -> list:
+    """Build every listed module's config from ``config`` and wire their graph.
+    ``told_by`` names where the settings came from, for a refusal."""
     try:
         enabled = resolve_enabled_modules(registry.create_modules(), config.modules)
         configs = resolve_module_configs(config, [m.name for m in enabled])
         scan_graph(enabled, configs, stored_run=config.source == _STORED_SOURCE)
     except ValueError as exc:  # a module refused (pydantic's ValidationError is one)
-        raise ConfigError(f"Pipeline file {path}: {exc}") from exc
+        raise ConfigError(f"{told_by}: {exc}") from exc
     return enabled
 
 
@@ -148,7 +159,7 @@ def _stored_run_config(pipeline: PipelineFile, path: Path, run_id: str | None) -
     sections = [key for key in pipeline.params if key in param_section_models()]
     if sections:
         raise ConfigError(
-            f"Pipeline file {path}: {', '.join(f'params.{s}' for s in sections)} cannot "
+            f"{_told_by(pipeline, path)}: {', '.join(f'params.{s}' for s in sections)} cannot "
             f"change over a stored run, which keeps the settings it was made with — "
             "remove them (the options of the listed modules still apply)"
         )
@@ -234,9 +245,10 @@ def _module_params(
     wrong: every one is checked, so all can be told together."""
     recorded: dict[str, dict[str, Any]] = {}
     refused: list[OptionsRefused] = []
+    source = pipeline_source(path, pipeline.overrides)
     for name in pipeline.modules:
         try:
-            record = _options_record(name, pipeline.params.get(name, {}), path)
+            record = _options_record(name, pipeline.params.get(name, {}), source)
         except OptionsRefused as exc:
             refused.append(exc)
             continue
@@ -245,11 +257,12 @@ def _module_params(
     return recorded, refused
 
 
-def _options_record(name: str, given: Mapping[str, Any], path: Path) -> dict[str, Any] | None:
-    """What a run records of module ``name``, given these options by the file
-    at ``path``: its validated options, complete, as the run record's JSON holds
-    them; None for a module without options. The run is configured from this
-    record, now and whenever it is resumed, so both get the same options.
+def _options_record(name: str, given: Mapping[str, Any], source: str) -> dict[str, Any] | None:
+    """What a run records of module ``name``, given these options by ``source``
+    (the file, and the command line's settings): its validated options,
+    complete, as the run record's JSON holds them; None for a module without
+    options. The run is configured from this record, now and whenever it is
+    resumed, so both get the same options.
 
     Raises
     ------
@@ -257,7 +270,6 @@ def _options_record(name: str, given: Mapping[str, Any], path: Path) -> dict[str
         An option is wrong, or holds a value the record would not give back:
         JSON holds no infinity or NaN.
     """
-    source = f"pipeline file {path}"
     in_json = f"{source}, as the run records it — JSON holds no infinity or NaN"
     options = module_options(name, given, source=source)
     if options is None:
@@ -303,6 +315,12 @@ def _named_run_config(pipeline: PipelineFile, path: Path, run_id: str) -> Intern
         raise ConfigError(
             f"Run {run_id} is of radar '{recorded.downloader.radar}', but {path} has "
             f"run.radar '{pipeline.run.radar}'"
+        )
+    if pipeline.overrides:
+        raise ConfigError(
+            f"Run {run_id} is resumed with the options it recorded, so --set cannot change "
+            f"them (given: {', '.join(pipeline.overrides)}). Leave --set out to resume it, "
+            "or start a new run with these options"
         )
     print(f"Continuing existing run ID: {run_id}")
     print(
@@ -392,7 +410,7 @@ def _internal_config(pipeline: PipelineFile, path: Path, run_id: str) -> Interna
                 "modules": list(pipeline.modules),
                 "pipeline": _provenance(pipeline, path),
             },
-            source=f"pipeline file {path}",
+            source=pipeline_source(path, pipeline.overrides),
             at=("params",),
         )
     except OptionsRefused as exc:
