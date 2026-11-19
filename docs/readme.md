@@ -7,9 +7,10 @@
 
 installation
 USAGE
+outputs
+cli_reference
 variable_names
 dashboard_reference
-cli_reference
 vision
 license
 ```

@@ -1,9 +1,13 @@
 # CLI Reference
 
-Adapt command structure: `adapt <command> [NAME] [options]`
+This page is the complete description of the `adapt` command and of the
+pipeline file. It is for someone who has made a first run with the
+[User Guide](USAGE.md) and now needs the exact rule: what a flag does, what a
+section of the file accepts, what is checked and when. The words *store*,
+*run*, *scan* and *module* are explained in the User Guide.
 
 ```
-adapt init                 # create a data store and its pipeline files (nexrad.yaml)
+adapt init                 # create a store and its pipeline file (nexrad.yaml)
 adapt config NAME          # (re)write the pipeline file ./NAME.yaml from template NAME
 adapt config --show NAME   # print NAME's options with their defaults, ready to paste
 adapt run NAME             # run the pipeline file ./NAME.yaml
@@ -18,21 +22,21 @@ which must be a store created by `adapt init`. There are no paths to pass.
 `adapt run nexrad.yaml` is `adapt run nexrad`.
 
 `adapt --version` prints the installed version and the path Adapt was installed
-to. `adapt --help` and `adapt <command> --help` describe each command from the
-command line.
+to. `adapt --help` and `adapt <command> --help` describe each command.
 
-Exit codes: `0` success; `1` a run that did not complete or was stopped, a run
-in which a scan failed, or a store error (not a store, already a store, unknown
-run); `2` an invalid pipeline file or option.
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | success |
+| `1` | a run that was stopped or did not complete; a run in which a module failed on a scan; the folder is not a store, or is one already; another pipeline is running |
+| `2` | an invalid pipeline file, option or argument; a `--run-id` that names no run the command can use |
 
 ---
 
 ## `adapt init`
 
 Create the store layout (`registry.db`, `logs/`, `collections/`), then one
-pipeline file per template — today `nexrad.yaml`. This is the only command that
-ever creates a store; `adapt run` and `adapt dashboard` fail loudly on an
-uninitialized directory.
+pipeline file per template: today `nexrad.yaml`. This is the only command that
+creates a store. `adapt run` refuses a folder that is not one.
 
 ```bash
 adapt init            # initialize the current directory
@@ -41,7 +45,7 @@ adapt init /data/kilx # initialize a specific directory
 
 | Argument | Description |
 |----------|-------------|
-| `directory` | Root directory for the new store. Defaults to the current directory. Fails if the store already exists or the directory uses the obsolete pre-store layout. A pipeline file that already exists there is kept. |
+| `directory` | Root directory for the new store. Defaults to the current directory. Refused when the folder is a store already, is inside another store, or holds the output of a version of Adapt from before the store (`adapt_registry.db`). A pipeline file that already exists there is kept. |
 
 ---
 
@@ -62,92 +66,31 @@ adapt config --show target_selection  # a module's packaged options, with their 
 
 - a **module** (`ingest`, `detection`, `projection`, `analysis`, `tracking`,
   `cell_volume_stats`, `target_selection`, `radar_command`, `xlma_stat`): its
-  options under its own name, `NAME:`, each with its default.
-  `target_selection` and `radar_command` print their packaged options with the
-  reasoning in comments (the `growing_isolated` rule and a dry-run `sandbox`
-  command setup);
+  options under its own name, each with its default. `target_selection` and
+  `radar_command` print their packaged options with the reasoning in comments
+  (the `growing_isolated` rule, and the dry-run `sandbox` command setup);
 - `global` (the settings of the whole run, shared by several modules),
   `downloader` or `logging`.
 
-An unknown name lists every valid one. The section names of earlier versions
-(`reader`, `regridder`, `segmenter`, `projector`, `analyzer`, `tracker`,
-`visualization`, `output`) are unknown names: every option is now under the
-module that uses it (see *Keys of earlier versions* in the
-[User Guide](USAGE.md)).
+An unknown name lists every valid one.
 
 The first line of the output names the line to paste the rest under: the
-file's `params:` line. Paste it there as
-printed — the entries are indented to sit under that line, and fragments pasted
-one after another load together. The template ends with `params:`, so
-`adapt config --show NAME >> nexrad.yaml` pastes them there too. You rarely need
-the whole fragment: a module listed under `modules:` runs with its defaults,
-which for `target_selection` and `radar_command` are the packaged options
-`--show` prints. Give only what you change; it is laid over the defaults part
-by part, so
+file's `params:` line. The entries are indented to sit under that line, and
+fragments pasted one after another load together. The template ends with
+`params:`, so `adapt config --show NAME >> nexrad.yaml` pastes them there too.
+An entry given twice is an error.
 
-```yaml
-modules:
-  - ...
-  - target_selection
-  - radar_command
-
-params:
-  target_selection:
-    duration: {max_minutes: 15}   # the packaged rule with a 15-minute cap
-```
-
-changes the cap and keeps every other part of the rule. This holds at any
-depth: one key deep inside a nested part can be given alone
-(`score: {site_preference: {projection_steps: 2}}`). A part that is off by
-default (`radar_command.api`, `radar_command.extent.vertical_band`) has no
-defaults to keep: give all of its required keys. A list, and an option that
-is a mapping of free keys (`target_selection.score.weights`,
-`ingest.field_map`), is replaced whole. `null` is a value like any other,
-never "use the default": it is refused for an option that does not allow it.
-An entry given twice is an error, never silently half-dropped.
-
-Option names and values are checked when a run of the file is configured, by
-`adapt run` and `adapt graph`. A misspelled option, a value of the wrong type
-or a value out of its bounds is refused, one line per option, named by its full
-path with the reason:
-
-```
-Invalid configuration (pipeline file /data/kilx/nexrad.yaml):
-  • params.detection.h_maxima — value -1 is out of range — Input should be greater than 0
-  • params.detection.h_maximum — unrecognized option (value: 3) — not a valid 'detection' setting; remove it or check for a typo or a renamed field
-The options of detection: adapt config --show detection
-```
-
-Every option of a file that is unknown, of the wrong type, out of its bounds
-or not finite is reported in that one message, whichever module or section
-(`global`, `downloader`, `logging`) it is under: one line per option, then one
-line per module that has such an option, naming the command that prints its
-options. A module option that is infinite or NaN is listed in the same message
-under its own heading line, which says the run's record cannot hold it. What a
-module refuses itself (the two rules on `global.tracking_field`, the
-`xlma_stat` folder), a module missing an input, and a missing time window are
-reported once those options are right.
-
-Three rules about values:
-
-- A number must be finite. `.inf` and `.nan` are refused for every module
-  option and for `global.z_level` and `global.max_scan_gap_minutes`: the
-  options are recorded with the run, and the record holds neither.
-- Text is trimmed of the spaces around it in the options of `ingest`,
-  `detection`, `projection`, `analysis` and `tracking` and in
-  `global.tracking_field`: `" velocity "` is `velocity`.
-- An option with a fixed set of values takes one of them exactly as `--show`
-  prints it: `projection.method` must be `adapt_default`; capital letters, or
-  spaces around it, are refused.
+You rarely need the whole fragment: a module listed under `modules:` runs with
+its defaults. Give only what you change (see *How options are read* below).
 
 ---
 
 ## The pipeline file
 
-`adapt init` and `adapt config nexrad` write this short form (shown here
-without its header comments). Only names are listed; every module option not
-given under `params:` uses its default. The file names no pipeline, so a copy
-of it is right as is.
+`adapt init` and `adapt config nexrad` write this file (shown here without its
+header comments). Only names are listed; every option not given under `params:`
+uses its default. The file does not hold its own name, so a copy of it is a
+valid pipeline file as it is.
 
 ```yaml
 run:
@@ -173,38 +116,116 @@ modules:                      # per-scan modules; Adapt orders them by their inp
 params:
 ```
 
-| Section | Holds |
-|---------|-------|
-| `run` | Where scans come from (`source`, `radar`, `mode`, `start_time`, `end_time`, `source_dir`) and `max_runtime_minutes`. Times need a time zone (`Z` = UTC) and are for `mode: historical` only, with `end_time` after `start_time`; `max_runtime_minutes` is for `mode: realtime` only; `source_dir` is required by, and only for, `source: local_directory`, which needs `mode: historical`: the folder's Level-II files must be named for `run.radar` (`RADARYYYYMMDD_HHMMSS...`; hidden files are ignored), and only those within `start_time`..`end_time` are processed — a folder with no scan in the window is refused. `source: stored_run` runs the modules over a run the store already has (below); it needs `mode: historical` and no time window. |
-| `modules` | The modules to run on every scan, in any order: Adapt orders them by what each reads and writes. A module whose input another, unlisted, module produces is refused, naming the module to list. |
-| `params` | `global`, `downloader`, `logging`, or the name of a listed module → options. Every module's options sit under its own name (`ingest`, `detection`, `tracking`, `target_selection`, …); `global` holds the settings of the whole run (`tracking_field`, `z_level`, `max_scan_gap_minutes`). |
+All three sections must be present. One whose entries are all commented out is
+empty.
+
+### `run`
+
+| Key | Values | Rules |
+|-----|--------|-------|
+| `source` | `aws_nexrad`, `local_directory`, `stored_run` | Where the scans come from: the public NEXRAD archive on AWS, a folder on disk, or a run the store already has. |
+| `radar` | 4-letter site code | Also the name of the collection the results go to. |
+| `mode` | `realtime`, `historical` | `local_directory` and `stored_run` need `historical`. |
+| `start_time`, `end_time` | ISO 8601 with a time zone (`Z` = UTC), or `null` | For `mode: historical` only, where both are required; `end_time` must be after `start_time`. Not allowed with `stored_run`. |
+| `source_dir` | a folder, or `null` | Required by, and only for, `source: local_directory`. Every file in it must be a Level-II volume of `radar`, named `RADARYYYYMMDD_HHMMSS...` (hidden files are ignored). Only the files within `start_time`..`end_time` are processed; a folder with no scan in the window is refused. |
+| `max_runtime_minutes` | a whole number, or `null` | For `mode: realtime` only. `null` runs until `Ctrl-C`. |
+
+A key that the mode or source would ignore is refused, never dropped.
+
+### `modules`
+
+The modules to run on every scan, in any order: Adapt orders them by what each
+reads and writes. An unknown module is an error that lists the valid names. A
+module whose input another, unlisted, module produces is refused, naming the
+module to list.
 
 There is one kind of module. Every listed module runs once per scan, as soon as
 the modules it reads from are done, and its outputs are written to the store
-when it finishes. `target_selection` and `radar_command` are modules like the
-others: their decisions and commands are store tables (`target_selection`,
-`radar_commands`), not files.
+when it finishes. What each module does and stores is listed under *The
+modules* in the [User Guide](USAGE.md); the tables and files are described in
+[Results](outputs.md).
 
-Every section must be present; one whose entries are all commented out is
-empty. An unknown module or an unknown `params:` key is an error that lists
-the valid names; any other unknown key, and a key given twice, is an error
-that names the key (for a module option, with the `adapt config --show`
-command that prints the valid ones). A file with the
-sections of earlier versions (`core:`, `extended:`, `consumers:`,
-`postprocessing:`) is refused: write a new one with `adapt config nexrad` and
-list the modules under `modules:`. The `params:` keys of earlier versions
-(`reader`, `regridder`, `segmenter`, `projector`, `analyzer`, `tracker`,
-`visualization`, `output`) are unknown keys: give the options under the module
-that uses them (see *Keys of earlier versions* in the [User Guide](USAGE.md)).
-Params of a module the file does not list are refused: list the module or
+### `params`
+
+A mapping from a name to options. The valid names are the modules the file
+lists, and three sections of the run:
+
+| Name | Options of |
+|------|-----------|
+| a listed module (`ingest`, `detection`, `tracking`, ...) | that module |
+| `global` | the whole run, shared by several modules: `tracking_field`, `z_level`, `max_scan_gap_minutes` |
+| `downloader` | fetching scans: polling interval, how far back a realtime run looks |
+| `logging` | the log file and the console |
+
+Options of a module the file does not list are refused: list the module or
 remove them. `params.downloader` cannot set `radar`, `mode`, `start_time` or
-`end_time` — those belong to `run:`. Every option is checked against its
-module's own model when a run of the file is configured (`adapt run`,
-`adapt graph`): an unknown option, a value out of its bounds, or `null` for an
-option that does not allow it is refused as `params.<module>.<option> — why`.
+`end_time`; those belong to `run:`. Any other unknown name is an error that
+lists the valid ones.
 
-A store may hold several pipeline files: copy `nexrad.yaml` to `kdix.yaml`,
-edit it, and run `adapt run kdix`.
+### How options are read
+
+What you give under `params.<name>` is laid over the defaults, part by part:
+
+```yaml
+params:
+  target_selection:
+    duration: {max_minutes: 15}   # the packaged rule with a 15-minute cap
+```
+
+changes the cap and keeps every other part of the rule. This holds at any
+depth: one key deep inside a nested part can be given alone
+(`score: {site_preference: {projection_steps: 2}}`). The exceptions:
+
+- A part that is off by default (`radar_command.api`,
+  `radar_command.extent.vertical_band`) has no defaults to keep: give all of
+  its required keys.
+- A list, and an option that is a mapping of free keys
+  (`target_selection.score.weights`, `ingest.field_map`), is replaced whole.
+- `null` is a value like any other, never "use the default": it is refused for
+  an option that does not allow it.
+- A key given twice in one mapping is an error that names both lines.
+
+Rules about values:
+
+- A number must be finite. `.inf` and `.nan` are refused for every module
+  option and for `global.z_level` and `global.max_scan_gap_minutes`: the
+  options are recorded with the run, and the record holds neither.
+- Free text is trimmed of the spaces around it in the options of `ingest`,
+  `detection`, `projection`, `analysis` and `tracking` and in
+  `global.tracking_field`: `" velocity "` is `velocity`.
+- An option with a fixed set of values takes one of them exactly as `--show`
+  prints it: `projection.method` must be `adapt_default`; capital letters, or
+  spaces around it, are refused.
+
+### When the file is checked
+
+`adapt run` and `adapt graph` check the whole file before anything starts, in
+this order:
+
+1. **The structure**: the three sections, the keys of `run`, the module names,
+   the names under `params:`.
+2. **Every option**: unknown options, wrong types, values out of bounds,
+   non-finite numbers. All of them are reported together, one line per option,
+   named by its full path with the reason, then one line per module with the
+   command that prints its options:
+
+   ```
+   Invalid configuration (pipeline file /data/kilx/nexrad.yaml):
+     • params.detection.h_maxima — value -1 is out of range — Input should be greater than 0
+     • params.detection.h_maximum — unrecognized option (value: 3) — not a valid 'detection' setting; remove it or check for a typo or a renamed field
+   The options of detection: adapt config --show detection
+   ```
+
+3. **What a module refuses itself** and the wiring, one at a time: the two
+   rules on `global.tracking_field` (see [Variable Names](variable_names.md)),
+   the `xlma_stat` folder, a module missing an input, a missing time window.
+
+`adapt run` then also checks the source (for `local_directory`, the folder and
+its files) and, when `radar_command` has an `api:` part, its settings in the
+environment: the base URL (`https://`), the key and a readable CA certificate
+file, each in the variable the part names (`base_url_env`, `api_key_env`,
+`ca_file_env`). The environment is their only source; the file never holds
+them.
 
 ---
 
@@ -216,62 +237,53 @@ adapt run nexrad.yaml                         # the same
 adapt run nexrad -v                           # with DEBUG logging
 adapt run nexrad --run-id 2026OCT21-1052-KFSX # resume that run, or start one with this id
 adapt run nexrad --run-id 2026OCT21-1052-KFSX --skip-failed
+adapt run nexrad --set params.tracking.max_speed_ms=35   # one option, for this run
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `NAME` | The pipeline file `./NAME.yaml` in the current folder (a store), given as `NAME` or `NAME.yaml`. A path is refused, `./nexrad.yaml` included. |
-| `--run-id ID` | A run already in the store is resumed from its last checkpoint with its recorded modules and params — of the file only `run.max_runtime_minutes` applies, and `run.radar` must be the run's. An unknown id (format `YYYYMONDD-HHMM-RADAR`, ending with `-` and the file's `run.radar`) starts a new run with that id. Without `--run-id` a new run's id is the minute it starts; a second run started within that minute is refused (wait a minute, or name it with `--run-id`), never joined to the first. With `run.source: stored_run`: the run to run over (required). |
+| `--run-id ID` | The format is `YYYYMONDD-HHMM-RADAR`. An id of a run in the store resumes that run (see *Resuming a run*). An id the store does not have starts a new run with that id; it must end with `-` and the file's `run.radar`. With `run.source: stored_run`: the run to run over (required). |
 | `--skip-failed` | Resuming `--run-id`: leave the scans that failed before as failed instead of processing them again. |
 | `-v`, `--verbose` | DEBUG-level logging in the run's log and on the console. |
+| `--set params.KEY.OPTION=VALUE` | Set one option for this run, over what the file says. May be given more than once. See *Setting an option on the command line*. |
 
-The whole file is checked before anything starts: every listed module is
-configured with its options as it will run and wired into the graph, so a
-wrong option (`params.<module>.<option> — why`) or a module missing an input
-(`projection` for `analysis`,
-`params.xlma_stat.input_dir` for `xlma_stat`) is refused now, not mid-run — and
-so are the source and, when `radar_command` has an `api:` part, its settings in
-the environment: the base URL (`https://`), the key and a readable CA
-certificate file, each in the variable the part names (`base_url_env`,
-`api_key_env`, `ca_file_env`). The environment is their only source; the file
-never holds them.
+Without `--run-id`, a new run's id is the minute it starts, in local time, and
+the radar. A second run started within that minute is refused (wait a minute,
+or name it with `--run-id`); it is never joined to the first.
 
 ### What a run does
 
-The source provides scans; for each scan the listed modules run as one graph
-(`adapt graph NAME` prints it), and each module's outputs are stored when it
-finishes:
+The source provides scans in time order. For each scan the listed modules run
+as one graph (`adapt graph NAME` prints it), and each module's outputs are
+stored when it finishes.
 
-| Module | Stores |
-|--------|--------|
-| `ingest` | the gridded volume (NetCDF, one file per scan) |
-| `detection` | its decision log (`decisions.db`) |
-| `analysis` | tables `cell_stats`, `cell_adjacency` |
-| `tracking` | the segmented and projected 2D fields with their cell labels (NetCDF, one file per scan); tables `cell_identity` (cell label → `cell_uid` per scan), `cell_events`, `cell_tracks`; the view `cells_by_scan`, which joins identity and statistics; its decision log |
-| `cell_volume_stats` | table `cell_volume_stats`, keyed by scan and cell label |
-| `target_selection` | table `target_selection`: one decision per scan (the selected `cell_uid`, or none) |
-| `radar_command` | table `radar_commands`: one row per decision with its outcome — `NO_TARGET`, `TARGET_UNAVAILABLE`, `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), `STALE` (`api:` is set but the scan was older than `api.max_scan_age_seconds`: held back), `SENT` / `NOT_ACKNOWLEDGED` / `SEND_FAILED` (the radar API, only when `api:` is set: sent and acknowledged as queued — not as run by the radar; sent but not acknowledged; not sent) — and the command as sent, `{"AutoTarget": {...}}` |
-| `xlma_stat` | tables `xlma_stat_minutes`, `xlma_stat_scan` |
+- **First scan and gaps.** A module that needs the scan before (`projection`,
+  and everything that reads from it) is skipped on the first scan of a run and
+  after a gap longer than `global.max_scan_gap_minutes`. A run of N scans gives
+  N−1 scans of tracked cells, decisions and commands.
+- **Failures.** A module that fails skips the modules that read from it. The
+  scan is recorded `failed` with the reason per module, and the run goes on
+  with the next scan as if the failed one had not arrived. The command then
+  exits `1`, with a summary that says so (`COMPLETED, 2 SCANS FAILED`).
+- **The console.** One line per scan, with the time each module took. Warnings
+  and errors are printed as they happen. Everything else goes to the log file
+  `logs/pipeline_<RADAR>.log`. `radar_command` also prints one line per scan:
+  the command it wrote or sent, or why there is none.
+- **Stopping.** `Ctrl-C` (or SIGTERM) stops the run: no new scan starts, the
+  scan in progress is finished and saved, and the run is recorded `cancelled`.
+  A stop pressed while a scan is being read may take until that read ends, 10
+  to 30 s on a full volume, to be acted on.
+- **One at a time.** Only one pipeline runs at a time for a user (PID file
+  `~/.adapt/pipeline.pid`; one left behind by a pipeline that has exited is
+  ignored).
 
-`radar_command` also prints one line per scan on the console (the command it
-wrote or sent, or why there is none). A send starts with two marks: `✓✓` sent and
-acknowledged, `✓✗` sent but not acknowledged, `✗–` not sent. Read the tables through
-`adapt.api.StoreClient` or the dashboard.
-
-A module that needs the scan before (projection, and everything that reads from
-it) is skipped on the first scan of a run and after a gap longer than
-`global.max_scan_gap_minutes`, so a run of N scans gives N−1 decisions and
-commands. A module that fails skips the modules that read from it; the scan is
-recorded `failed` with the reason per module, the run goes on with the next
-scan as if the failed one had not arrived, and the command exits `1` with a
-summary that says so (`COMPLETED, 2 SCANS FAILED`).
-
-`Ctrl-C` (or SIGTERM) stops the run: no new scan starts, the scan in progress is
-finished and saved (a stop pressed while a scan is being read may take until
-that read ends, 10–30 s on a full volume, to be acted on), and the run is
-recorded `cancelled`. Only one pipeline runs at a time (PID file
-`~/.adapt/pipeline.pid`; one left behind by a pipeline that has exited is
-ignored).
+The outcomes `radar_command` records are: `NO_TARGET`, `TARGET_UNAVAILABLE`,
+`VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), and, only when
+`api:` is set, `STALE` (the scan was older than `api.max_scan_age_seconds`:
+held back), `SENT` (sent and acknowledged as queued, not as run by the radar),
+`NOT_ACKNOWLEDGED` (sent but not acknowledged) and `SEND_FAILED` (not sent).
+The command is stored as it is sent, `{"AutoTarget": {...}}`.
 
 ### Resuming a run
 
@@ -287,30 +299,29 @@ kill alike, and the result is the same as if the run had never stopped:
 - a scan that failed earlier, with complete scans after it, stays failed: its
   turn has passed.
 
-The resumed run keeps the modules and params it was started with: it is
+The resumed run keeps the modules and options it was started with: it is
 configured from the options the run recorded (every listed module's options,
-defaults included), not from the file. On a resume the file's structure is
-still checked (its sections, module names and `params:` keys), but its options
-are not read, so they are not checked either: a wrong option of a module or of
-`global`, `downloader` or `logging` goes unreported there (a new run of the
-file, and `adapt graph`, report it). A run whose checkpoint does not hold the
-state its modules need is refused, naming them.
+defaults included), not from the file. Of the file only
+`run.max_runtime_minutes` applies, and `run.radar` must be the run's. The
+file's structure is still checked, but its options are not read, so a wrong
+option goes unreported there (a new run of the file, and `adapt graph`, report
+it). A run whose checkpoint does not hold the state its modules need is
+refused, naming them.
 
-A run whose recorded config (`runs.config_json` in `registry.db`) this version
-cannot read cannot be resumed or used for a stored-run pass: the message names
-the run and the keys it cannot read. Every run made before each module's
-options moved under the module's own name is such a run; start a new run
-instead.
+A run whose recorded options this version of Adapt cannot read cannot be
+resumed or used for a stored-run pass: the message names the run and the keys
+it cannot read. Start a new run instead.
 
 ### Running modules over a stored run (`run.source: stored_run`)
 
-With `source: stored_run` no scan is downloaded or read: the listed modules run
-over every scan of the run `--run-id`, in scan order, and each input that no
-listed module produces is read back from the store when it is a stored output
-(a module's table or NetCDF file). A module that needs an input the store does
-not hold (`segmented_ds`, `projected_ds`, `grid_ds_2d`) is refused, naming the
-module to list with it. This is how a module is added to a run after the fact,
-or how target selection is run again with another rule:
+With `source: stored_run` no scan is downloaded: the listed modules run over
+every scan of the run `--run-id`, in scan order. Each input that no listed
+module produces is read back from the store when it is a stored output (a
+module's table or NetCDF file). A module that needs an input the store does not
+hold (the grids and labels that modules pass each other in memory:
+`segmented_ds`, `projected_ds`, `grid_ds_2d`) is refused, naming the module to
+list with it. This is how a module is added to a run after the fact, or how
+target selection is run again with another rule:
 
 ```yaml
 # rules_b.yaml: another target selection rule over a stored run
@@ -350,6 +361,8 @@ params:
     input_dir: /data/lma      # folder of xLMA flash-sorted NetCDF files
 ```
 
+The rules:
+
 - The run must be of `run.radar` and must have ended (a run still `running` is
   refused; an unknown id lists the store's runs of the radar).
 - A listed module is configured as in a new run: its own defaults, then the
@@ -364,15 +377,53 @@ params:
   file's. Give the module the recorded options, or start a new run with the
   new ones.
 - `target_selection` and `radar_command` are exempt from that refusal: their
-  rows (tables `target_selection`, `radar_commands`) are keyed by the hash of
-  the options that made them (`config_hash`), so decisions under different
-  rules sit side by side in the same tables.
-- A stored run whose recorded config this version cannot read cannot be used
-  (see *Resuming a run*).
+  rows are keyed by the hash of the options that made them (`config_hash`), so
+  decisions under different rules sit side by side in the same tables.
 - A module whose input is not in the store for a scan is skipped for that scan,
   with the reason recorded.
 - `radar_command` never sends over a stored run, with or without `api:`.
 - The run's checkpoint is left as it is.
+- A table with one row per run, scan and cell label that the pass stores is
+  read through the view `cells_by_scan` from then on (see
+  [Results](outputs.md)).
+
+### Setting an option on the command line
+
+`--set` gives one option for one run without editing the file. An option is
+read in this order: the module's default, then the pipeline file, then the
+command line.
+
+```bash
+adapt run nexrad --set params.tracking.max_speed_ms=35
+adapt run nexrad --set params.global.z_level=3000 --set params.detection.threshold_params.threshold=40
+adapt graph nexrad --set params.detection.h_maxima=4     # check it first, nothing runs
+```
+
+- The path is the option's full name as `adapt config --show` and the error
+  messages give it: `params`, then a module or one of the sections `global`,
+  `downloader`, `logging`, then the option. A key deep inside a nested part is
+  set alone, like in the file. Only `params` can be set; `run:` and
+  `modules:` are the file's.
+- The value is read as the file would read it: `35`, `3.5`, `true`, `null`,
+  `[velocity, spectrum_width]`, `{reflectivity: DBZ}`, or text. Quote it for
+  the shell when it has spaces or brackets.
+- The setting is checked like the file's options, and a wrong one is refused
+  before anything starts. The message names the file and the settings:
+  `Invalid configuration (pipeline file /data/khtx/nexrad.yaml with --set params.tracking.max_speed_ms=0):`.
+  One refusal still says "this file": a pass over a stored run with other
+  options than the run recorded for a module.
+- The file must have its `params:` section, even an empty one; `--set` does
+  not supply it.
+- Of two settings of the same option, the later one holds.
+- A new run records what was set (`client.run_config(run_id)`:
+  `pipeline.content.overrides`, in the order given) and the options it ran
+  with under `module_params`. `pipeline.content.params` holds the file's
+  params with the settings laid over them. A pass over a stored run records
+  neither its file nor its `--set` settings: the stored run's record stays as
+  it was.
+- A resumed run keeps the options it recorded, so `--set` with the `--run-id`
+  of a run in the store is refused. Over a stored run (`run.source:
+  stored_run`) it sets options of the listed modules, like the file.
 
 ---
 
@@ -385,29 +436,29 @@ have to be a store.
 ```bash
 adapt graph nexrad                # print the graph
 adapt graph nexrad > nexrad.mmd   # save it; open it in any Mermaid viewer
+adapt graph nexrad --set params.detection.h_maxima=4   # with one option set, as adapt run takes it
 ```
 
 The graph is the one a new run of the file would build, from the modules'
 declared inputs and outputs and the file's options:
 
-- `modules` — the listed modules. Each arrow is labelled with the data one
+- `modules`: the listed modules. Each arrow is labelled with the data one
   module hands the next, e.g. `ingest -->|grid_ds_2d, grid_ds| detection`.
-- `scan` and `prior_scans` — what Adapt provides to every scan: the file, its
-  identity and the machine's time as the module that reads it starts
+- `scan` and `prior_scans`: what Adapt provides to every scan. `scan` is the
+  file, its identity and the machine's time as the module that reads it starts
   (`wall_time`, which `radar_command` compares with the scan's time before it
-  sends), and what
-  modules read back from the scans before. A module that
-  needs a prior scan is skipped on the first scan and after a too-long gap, and
-  so is every module downstream of it.
-- `store` — what is read from the store: the cells and tracks so far (for
+  sends). `prior_scans` is what modules read back from the scans before. A
+  module that needs a prior scan is skipped on the first scan and after a
+  too-long gap, and so is every module downstream of it.
+- `store`: what is read from the store: the cells and tracks so far (for
   `target_selection`) and, over a stored run, each stored output that no
   listed module produces.
 
 An option can change what a module reads: with
 `radar_command.extent.vertical_band` set, `radar_command` no longer reads
-`cell_volume_stats`, and the arrow is gone. A file a run would refuse — an
+`cell_volume_stats`, and the arrow is gone. A file a run would refuse (an
 unknown module, a wrong option, a module listed without the one that produces
-its input — is refused here with the same message, exit code `2`.
+its input) is refused here with the same message, exit code `2`.
 
 ---
 
@@ -422,9 +473,67 @@ adapt dashboard --repo ~/adapt_output
 
 | Flag | Description |
 |------|-------------|
-| `--repo PATH` | Pre-populate the repository path field in the GUI. |
+| `--repo PATH` | The store to open. Without it the dashboard opens the current folder when it is a store, and otherwise the store used last; when there is neither, it asks. |
 
 The dashboard reads from an existing store and does not affect a running
 pipeline; run it in a second terminal while the pipeline runs. Its **Start New
 Pipeline…** wizard writes `dashboard.yaml` in the chosen store and runs
 `adapt run dashboard` there (see [Dashboard Reference](dashboard_reference.md)).
+
+---
+
+## Pipeline files of earlier versions
+
+This section is for someone who has a pipeline file written for an earlier
+version of Adapt. A new user can skip it.
+
+A file with the sections of earlier versions (`core:`, `extended:`,
+`consumers:`, `postprocessing:`) is refused: write a new one with
+`adapt config nexrad` and list the modules under `modules:`.
+
+Earlier versions kept the options of five modules under other names. Those
+names are now unknown, both under `params:` and for `adapt config --show`, and
+are refused with the list of valid ones. Move the options under the module that
+uses them:
+
+| Old key under `params:` | Now |
+|---|---|
+| `reader`, `regridder` | `ingest` |
+| `segmenter` | `detection` |
+| `projector` | `projection` |
+| `analyzer` | `analysis` |
+| `tracker` | `tracking` |
+| `tracker.cell_uid.width` | `tracking.uid_width` |
+| `tracker.cell_uid.alphabet`, `downloader.output_dir` | removed (they had no effect); each is refused as an unknown option, like any other |
+| `visualization`, `output` | removed (they had no effect on a run) |
+| `global.coord_names` | removed: the grid coordinate names are fixed (`x`, `y`, `z`, `time`) |
+| `analyzer.exclude_fields` (defaults plus your entries) | `analysis.exclude_fields` lists only your additions. Five internal variables are always excluded (`ROI`, `labels`, `cell_labels`, `cell_projections`, `clutter_filter_power_removed`); `exclude_fields: []` no longer clears them |
+
+The option names inside a section are otherwise unchanged
+(`segmenter.h_maxima` is `detection.h_maxima`). `global`, `downloader` and
+`logging` keep their names. A value that was refused before (out of its
+bounds, of the wrong type, `null` where the option does not allow it) is
+refused as before, under the new key.
+
+What else is different from earlier versions:
+
+- **Options of a module the file does not list** are refused
+  (`params.tracking` in a file whose `modules:` has no `tracking`). Earlier
+  versions accepted the old sections of a module that was not listed, and
+  ignored them. List the module, or remove its options.
+- **The two rules on `global.tracking_field`** (it must be in
+  `analysis.radar_variables`, and in `ingest.fields` when that list is not
+  empty) are each checked by the module they concern, so they apply only in a
+  file that lists `analysis`, respectively `ingest`. Earlier versions applied
+  them to every file.
+- **On a resume** (`--run-id` of a run in the store) the file's options are not
+  read, so a wrong one is not reported. Earlier versions refused the file.
+- **`.inf` and `.nan`** are refused for every module option and for
+  `global.z_level` and `global.max_scan_gap_minutes`. Earlier versions
+  accepted them wherever the option's bounds did. Give a finite number, or
+  `null` where the option allows it (for `target_selection`,
+  `duration: {max_minutes: null}` is no cap).
+- **`projection.method`** must be written exactly `adapt_default`. Earlier
+  versions also took other letter case and surrounding spaces.
+- **A run recorded with the old keys** cannot be resumed or used for a
+  stored-run pass; start a new run.

@@ -1,10 +1,17 @@
 # Installation
 
+This page is for anyone installing Adapt for the first time. It assumes you can
+use a terminal and have `conda` (or `mamba`). When `adapt --version` works, go
+on to the [User Guide](USAGE.md) for a first run.
+
 ## Requirements
 
 - Python 3.10 or later
-- Internet access (to download NEXRAD data from AWS S3)
 - macOS, Linux, or Windows
+- Internet access, to download NEXRAD data from the public archive on AWS and
+  map tiles for the dashboard. Processing files you already have on disk needs
+  none.
+- Disk space: with the default grid, about 140 MB per processed scan.
 
 ---
 
@@ -27,8 +34,8 @@ adapt --version
 adapt --help
 ```
 
-`adapt --version` prints the installed version and the path Adapt was installed to — useful for
-confirming which environment is active.
+`adapt --version` prints the installed version and the path Adapt was installed to, which confirms
+which environment is active.
 
 ---
 
@@ -38,19 +45,19 @@ confirming which environment is active.
 pip install arm-adapt
 ```
 
-The environment must be **fresh** — do not `pip install` into a conda environment that already has
+The environment must be **fresh**: do not `pip install` into a conda environment that already has
 netCDF4, h5py, opencv, or Py-ART installed from conda-forge. Adapt's compiled dependencies ship both
-conda and pip builds of the same native libraries, and mixing them fails at import with a DLL error —
-on Windows, `[WinError 11] An attempt was made to load a program with an incorrect format`. On Windows,
-use 64-bit x86 Python: several of these dependencies publish no ARM64 wheels. This is a pip/conda
-mixing issue only — it does not apply to the conda-forge install above.
+conda and pip builds of the same native libraries, and mixing them fails at import with a DLL error
+(on Windows, `[WinError 11] An attempt was made to load a program with an incorrect format`). On
+Windows, use 64-bit x86 Python: several of these dependencies publish no ARM64 wheels. This is a
+pip/conda mixing issue only; it does not apply to the conda-forge install above.
 
 ---
 
 ## Developers: latest source
 
-To run the bleeding-edge version from `main` and have your edits take effect
-immediately, install the checkout in editable mode:
+To run the version on `main` and have your edits take effect immediately, install the checkout in
+editable mode:
 
 ```bash
 conda create -n adapt_dev python=3.13 -y
@@ -60,41 +67,37 @@ cd Adapt
 pip install -e .
 ```
 
-Then make a data store, run the pipeline, and open the dashboard:
-
-```bash
-mkdir my_case && cd my_case
-adapt init                                # the store plus its pipeline file nexrad.yaml
-adapt run nexrad                          # Ctrl-C to stop
-adapt dashboard                           # in a second terminal, in the same folder
-```
-
-The folder is the store and `nexrad.yaml` is its pipeline (radar `KLOT` until you
-edit `run.radar`), so the commands above work together with no paths to pass.
-
-> Use a fresh environment for the editable install too — the same pip/conda
-> binary-mixing issue described above applies.
+Use a fresh environment for the editable install too: the same pip/conda binary-mixing issue
+described above applies.
 
 ---
 
-## Optional: map overlay support
+## Optional: map overlay in the dashboard
 
-By default Adapt installs without `contextily` and `pyproj`. The dashboard runs
-fully without them — radar data, cell tracking, and statistics all work. The
-basemap overlay (background map tiles) and coordinate display in the toolbar
-require the extra:
+The dashboard draws a background map when `contextily` is installed. Without it the dashboard works
+fully (radar data, cells, statistics), with no map behind them. Install it with the extra:
 
 ```bash
 pip install "arm-adapt[maps]"
 ```
 
-> **Note for conda users:** install `pyproj` via conda-forge instead of pip to
+> **Note for conda users:** install `pyproj` and `contextily` via conda-forge instead of pip to
 > avoid PROJ database version conflicts:
 >
 > ```bash
-> pip install arm-adapt
 > conda install -c conda-forge pyproj contextily
 > ```
+
+---
+
+## First run
+
+```bash
+mkdir my_case && cd my_case
+adapt init                                # makes the folder a store and writes nexrad.yaml
+```
+
+Then follow *First run* in the [User Guide](USAGE.md).
 
 ---
 
@@ -105,7 +108,7 @@ pip install "arm-adapt[maps]"
 Activate the environment first:
 
 ```bash
-mamba activate adapt_env
+conda activate adapt_env
 ```
 
 ### PROJ database version errors
@@ -121,9 +124,6 @@ pip uninstall pyproj -y
 conda install -c conda-forge pyproj
 ```
 
-Or uninstall pyproj entirely — the dashboard works without it (basemap
-and coordinate toolbar are disabled automatically).
-
 ### pyproj network warning
 
 ```
@@ -138,8 +138,9 @@ conda env config vars set PROJ_NETWORK=OFF -n adapt_env
 
 ### `ModuleNotFoundError` on dashboard startup
 
-Make sure you installed from PyPI and not just cloned the repository:
+Adapt is not installed in the active environment: a clone of the repository alone is not an
+installation. Install it:
 
 ```bash
-pip install arm-adapt
+pip install arm-adapt        # or, in a clone: pip install -e .
 ```

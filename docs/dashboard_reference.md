@@ -1,5 +1,15 @@
 # Adapt Dashboard — Reference
 
+This page has two parts. *Getting started* and the tables of controls are for
+anyone using the dashboard: they assume you know what a store and a run are
+(see the [User Guide](USAGE.md)). The sections from *Repository layout* on
+describe what the dashboard reads and writes and how it works inside, for
+someone changing or debugging it.
+
+The dashboard is a desktop window (Tk). It needs a display: it does not run
+over a plain SSH session without one. It reads a store and never changes what a
+run produced.
+
 ## Getting started (first-time user)
 
 ### 1. Open the dashboard
@@ -8,7 +18,10 @@
 adapt dashboard
 ```
 
-A welcome screen appears with two options.
+Run from a store folder, it opens that store. Run from elsewhere, it opens the
+store you used last. `adapt dashboard --repo PATH` opens the one you name. When
+there is no store to open, a welcome screen appears with two options. The
+dashboard calls a store a *repository*.
 
 ---
 
@@ -17,9 +30,18 @@ A welcome screen appears with two options.
 Click **Open an existing repository**, browse to the folder that contains
 `registry.db` (a store created by `adapt init`), and click **Open Repository**.
 
-The radar map and scan dropdowns populate automatically. Use the scan selector or
-**Show Latest** to display a scan. Click any cell on the map to plot its track
-history in the time-series panels on the right.
+The **Collection** (radar) and **Run** selectors in the toolbar fill in, and the
+newest scan of the newest run is shown. Use the scan selector or **Show Latest**
+to display a scan. Click any cell on the map to plot its track history in the
+time-series panels on the right.
+
+The window has three tabs:
+
+| Tab | Shows |
+|-----|-------|
+| **Latest Scan** | One scan as a map with its cells, and the time series of the cells you select. |
+| **Target Selection** | A replay of the run, scan by scan, under target selection rules you set in the tab (ranges on cell variables, and the engine settings). |
+| **Log** | The output of a pipeline started from the dashboard. |
 
 ---
 
@@ -41,9 +63,11 @@ The launch wizard opens:
      wizard's radar, mode and times;
    - runs `adapt run dashboard` in that folder.
 
-`dashboard.yaml` belongs to the dashboard and is rewritten on every launch, so
+The wizard starts a pipeline on the public NEXRAD archive with the default
+modules and options. `dashboard.yaml` belongs to the dashboard and is rewritten
+on every launch. When you need local files, other modules or other options,
 edit `nexrad.yaml` (or a copy) instead and run it from a terminal with
-`adapt run nexrad` when you need other modules, consumers or options.
+`adapt run nexrad`; the dashboard shows its results all the same.
 
 ---
 
@@ -65,10 +89,19 @@ edit `nexrad.yaml` (or a copy) instead and run it from a terminal with
 | Click again | Deselects the cell |
 | Up to 7 cells | Each gets a distinct colour; the track legend shows at the bottom right |
 | **Show Latest** | Jumps to the most recent scan; preserves your zoom and selected cells |
-| **Show Loop** | Animates the last N scans; time-series panels update with each frame, vertical line marks the current scan time |
+| **Show Loop** | Animates the last N scans (**Loop N**, with **dt(ms)** between frames); time-series panels update with each frame, vertical line marks the current scan time |
+| **Variable**, **Min**, **Max** | The field on the map (reflectivity, differential reflectivity, velocity, spectrum width) and its colour range; press Return in a box to apply |
+| **⚙ Plot settings** | Choose which three groups of variables the time-series panels show (area, reflectivity, ZDR, velocity, cloud top height, lightning) |
 | Left / Right arrow keys | Step through scans one at a time |
 | Space | Jump to latest scan |
+| `l` | Start or stop the loop |
+| Escape | Clear the selected cells and their time series |
+| Ctrl+R / Ctrl+O | Refresh / open a repository |
 | Scroll to zoom, drag to pan | Zoom is preserved across scan changes |
+| **File → Save Movie…** | Records the plot of the active tab over a range of scans to `.mp4` or `.gif` |
+
+The tracked cells of a run start with its second scan, so a run with one scan
+processed has nothing to show yet.
 
 ---
 
@@ -91,7 +124,6 @@ dashboard and it will offer to reconnect to the running process.
 ├── dashboard.yaml             # pipeline file the wizard writes on each launch
 ├── registry.db                # SQLite: runs (with config), collections, events
 ├── logs/                      # run log files
-├── consumers/                 # consumer outputs: consumers/<run_id>/<consumer>/ (replays: replay-<n>/)
 └── collections/
     └── {RADAR_ID}/
         ├── catalog.db         # SQLite: scans, artifacts, checksums, lineage
@@ -115,9 +147,10 @@ the dashboard only redirects the pipeline's stdout/stderr to
 
 ---
 
-## The `~/.adapt/` directory (dashboard writes here)
+## The `~/.adapt/` directory
 
-All dashboard-owned state lives under `~/.adapt/`:
+What the dashboard keeps for itself, and the PID file of the running pipeline,
+are under `~/.adapt/` in your home folder, not in the store:
 
 ```
 ~/.adapt/
@@ -199,10 +232,13 @@ run:
   radar: KLOT
   mode: realtime
   ...
-core: [ingest, detection, projection, analysis, tracking]
-extended: [cell_volume_stats]
-consumers: {}
-postprocessing: []
+modules:
+  - ingest
+  - detection
+  - projection
+  - analysis
+  - tracking
+  - cell_volume_stats
 params:       # paste `adapt config --show NAME` here; an option not given is a default
 ```
 
@@ -248,10 +284,10 @@ a snapshot replaces the in-memory state; the bundled defaults are unaffected.
 
 | Setting | Value | Location |
 |---------|-------|----------|
-| Auto-refresh interval | 10 s | `POLL_MS` in `dashboard.py` |
-| Log buffer (max lines) | 500 | `LOG_MAX` in `dashboard.py` |
+| Auto-refresh interval | 10 s | `POLL_MS` in `_config.py` |
+| Log buffer (max lines) | 500 | `LOG_MAX` in `_pipeline.py` |
 | PID file path | `~/.adapt/pipeline.pid` | `_utils.py` |
-| Log file path | `~/.adapt/pipeline.log` | `dashboard.py` |
+| Log file path | `~/.adapt/pipeline.log` | `LOG_FILE` in `_pipeline.py` |
 | User config path | `~/.adapt/user_dashboard.json` | `_config.py` |
 | Max recent repos | 5 | `_config.py` |
 
@@ -322,7 +358,9 @@ The dashboard auto-refreshes every 10 s (`POLL_MS`). Each cycle:
 
 Data is never pre-fetched. Each scan raster is loaded fully into memory on
 demand through `client.open_scan_raster` and holds no file handle afterwards.
-Cell statistics are loaded once per run via `client.cells()` and cached.
+Cell statistics come from the view `cells_by_scan`, through `client.cells()`
+(one run), `client.cells_at_scan()` (one scan) and `client.track_history()`
+(one cell).
 
 ---
 
@@ -337,10 +375,11 @@ src/adapt/consumers/live/
 ├── _pipeline.py                  # Pipeline tab: launch wizard (adapt init, adapt run dashboard)
 ├── _renderer.py                  # Pure matplotlib scan rendering; add_basemap()
 ├── _movie.py / _movie_dialog.py  # Save Movie: frame writer + dialog
-├── _targeting.py                 # TSE map drawing (pure, in-memory dataset)
-├── _volume_stats.py              # Volume-stats reads via StoreClient
-├── _lightning.py                 # Lightning table reads via StoreClient
+├── _targeting.py                 # Target selection map drawing (pure, in-memory dataset)
+├── _lightning.py                 # Joins the lightning rows onto a track's scan times
 ├── _timeseries.py                # matplotlib time-series helpers; no Tk
+├── _view_mode.py                 # State of the Latest Scan tab (loop, zoom); no Tk
+├── _timers.py                    # Bookkeeping of the recurring Tk timers; no Tk
 ├── _widgets.py                   # Custom Tk widgets (_CompactToolbar, _RangeSlider)
 ├── _utils.py                     # Pure helpers; store-root detection; PID file; wizard launch commands
 ├── _config.py                    # ~/.adapt/user_dashboard.json I/O only

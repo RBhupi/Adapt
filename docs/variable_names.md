@@ -1,28 +1,34 @@
 # Variable Names and the Tracking Field
 
-Adapt works with any radar source and, in principle, any 2-D scalar field.
-Two independent bindings make that possible, and each lives in exactly one
-place:
+This page is for someone whose input files name the radar variables
+differently from NEXRAD, or who wants cells detected and tracked on a field
+other than reflectivity. It assumes you have made a run and know how options
+are set under `params:` in the pipeline file (see the [User Guide](USAGE.md)).
+With NEXRAD Level-II input and reflectivity tracking, the defaults need no
+change and you can skip this page.
 
-| Binding | Config knob (under `params:`) | Applied where |
+Adapt uses one fixed set of variable names inside, the *canonical names*. Two
+settings connect them to your data, and each is given in exactly one place:
+
+| Setting | Option (under `params:`) | Applied where |
 |---|---|---|
-| Source name → canonical name | `ingest.field_map`, `ingest.fields` | Once, inside the ingest module |
-| Role → canonical field | `global.tracking_field` | Read by detection / projection / tracking |
+| The name in your files → the canonical name | `ingest.field_map`, `ingest.fields` | Once, inside the `ingest` module |
+| The field cells are found and tracked on | `global.tracking_field` | Read by `detection`, `projection` and `tracking` |
 
-Everything downstream of ingest — module code, contracts, stored column
-names, the dashboard, the Target Selection Engine — speaks **canonical
-names only** and never maps names again.
+Everything after `ingest` (the other modules, the stored column names, the
+dashboard, target selection) uses **canonical names only** and never maps
+names again.
 
 ## Canonical names
 
-The canonical vocabulary is simply Adapt's established names:
-`reflectivity`, `velocity`, `differential_reflectivity`,
-`spectrum_width`, `cross_correlation_ratio`, `differential_phase`, …
-The segmentation label grid is always `cell_labels`, and the grid
-coordinates are always `x`, `y`, `z` and `time` (fixed by the data
-contract, not configurable). Per-cell statistics columns are always minted as
-`radar_<field>_<stat>` (e.g. `radar_reflectivity_max`) — the `radar_`
-prefix is a namespace, not a physics claim.
+The canonical names of the radar variables are `reflectivity`, `velocity`,
+`differential_reflectivity`, `spectrum_width`, `cross_correlation_ratio`,
+`differential_phase`, …
+The grid of cell labels is always `cell_labels`, and the grid coordinates are
+always `x`, `y`, `z` and `time`; these are not options. The per-cell
+statistics columns are always named `radar_<field>_<stat>` (for example
+`radar_reflectivity_max`). The `radar_` prefix only marks a column as a cell
+statistic; it does not say the field came from a radar.
 
 ## Renaming source variables (`ingest.field_map`)
 
@@ -78,42 +84,43 @@ A rule applies only in a file that lists its module: a file without
 be set only in a file that lists `ingest`.
 
 Dual-polarization fields are **optional**: a source without
-`differential_reflectivity` runs the full pipeline; ZDR-derived columns
-simply do not exist for that run (consumers discover available columns
-through the store's `table_schemas`).
+`differential_reflectivity` runs the full pipeline, and the columns derived
+from it do not exist for that run. `client.tables(collection)` lists the
+columns each table has.
 
-## Cell identity (uid v2)
+## Cell identity
 
-Cell uids are `hash(scan_id, cell_label)` — a pure function of the scan's
-raw bytes and the cell's label. Identical input and configuration always
-mint identical uids, for any source and any tracked field. Runs recorded
-before v2 keep their stored uids (uids are minted once and never
-recomputed; every table scopes them by `run_id`). Cross-run comparisons
-join on `scan_id` + `cell_label`.
+A `cell_uid` is computed from the `scan_id` of the scan the cell is first seen
+in and its `cell_label` there, so it depends only on the content of the input
+file and the cell's label. The same input and the same options always give the
+same uids, for any source and any tracked field. Runs recorded by earlier
+versions keep the uids they stored (a uid is made once and never recomputed;
+every table carries the `run_id` with it). To compare two runs, join on
+`scan_id` and `cell_label`.
 
-## How consumers resolve the field
+## Finding out which field a run tracked
 
-Consumers never guess. The run's provenance is the truth:
+The run's record is the source:
 
 ```python
 client.run_config(run_id)          # full resolved config (dict)
 client.run_tracking_field(run_id)  # the canonical tracked field
 ```
 
-`run_tracking_field` also understands pre-v2 provenance (runs that
+`run_tracking_field` also reads the record of earlier versions (runs that
 recorded `var_names.reflectivity`), so old stores stay readable. The
-dashboard backdrop, hover statistics, and the Target Selection Engine's
-`CellSnapshot.field_max` all resolve through it.
+dashboard and target selection find the field the same way.
 
 ## Compatibility notes
 
 - **Existing stores** remain readable unchanged; canonical names equal the
   names Adapt always used.
-- **Changed field sets need a new collection**: a collection's product
-  tables freeze their column set on first write, so a run whose
-  `ingest.fields` / `ingest.field_map` / `analysis.radar_variables` produces
-  different columns
-  is rejected by an existing collection (by design — create a new one).
+- **A changed set of fields needs a new store**: the product tables of a
+  collection keep the columns of the first run that wrote them. A run whose
+  `ingest.fields`, `ingest.field_map` or `analysis.radar_variables` would add
+  columns fails on every scan in an existing collection, with
+  `new columns are rejected after first-frame freeze`. Make a new store folder
+  (`adapt init`) for it.
 - **Target selection weights**: `target_selection.score.weights` names
   columns of the per-cell snapshot; the tracked field's maximum is the
   column `field_max` (there is no `reflectivity:` or `field:` key). A weight
@@ -125,12 +132,12 @@ dashboard backdrop, hover statistics, and the Target Selection Engine's
   *tracked field*; the name is kept for store compatibility and only
   means dBZ for reflectivity-tracked runs.
 
-## Onboarding a new source, in practice
+## Using a new source, in practice
 
 1. Write (or reuse) an ingest path that reads the format.
 2. Add the source's `ingest.field_map` and an explicit `ingest.fields`.
 3. Pick `global.tracking_field` and match `analysis.radar_variables`.
-4. Run into a **new collection**.
+4. Run into a **new store folder**.
 
-No detection, projection, tracking, persistence, api, or consumer code
-changes are required.
+No change is needed in detection, projection, tracking, the store, the API or
+the dashboard.

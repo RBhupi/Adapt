@@ -32,23 +32,84 @@
 > time; contribution guidelines will follow the first stable release. APIs, configuration files,
 > database schemas, and output formats are subject to change without notice.
 
-**Documentation:** [arm-doe.github.io/Adapt](https://arm-doe.github.io/Adapt/) — [Installation](https://arm-doe.github.io/Adapt/installation.html) · [User Guide](https://arm-doe.github.io/Adapt/USAGE.html) · [CLI Reference](https://arm-doe.github.io/Adapt/cli_reference.html)
+**Documentation:** [arm-doe.github.io/Adapt](https://arm-doe.github.io/Adapt/) — [Installation](https://arm-doe.github.io/Adapt/installation.html) · [User Guide](https://arm-doe.github.io/Adapt/USAGE.html) · [Results](https://arm-doe.github.io/Adapt/outputs.html) · [CLI Reference](https://arm-doe.github.io/Adapt/cli_reference.html)
 
 ---
 
-## Overview
+## What Adapt does
 
-Adapt is a modular framework for real-time convective cell detection, motion projection, and storm
-lifecycle analysis. It processes a stream of radar volume scans and, for each cell, produces a tracked
-identity, a set of measured properties, and a record of lifecycle events — initiation, growth,
-splitting, merging, and decay. Results are written to a structured, queryable repository (NetCDF,
-Parquet, and SQLite) exposed through a read-only Python API, rather than as loose output files.
+Adapt reads weather radar volume scans one after the other, from files on disk, from the public
+NEXRAD archive, or as they arrive. For each scan it grids the volume, finds the convective cells,
+estimates their motion, measures each cell, and links it to the cells of the scan before. A storm
+keeps one identity for its whole life, through splits and merges. Adapt can then choose the cell a
+radar should follow and write the command that points the radar at it.
 
-The processing pipeline is composed of independently registered modules — ingest, detection, projection,
-analysis, and tracking — assembled automatically at run time. New algorithms and data sources are added
-by registering a module, not by modifying the pipeline. Every run is deterministic and reproducible:
-runs are registered, derived quantities are traceable to their inputs, and identical inputs produce
-identical tracks.
+What comes out of a run:
+
+| Output | Form |
+|--------|------|
+| The gridded volume of every scan | NetCDF, one file per scan |
+| The cell labels, the motion field and the projected cell positions | NetCDF, one file per scan |
+| One row per cell and scan: identity, area, reflectivity and other radar statistics, heights and volumes | SQLite tables, read as one table through the view `cells_by_scan` |
+| One row per track and one row per event (a cell begins, continues, splits, merges, ends) | SQLite tables |
+| The options every run was made with, and what each step did on each scan | SQLite tables |
+
+Everything goes into one folder, the *store*, and is read with Python (`adapt.api.StoreClient`), with
+SQL, or in the dashboard. The same scans and the same options give the same cells and the same
+identities, run after run.
+
+## Quick start
+
+```bash
+conda create -n adapt_env python=3.13 -y
+conda activate adapt_env
+conda install conda-forge::arm-adapt
+
+mkdir my_case && cd my_case
+adapt init          # makes the folder a store and writes the pipeline file nexrad.yaml
+                    # edit the run: section of nexrad.yaml: your radar, and where the scans come from
+adapt run nexrad    # process the scans
+adapt dashboard     # look at the result
+```
+
+`nexrad.yaml` is the *pipeline file*. It says where the scans come from, lists the steps to run (the
+*modules*), and holds the options you change:
+
+```yaml
+run:
+  source: local_directory          # or aws_nexrad, the public NEXRAD archive
+  radar: KHTX
+  mode: historical
+  start_time: 2026-08-04T19:00:00Z
+  end_time: 2026-08-04T21:00:00Z
+  source_dir: /data/level2/KHTX
+  max_runtime_minutes: null
+
+modules:
+  - ingest                    # read + regrid radar volumes
+  - detection                 # segment cells from the grid
+  - projection                # optical-flow projection between scans
+  - analysis                  # 2D per-cell statistics
+  - tracking                  # link cells across scans
+  - cell_volume_stats         # 3D volume stats per cell (base, top, echo-top heights)
+
+params:
+  detection:
+    threshold_params: {threshold: 40}   # an option you change; everything else keeps its default
+```
+
+The [User Guide](https://arm-doe.github.io/Adapt/USAGE.html) walks through a first run, reading the
+results, changing options, adding modules, running a module later over a stored run, and resuming a
+stopped run.
+
+## How it is put together
+
+Each step is a *module* with declared inputs and outputs. A pipeline file lists modules by name, and
+Adapt orders them by what each reads and writes. A new step is a new module: no existing module
+changes. Modules that ship with Adapt: `ingest`, `detection`, `projection`,
+`analysis`, `tracking`, `cell_volume_stats`, `target_selection`, `radar_command` and `xlma_stat`
+(lightning statistics from a Lightning Mapping Array). See the
+[Module Developer Guide](https://arm-doe.github.io/Adapt/module-developer-guide.html) to write one.
 
 ## Motivation
 
@@ -60,21 +121,15 @@ applications such as storm lifecycle studies, radar–lightning correlation anal
 of analysis-ready, multi-sensor datasets combining radar, satellite, and Lightning Mapping Array
 observations.
 
-## From operations to large-scale analysis
-
-The pipeline that selects targets in real time also reprocesses years of archived data, with identical,
-traceable results. Its tracked cells, lifecycle events and decision logs make ready-made value-added
-products and consistent datasets for AI-driven research.
-
 ## Current status
 
 Adapt is at an alpha stage of development.
 
-- The reference NEXRAD pipeline (ingest, detection, projection, analysis, tracking) runs end to end in
+- The NEXRAD pipeline (ingest, detection, projection, analysis, tracking) runs end to end in
   real-time and historical modes.
-- A read-only query API and GUI dashboard provide access to pipeline output.
-- Modules run over a stored run enrich completed storm tracks with observations from other instruments.
-- Rule-based target selection for adaptive scanning is under active development.
+- A read-only Python API and a GUI dashboard give access to the results.
+- Modules can be run later over a stored run, for example to add lightning statistics to tracked cells.
+- Rule-based target selection and radar commands for adaptive scanning are under active development.
 - Supported platforms: macOS, Linux, and Windows. See [Installation](https://arm-doe.github.io/Adapt/installation.html).
 
 No backward compatibility is guaranteed for APIs, configuration, or generated data products until the
