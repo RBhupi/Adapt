@@ -67,6 +67,7 @@ from adapt.consumers.live._utils import (
     cells_for_scan,
     require_scan_identity,
     safe_close,
+    scan_times,
 )
 from adapt.consumers.live._view_mode import Camera, ScanViewState
 from adapt.consumers.live._widgets import _CompactToolbar
@@ -955,7 +956,7 @@ class ScanViewTab:
                 except Exception:
                     logger.exception("Failed to load lightning for %s", uid)
             columns.update(track_df.columns)
-            t = pd.to_datetime(track_df["scan_time"], utc=True)
+            t = scan_times(track_df["scan_time"])
 
             for ax, group_name in zip(axes, group_names, strict=False):
                 group = self.ctx.cfg().get("plot_groups", {}).get(group_name, {})

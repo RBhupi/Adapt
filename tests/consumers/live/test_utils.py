@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 
+import pandas as pd
 import pytest
 
 from adapt.api.domain import Run
@@ -18,6 +19,7 @@ from adapt.consumers.live._utils import (
     format_run_labels,
     is_repository,
     safe_close,
+    scan_times,
     startup_repo,
 )
 
@@ -149,3 +151,36 @@ def test_legacy_root_is_detected_but_not_a_store(tmp_path):
     (legacy / "adapt_registry.db").touch()
     assert is_repository(legacy) is False
     assert is_legacy_repository(legacy) is True
+
+
+# A scan time whose format pandas cannot guess by itself (it warns and parses
+# every value one by one): the day and the second are both "02".
+_UNGUESSABLE = "2025-05-02T20:25:02Z"
+
+
+def test_scan_times_are_read_as_utc_instants():
+    times = scan_times(pd.Series([_UNGUESSABLE, "2025-05-02T20:30:19Z"]))
+
+    assert list(times) == [
+        pd.Timestamp("2025-05-02 20:25:02", tz="UTC"),
+        pd.Timestamp("2025-05-02 20:30:19", tz="UTC"),
+    ]
+
+
+@pytest.mark.filterwarnings("error")
+def test_scan_times_are_read_in_the_stored_format_without_guessing():
+    assert scan_times(pd.Series([_UNGUESSABLE])).iloc[0] == pd.Timestamp(
+        "2025-05-02 20:25:02", tz="UTC"
+    )
+
+
+def test_no_scan_times_give_no_instants():
+    times = scan_times(pd.Series([], dtype=object))
+
+    assert times.empty
+    assert str(times.dtype) == "datetime64[ns, UTC]"
+
+
+def test_a_time_that_is_not_in_the_stored_format_is_refused():
+    with pytest.raises(ValueError, match="2025-05-02 20:25"):
+        scan_times(pd.Series(["2025-05-02 20:25"]))

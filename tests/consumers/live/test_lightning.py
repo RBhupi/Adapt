@@ -59,3 +59,15 @@ def test_missing_bin_yields_nan():
     track = pd.DataFrame({"scan_time": ["2024-05-18T12:05:00Z"]})
     out = merge_lightning(track, _lma_df())
     assert pd.isna(out["flash_count"].iloc[0])
+
+
+@pytest.mark.filterwarnings("error")
+def test_times_are_read_in_the_stored_format_without_guessing():
+    """pandas cannot guess the format of this time (day and second are both "02")."""
+    track = pd.DataFrame({"scan_time": ["2025-05-02T20:25:02Z", "2025-05-02T20:30:19Z"]})
+    lma = pd.DataFrame({"time": ["2025-05-02T20:25:00Z"], "flash_count": [4]})
+
+    out = merge_lightning(track, lma)
+
+    assert out["flash_count"].iloc[0] == 4
+    assert pd.isna(out["flash_count"].iloc[1])

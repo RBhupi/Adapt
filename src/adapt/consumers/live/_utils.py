@@ -13,11 +13,13 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
+
 from adapt.utils.process import process_alive
+from adapt.utils.time import from_scan_iso
 
 if TYPE_CHECKING:
     import numpy as np
-    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +217,15 @@ def require_scan_identity(df) -> None:
             "cells_by_scan carries no scan_id column — the repository predates "
             "scan identity. Recreate it (delete and rerun the pipeline)."
         )
+
+
+def scan_times(column: pd.Series) -> pd.Series:
+    """The instants (UTC) of a column of stored scan-time strings.
+
+    Read in the one stored format, never by letting pandas guess it: pandas
+    cannot guess the format of some valid times (``2025-05-02T20:25:02Z``).
+    """
+    return pd.to_datetime(column.map(from_scan_iso), utc=True)
 
 
 def cells_for_scan(df, scan_id: str, cell_id: int | None = None):

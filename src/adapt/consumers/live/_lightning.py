@@ -12,6 +12,8 @@ only does the pure, Tk/matplotlib-free join.
 
 import pandas as pd
 
+from adapt.consumers.live._utils import scan_times
+
 
 def merge_lightning(track_df: pd.DataFrame, lma_df: pd.DataFrame) -> pd.DataFrame:
     """Left-join lightning value columns onto ``track_df`` by 1-minute bin.
@@ -23,10 +25,10 @@ def merge_lightning(track_df: pd.DataFrame, lma_df: pd.DataFrame) -> pd.DataFram
         return track_df
 
     track = track_df.copy()
-    track["_bin"] = pd.to_datetime(track["scan_time"], utc=True).dt.floor("min")
+    track["_bin"] = scan_times(track["scan_time"]).dt.floor("min")
 
     lma = lma_df.copy()
-    lma["_bin"] = pd.to_datetime(lma["time"], utc=True)
+    lma["_bin"] = scan_times(lma["time"])
     drop = [c for c in lma.columns if c in track.columns and c != "_bin"]
     lma = lma.drop(columns=drop)
 
