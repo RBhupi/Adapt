@@ -14,9 +14,8 @@ import yaml
 
 from adapt.configuration.schemas.module_resolver import module_options
 from adapt.contracts import check_radar_commands
-from adapt.execution.nodes import radar_command as node
-from adapt.execution.nodes.radar_command import RadarCommandModule
-from adapt.modules.radar_command import RadarCommandConfig
+from adapt.modules.radar_command import RadarCommandConfig, node
+from adapt.modules.radar_command.node import RadarCommandModule
 from adapt.modules.radar_command.transport import NotSent, SendError
 from tests.helpers import radar_store
 from tests.helpers.pipeline_files import API, API_KEY, API_URL, RADAR_COMMAND, export_api

@@ -1,11 +1,11 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Base interface for all Adapt execution nodes.
+"""Base interface for all Adapt modules.
 
-Every node in the system — registered from the module catalog
-(``configuration/defaults.yaml``) — must declare its name, inputs, outputs, and
-optionally input/output contracts.
+Every module — a ``BaseModule`` subclass in ``modules/<name>/node.py``, named by
+one line of the module catalog (``configuration/defaults.yaml``) — must declare
+its name, inputs, outputs, and optionally input/output contracts.
 The graph engine uses these declarations to build the execution DAG automatically.
 
 Contract functions come from adapt.contracts — import them there, not here.
@@ -21,7 +21,7 @@ from adapt.contracts import PersistenceSpec, SharedConfig
 
 
 class BaseModule(ABC):
-    """Abstract base for all Adapt execution nodes.
+    """Abstract base for all Adapt modules.
 
     Subclasses declare:
     - ``name``: unique identifier used in the execution graph

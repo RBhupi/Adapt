@@ -7,7 +7,6 @@ from adapt.contracts import (
     check_cell_adjacency,
     check_cell_stats,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisConfig, AnalysisOptions
 from adapt.modules.analysis.module import RadarCellAnalyzer
 from adapt.modules.base import BaseModule
@@ -101,6 +100,3 @@ class AnalysisModule(BaseModule):
         df_adjacency = self._analyzer.extract_adjacency(ds_2d)
 
         return {"cell_stats": df_cells, "cell_adjacency": df_adjacency}
-
-
-registry.register(AnalysisModule)

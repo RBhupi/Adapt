@@ -3,12 +3,15 @@
 
 """Run configs for tests, built the way ``adapt run`` builds them."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from adapt.configuration.pipeline_file import PipelineFile
 from adapt.configuration.pipeline_run import run_config
 from adapt.configuration.schemas.internal import InternalConfig
+from adapt.persistence.store_registry import RunStart, StoreRegistry
+from adapt.runtime.provenance import module_provenance
 from tests.helpers.pipeline_files import MODULES
 
 RADAR = "TEST_RADAR"
@@ -34,3 +37,21 @@ def new_run_config(root: Path, run_id: str | None = None, **sections: Any) -> In
     if sections:
         raise TypeError(f"A pipeline file has no section {', '.join(sections)}")
     return run_config(pipeline, root / "test.yaml", run_id)
+
+
+def record_run(root: Path, config: InternalConfig, **changed: Any) -> None:
+    """Record ``config``'s run in store ``root`` as the orchestrator does when a
+    run starts: its collection, the run with its config, and what each of its
+    modules runs with (``changed``: parts of the run's row that differ)."""
+    registry = StoreRegistry.get_instance(root)
+    registry.register_collection(config.downloader.radar, source_kind="aws_nexrad")
+    start = RunStart(
+        run_id=config.run_id,
+        collection_id=config.downloader.radar,
+        config_hash="h",
+        config_json=config.model_dump_json(),
+        pipeline_version="0",
+        environment_json="{}",
+    )
+    registry.begin_run(replace(start, **changed))
+    registry.record_module_provenance(config.run_id, module_provenance(config))

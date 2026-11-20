@@ -42,3 +42,21 @@ def test_id_is_sha256_prefix():
 def test_non_bytes_input_raises():
     with pytest.raises(TypeError):
         scan_id_from_bytes("not-bytes")
+
+
+# ── options_hash: the identity of a module's options ─────────────────────────
+
+
+def test_equal_options_have_the_same_hash():
+    from adapt.utils.identity import options_hash
+
+    assert options_hash('{"tag":"a"}') == options_hash('{"tag":"a"}')
+    assert options_hash('{"tag":"a"}') != options_hash('{"tag":"b"}')
+
+
+def test_an_options_hash_is_the_first_sixteen_hex_chars_of_the_sha256_of_the_json():
+    from adapt.utils.identity import options_hash
+
+    text = '{"tag":"a"}'
+
+    assert options_hash(text) == hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

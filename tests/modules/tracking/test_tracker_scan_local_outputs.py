@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.module import CellTracker
+from adapt.modules.tracking.node import TrackingModule
 from tests.helpers.shared_config import SHARED
 
 

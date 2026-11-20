@@ -1,17 +1,17 @@
 # The module catalog: every per-scan module a pipeline file may list.
-# Each entry is a Python module path. Importing the module triggers
-# registry.register() for the BaseModule subclass it contains.
-# Listed modules run in dependency order determined by the execution graph —
-# add entries here to extend the catalog without editing Python code.
+# Each line names a module's class as package.file:Class (a BaseModule
+# subclass); loading the catalog registers it.
+# A module runs after the modules it reads from; modules that do not read from
+# each other run in the order of this list.
 
 pipeline:
   modules:
-    - adapt.execution.nodes.ingest
-    - adapt.execution.nodes.detection
-    - adapt.execution.nodes.projection
-    - adapt.execution.nodes.analysis
-    - adapt.execution.nodes.tracking
-    - adapt.execution.nodes.cell_volume_stats
-    - adapt.execution.nodes.target_selection
-    - adapt.execution.nodes.radar_command
-    - adapt.execution.nodes.xlma_stat
+    - adapt.modules.ingest.node:LoadModule
+    - adapt.modules.detection.node:DetectModule
+    - adapt.modules.projection.node:ProjectionModule
+    - adapt.modules.analysis.node:AnalysisModule
+    - adapt.modules.tracking.node:TrackingModule
+    - adapt.modules.cell_volume_stats.node:CellVolumeStatsModule
+    - adapt.modules.target_selection.node:TargetSelectionModule
+    - adapt.modules.radar_command.node:RadarCommandModule
+    - adapt.modules.xlma_stat.node:XlmaStatModule

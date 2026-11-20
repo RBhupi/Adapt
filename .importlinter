@@ -36,7 +36,7 @@ include_external_packages = False
 # runtime        composition root: orchestrates everything below
 # configuration  pydantic schemas + resolution; builds module configs
 # api            StoreClient read facade over the store
-# execution      graph + nodes: the one sanctioned wiring layer over modules
+# execution      graph, module registry, catalog loader: wires modules, defines none
 # modules        science; deterministic; no I/O to the store
 # persistence    SQLite/NetCDF store; no science, no orchestration
 # contracts      types + check_* validators; zero adapt imports

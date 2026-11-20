@@ -7,8 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-from adapt.execution.nodes.detection import DetectModule
 from adapt.modules.detection.config import DetectionConfig, DetectionOptions
+from adapt.modules.detection.node import DetectModule
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit

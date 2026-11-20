@@ -3,9 +3,9 @@
 
 """Module discovery (the module catalog) and selection for pipeline assembly.
 
-The catalog is one discovery file of dotted import paths,
-``configuration/defaults.yaml``. Importing a path triggers its module's
-``registry.register()`` call.
+The catalog is one file, ``configuration/defaults.yaml``, with one line per
+module naming its class as ``package.file:Class``. Loading the catalog
+registers each class.
 
 ``resolve_enabled_modules`` filters the registered set down to a run's list,
 and ``scan_graph`` wires that selection into the one per-scan graph.
@@ -32,67 +32,86 @@ from adapt.contracts import (
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.node import Node
 from adapt.execution.module_registry import registry
+from adapt.modules.base import BaseModule
 
 logger = logging.getLogger(__name__)
 
 _DEFAULTS_YAML = Path(__file__).parent.parent / "configuration" / "defaults.yaml"
 
 
-def _import_catalog(path: Path, section: str, label: str) -> list[str]:
-    """Import every dotted path under ``<section>.modules`` of ``path``; return them."""
+def _catalog_lines() -> list[object]:
+    """The lines of the catalog, ``pipeline.modules`` of ``configuration/defaults.yaml``."""
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(_DEFAULTS_YAML, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
     except OSError as e:
-        raise RuntimeError(f"Cannot read {label} module list '{path}': {e}") from e
+        raise RuntimeError(f"Cannot read pipeline module list '{_DEFAULTS_YAML}': {e}") from e
 
-    module_paths = (cfg or {}).get(section, {}).get("modules", [])
-    if not module_paths:
-        raise RuntimeError(f"No {label} modules declared under '{section}.modules' in '{path}'")
-
-    for module_path in module_paths:
-        try:
-            importlib.import_module(module_path)
-            logger.debug("Registered %s module from: %s", label, module_path)
-        except Exception as e:
-            raise ImportError(f"Failed to import {label} module '{module_path}': {e}") from e
-    return list(module_paths)
+    lines = (cfg or {}).get("pipeline", {}).get("modules", [])
+    if not lines:
+        raise RuntimeError(
+            f"No pipeline modules declared under 'pipeline.modules' in '{_DEFAULTS_YAML}'"
+        )
+    return list(lines)
 
 
-def _ensure_modules_registered() -> None:
-    """Import the modules listed in configuration/defaults.yaml.
-
-    To add a module: add its dotted import path to defaults.yaml.
-
-    Raises
-    ------
-    RuntimeError
-        If defaults.yaml is unreadable or declares no modules.
-    ImportError
-        If any declared module fails to import.
-    """
-    _import_catalog(_DEFAULTS_YAML, "pipeline", "pipeline")
+def _module_class(line: object) -> type[BaseModule]:
+    """The module class a catalog line names as ``package.file:Class``."""
+    path, _, class_name = line.partition(":") if isinstance(line, str) else ("", "", "")
+    if not path or not class_name:
+        raise RuntimeError(
+            f"Catalog line {line!r} in '{_DEFAULTS_YAML}' is not of the form package.file:Class"
+        )
+    try:
+        named = getattr(importlib.import_module(path), class_name, None)
+    except Exception as e:
+        raise ImportError(f"Failed to import pipeline module '{line}': {e}") from e
+    if not isinstance(named, type) or not issubclass(named, BaseModule) or named is BaseModule:
+        raise RuntimeError(
+            f"Catalog line {line!r} in '{_DEFAULTS_YAML}' names no module class "
+            "(a BaseModule subclass)"
+        )
+    if not named.name:
+        raise RuntimeError(
+            f"Catalog line {line!r} in '{_DEFAULTS_YAML}': class {named.__name__} has no name "
+            "(the name a pipeline file lists it by)"
+        )
+    return named
 
 
 def catalog_module_names() -> list[str]:
     """Names of every catalog module, in the catalog's order.
 
-    Registers every catalog module as a side effect (importing is how a module
-    registers).
+    Registers the class each line names. Loading again leaves a class that is
+    already registered alone, since several components load the catalog during
+    startup.
 
     Raises
     ------
     RuntimeError
-        If the discovery file is unreadable or empty, or one of its paths
-        registers no module.
+        If the catalog is unreadable or empty, a line is not
+        ``package.file:Class``, names no module class or one without a name,
+        or two classes give one module name.
+    ImportError
+        If a line's file cannot be imported.
     """
     names: list[str] = []
-    for path in _import_catalog(_DEFAULTS_YAML, "pipeline", "pipeline"):
-        found = [n for n in registry.list_modules() if registry.get(n).__module__ == path]
-        if not found:
-            raise RuntimeError(f"Catalog entry '{path}' registers no module")
-        names.extend(found)
+    for line in _catalog_lines():
+        module_class = _module_class(line)
+        name = module_class.name
+        if name not in registry or registry.get(name) is not module_class:
+            registry.register(module_class)
+        names.append(name)
     return names
+
+
+def _ensure_modules_registered() -> None:
+    """Register the modules listed in configuration/defaults.yaml.
+
+    To add a module: add its class to defaults.yaml as ``package.file:Class``.
+    Raises as ``catalog_module_names`` does.
+    """
+    catalog_module_names()
 
 
 def resolve_enabled_modules(all_modules: list, modules: list[str]) -> list:

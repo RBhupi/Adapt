@@ -318,7 +318,16 @@ sqlite3 collections/KHTX/catalog.db \
 
 # the warnings and errors of a run
 sqlite3 registry.db "SELECT severity, module, message FROM run_events WHERE run_id = '2026NOV18-2211-KHTX'"
+
+# the options each module ran with, and the Adapt version that ran it
+sqlite3 registry.db \
+  "SELECT module, options_hash, version, options_json FROM run_module_provenance WHERE run_id = '2026NOV18-2211-KHTX'"
 ```
+
+The last table has one row per module and set of options: a module added later
+by a run over the stored run is there too. For `target_selection` and
+`radar_command`, `options_hash` is the `config_hash` in their rows, so a row's
+hash leads to the rules that made it.
 
 On the first scan of a run the second query of modules shows, for example:
 

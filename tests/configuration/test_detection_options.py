@@ -21,7 +21,8 @@ from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.modules.detection.config import DetectionOptions
 from adapt.persistence.store import init_store
-from adapt.persistence.store_registry import RunStart, StoreRegistry
+from adapt.persistence.store_registry import StoreRegistry
+from tests.helpers.run_configs import record_run
 
 pytestmark = pytest.mark.unit
 
@@ -298,19 +299,10 @@ class TestRunRecord:
 
     def test_a_pass_over_a_stored_run_with_other_detection_options_is_refused(self, path):
         recorded = run_config(_pipeline({"detection": {"h_maxima": 2.5}}), path, run_id=_RUN_ID)
-        registry = StoreRegistry.get_instance(path.parent)
-        registry.register_collection("KBOX", source_kind="aws_nexrad")
-        registry.begin_run(
-            RunStart(
-                run_id=_RUN_ID,
-                collection_id="KBOX",
-                config_hash="h",
-                config_json=recorded.model_dump_json(),
-                pipeline_version="0",
-                environment_json="{}",
-            )
+        record_run(path.parent, recorded)
+        StoreRegistry.get_instance(path.parent).finalize_run(
+            _RUN_ID, "completed", scans_processed=0
         )
-        registry.finalize_run(_RUN_ID, "completed", scans_processed=0)
         later = _pipeline({}, run={"source": "stored_run", "radar": "KBOX", "mode": "historical"})
 
         with pytest.raises(ConfigError) as exc:

@@ -12,8 +12,8 @@ import yaml
 
 from adapt.configuration.schemas.module_resolver import module_options
 from adapt.contracts import check_selection
-from adapt.execution.nodes.target_selection import TargetSelectionModule, TargetSelectionRun
 from adapt.modules.target_selection import TSEConfig, config_hash
+from adapt.modules.target_selection.node import TargetSelectionModule, TargetSelectionRun
 from adapt.utils.time import from_scan_iso
 from tests.helpers.pipeline_files import TARGET_SELECTION
 from tests.helpers.shared_config import SHARED

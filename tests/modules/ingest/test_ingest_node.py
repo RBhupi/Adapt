@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 import pytest
 
 from adapt.contracts import check_grid_ds_2d
-from adapt.execution.nodes import ingest as ingest_node
-from adapt.execution.nodes.ingest import LoadModule
+from adapt.modules.ingest import node as ingest_node
+from adapt.modules.ingest.node import LoadModule
 from tests.helpers.fake_grid import make_fake_grid_ds
 
 pytestmark = pytest.mark.unit
@@ -100,7 +100,7 @@ def test_outputs_are_in_memory_datasets_only(load_module, ingest_module_config):
 
 def test_declares_gridded3d_netcdf_artifact():
     from adapt.contracts import NetcdfArtifact
-    from adapt.execution.nodes.ingest import LoadModule
+    from adapt.modules.ingest.node import LoadModule
 
     (spec,) = LoadModule.persistence
     assert isinstance(spec, NetcdfArtifact)

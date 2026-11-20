@@ -92,7 +92,7 @@ def test_a_module_listed_without_its_producer_is_told_which_module_to_list():
 
 def test_over_a_stored_run_a_stored_output_needs_no_producer():
     """A module reads from the store what a module not listed stored before."""
-    from adapt.execution.nodes.xlma_stat import XlmaStatModule
+    from adapt.modules.xlma_stat.node import XlmaStatModule
 
     (node,) = scan_graph([XlmaStatModule()], {}, stored_run=True)
 

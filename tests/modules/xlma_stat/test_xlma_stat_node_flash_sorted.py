@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from adapt.execution.nodes.xlma_stat import XlmaStatModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
+from adapt.modules.xlma_stat.node import XlmaStatModule
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc
 

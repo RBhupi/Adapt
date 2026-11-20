@@ -9,7 +9,7 @@ import pytest
 
 from adapt.api.store_client import StoreClient
 from adapt.contracts.persistence import PersistenceMeta
-from adapt.execution.nodes.xlma_stat import XlmaStatModule
+from adapt.modules.xlma_stat.node import XlmaStatModule
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store
 from tests.helpers.radar_store import (

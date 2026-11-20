@@ -203,3 +203,10 @@ def test_format_banner_is_plain_name_version_and_copyright():
         "All Rights Reserved",
         "By: Argonne National Laboratory",
     ]
+
+
+def test_header_marks_a_commit_whose_code_has_changed_since():
+    start = _start()
+    changed = replace(start, provenance=replace(start.provenance, git_commit="abc1234def-dirty"))
+
+    assert "commit abc1234-dirty " in format_header(changed)

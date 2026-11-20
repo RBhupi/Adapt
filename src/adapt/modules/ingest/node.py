@@ -5,7 +5,6 @@ import numpy as np
 import xarray as _xr
 
 from adapt.contracts import TIME_COORD, Z_COORD, NetcdfArtifact, SharedConfig, check_grid_ds_2d
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.ingest.config import IngestConfig, IngestOptions
 from adapt.modules.ingest.module import RadarDataLoader
@@ -112,6 +111,3 @@ class LoadModule(BaseModule):
         ds_2d.attrs.update(ds.attrs)
 
         return {"grid_ds": ds, "grid_ds_2d": ds_2d}
-
-
-registry.register(LoadModule)

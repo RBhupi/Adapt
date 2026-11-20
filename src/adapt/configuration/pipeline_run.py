@@ -14,7 +14,7 @@ fails before anything starts.
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,9 +30,9 @@ from adapt.configuration.schemas.errors import ConfigError, OptionsRefused, toge
 from adapt.configuration.schemas.internal import InternalConfig, PipelineProvenance
 from adapt.configuration.schemas.module_resolver import (
     module_options,
-    recorded_options,
     resolve_module_configs,
 )
+from adapt.contracts.execution_history import ModuleProvenance
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import resolve_enabled_modules, scan_graph
 from adapt.persistence.errors import StoreError
@@ -64,9 +64,10 @@ def run_config(pipeline: PipelineFile, path: Path, run_id: str | None = None) ->
     ``run.source: stored_run`` runs the file's modules over the stored run
     ``run_id``: that run's recorded config, with the file's module list and
     those modules' own options (their defaults with the file's laid over, in
-    place of what the stored run recorded for them). A module the stored run
-    ran must get the options the run recorded for it, unless it keys its rows
-    by its options (``BaseModule.rows_keyed_by_options``).
+    place of what the stored run recorded for them). A module the run has run,
+    in the run itself or in an earlier pass over it, must get the options the
+    run keeps for it (``run_module_provenance``), unless it keys its rows by
+    its options (``BaseModule.rows_keyed_by_options``).
 
     Every module the run will run is configured here and wired into its graph,
     so a module that refuses its options or misses an input fails now, not
@@ -81,7 +82,8 @@ def run_config(pipeline: PipelineFile, path: Path, run_id: str | None = None) ->
         ``YYYYMONDD-HHMM-RADAR``, names a run of another radar, or names a new
         run without the file's radar; a stored run is not named, unknown or
         still running, was recorded with a config this Adapt version cannot
-        read, or ran a listed module with other options; a historical run has
+        read, keeps no record of its modules' options, or ran a listed module
+        with other options; a historical run has
         no ``run.start_time`` or ``run.end_time``; or the file's settings do
         not configure the run and every module (a wrong option is named as
         ``params.<section>.<option>`` or ``params.<module>.<option>``).
@@ -166,7 +168,7 @@ def _stored_run_config(pipeline: PipelineFile, path: Path, run_id: str | None) -
     given, refused = _module_params(pipeline, path)
     if refused:
         raise together(refused)
-    _refuse_other_options(recorded, given, path)
+    _refuse_other_options(run_id, run_registry.module_provenance(run_id), given, path)
     print(f"Running {', '.join(pipeline.modules)} over stored run {run_id}")
     return recorded.model_copy(
         update={
@@ -180,32 +182,42 @@ def _stored_run_config(pipeline: PipelineFile, path: Path, run_id: str | None) -
 
 
 def _refuse_other_options(
-    recorded: InternalConfig, given: Mapping[str, dict[str, Any]], path: Path
+    run_id: str,
+    ran: Sequence[ModuleProvenance],
+    given: Mapping[str, dict[str, Any]],
+    path: Path,
 ) -> None:
-    """Refuse a pass over stored run ``recorded`` that gives a module the run ran
-    (``given``: the pass's options, by module) other options than the run
-    recorded for it.
+    """Refuse a pass over stored run ``run_id`` that gives a module the run has
+    run (``given``: the pass's options, by module) other options than the run
+    keeps for it (``ran``: what its modules ran with, in the run itself or in
+    an earlier pass).
 
     The pass writes the module's rows over the run's key by key, so the rows
-    only the recorded options made would stay among the new ones. A module that
+    only the kept options made would stay among the new ones. A module that
     keys its rows by its options (``rows_keyed_by_options``) is exempt.
     """
+    if not ran:
+        raise ConfigError(
+            f"Pipeline file {path}: run {run_id} keeps no record of the options its modules "
+            "ran with (it was recorded before Adapt kept them, or its start was interrupted), "
+            "so the options of this file cannot be checked against them — start a new run"
+        )
     differing: dict[str, list[str]] = {}
     for name, options in given.items():
-        if name not in recorded.module_params or registry.get(name).rows_keyed_by_options:
+        if registry.get(name).rows_keyed_by_options:
             continue
-        ran_with = recorded_options(recorded, name)
-        assert ran_with is not None  # the pass gives it options, so it has options
         lines = [
             f"  • {at} — recorded: {json.dumps(was)}; this file: {json.dumps(now)}"
-            for at, was, now in _differences(_in_json(ran_with), options, f"params.{name}")
+            for kept in ran
+            if kept.module == name
+            for at, was, now in _differences(_kept_options(run_id, kept), options, f"params.{name}")
         ]
         if lines:
-            differing[name] = lines
+            differing[name] = list(dict.fromkeys(lines))  # each difference once
     if differing:
         names = ", ".join(differing)
         raise ConfigError(
-            f"Pipeline file {path}: run {recorded.run_id} ran {names} with other options "
+            f"Pipeline file {path}: run {run_id} ran {names} with other options "
             "than this file gives:\n"
             + "\n".join(line for lines in differing.values() for line in lines)
             + f"\nThe rows of {names} are not keyed by options, so this pass would write "
@@ -213,6 +225,24 @@ def _refuse_other_options(
             f"Give {names} the recorded options (the recorded values above), or start a new "
             "run with the new ones."
         )
+
+
+def _kept_options(run_id: str, kept: ModuleProvenance) -> dict[str, Any]:
+    """The options run ``run_id`` kept for a module, complete, as this version
+    reads them: an option the module has gained since is at its default, as it
+    is when the run is resumed.
+
+    Raises
+    ------
+    OptionsRefused
+        This version cannot read them (an option the module no longer has, or a
+        value it no longer takes), so whether a file gives the module the
+        options it ran with cannot be told.
+    """
+    source = f"the options run {run_id} kept for {kept.module}"
+    options = module_options(kept.module, json.loads(kept.options_json), source=source)
+    assert options is not None  # a pass gives the module options, so it has options
+    return _in_json(options)
 
 
 def _differences(recorded: Any, given: Any, at: str) -> list[tuple[str, Any, Any]]:

@@ -20,7 +20,6 @@ from adapt.contracts import (
     check_tracked_cells,
     check_tracking_decisions,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.tracking.config import TrackingConfig, TrackingOptions
 from adapt.modules.tracking.lut import attach_cell_uid_lut, attach_registration_uid_lut
@@ -221,6 +220,3 @@ class TrackingModule(BaseModule):
             "tracking_decisions": tracker.decisions(),
             "tracking_state": TrackingState(tracker.state, tables.lifecycle, last_cells),
         }
-
-
-registry.register(TrackingModule)

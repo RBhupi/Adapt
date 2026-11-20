@@ -22,7 +22,6 @@ from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import module_options, resolve_module_configs
 from adapt.contracts import config_key
 from adapt.execution.module_registry import registry
-from adapt.execution.nodes.target_selection import TargetSelectionRun
 from adapt.modules.analysis.config import AnalysisOptions
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
@@ -31,6 +30,7 @@ from adapt.modules.ingest.config import IngestOptions
 from adapt.modules.projection.config import ProjectionOptions
 from adapt.modules.radar_command import RadarCommandConfig
 from adapt.modules.target_selection import TSEConfig
+from adapt.modules.target_selection.node import TargetSelectionRun
 from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.xlma_stat.config import XlmaStatConfig
 from adapt.persistence.store import init_store

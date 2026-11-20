@@ -128,13 +128,6 @@ class TestRegistration:
     def test_unregister_nonexistent_is_noop(self, reg):
         reg.unregister("does_not_exist")  # should not raise
 
-    @pytest.mark.unit
-    def test_clear_removes_all(self, reg):
-        reg.register(StubA)
-        reg.register(StubB)
-        reg.clear()
-        assert len(reg) == 0
-
 
 # ---------------------------------------------------------------------------
 # Retrieval tests

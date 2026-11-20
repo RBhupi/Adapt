@@ -2,9 +2,9 @@ from dataclasses import replace
 
 import pytest
 
-from adapt.execution.nodes.projection import ProjectionModule
 from adapt.modules.projection.config import ProjectionOptions
 from adapt.modules.projection.module import RadarCellProjector
+from adapt.modules.projection.node import ProjectionModule
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit

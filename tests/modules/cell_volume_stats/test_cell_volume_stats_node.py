@@ -20,28 +20,17 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 from adapt.configuration.schemas.errors import ConfigError  # noqa: E402
 from adapt.contracts import check_cell_volume_stats  # noqa: E402
-from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule  # noqa: E402
 from adapt.modules.cell_volume_stats.config import (  # noqa: E402
     CellVolumeStatsConfig,
     CellVolumeStatsOptions,
 )
+from adapt.modules.cell_volume_stats.node import CellVolumeStatsModule  # noqa: E402
 from adapt.utils.time import to_scan_iso  # noqa: E402
 from tests.helpers.shared_config import SHARED  # noqa: E402
 
 
 def _default_config() -> CellVolumeStatsConfig:
     return CellVolumeStatsModule.configure(CellVolumeStatsOptions(), SHARED)
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _restore_default_registration():
-    """cell_volume_stats is a default-pipeline module; ensure it stays registered
-    for other test files even if a test here unregisters it."""
-    yield
-    from adapt.execution.module_registry import registry
-
-    if "cell_volume_stats" not in registry:
-        registry.register(CellVolumeStatsModule)
 
 
 def _grid_3d() -> xr.Dataset:

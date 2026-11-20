@@ -30,7 +30,6 @@ from adapt.contracts import (
     SharedConfig,
     check_cell_volume_stats,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig, CellVolumeStatsOptions
 from adapt.modules.cell_volume_stats.module import CellVolumeStatsAlgorithm
@@ -73,6 +72,3 @@ class CellVolumeStatsModule(BaseModule):
             algo.compute_cell(context["grid_ds"], cell_labels_2d, int(label)) for label in labels
         ]
         return {"cell_volume_stats_rows": pd.DataFrame(rows)}
-
-
-registry.register(CellVolumeStatsModule)

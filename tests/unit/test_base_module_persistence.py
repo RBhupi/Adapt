@@ -26,14 +26,14 @@ class TestBaseModulePersistence:
         assert _NoPersistenceModule.persistence == ()
 
     def test_pure_compute_modules_declare_no_persistence(self):
-        from adapt.execution.nodes.projection import ProjectionModule
+        from adapt.modules.projection.node import ProjectionModule
 
         assert ProjectionModule.persistence == ()
 
     def test_decision_logging_modules_declare_only_decision_writes(self):
         """Detection writes no product; its only persistence is the decision log."""
         from adapt.contracts import DecisionTableWrite
-        from adapt.execution.nodes.detection import DetectModule
+        from adapt.modules.detection.node import DetectModule
 
         assert {type(s) for s in DetectModule.persistence} == {DecisionTableWrite}
         assert DetectModule.persistence[0].key == "detection_decisions"
@@ -45,10 +45,10 @@ class TestBaseModulePersistence:
             ProductTableWrite,
             ProductView,
         )
-        from adapt.execution.nodes.analysis import AnalysisModule
-        from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
-        from adapt.execution.nodes.ingest import LoadModule
-        from adapt.execution.nodes.tracking import TrackingModule
+        from adapt.modules.analysis.node import AnalysisModule
+        from adapt.modules.cell_volume_stats.node import CellVolumeStatsModule
+        from adapt.modules.ingest.node import LoadModule
+        from adapt.modules.tracking.node import TrackingModule
 
         assert {type(s) for s in LoadModule.persistence} == {NetcdfArtifact}
         assert {type(s) for s in AnalysisModule.persistence} == {ProductTableWrite}
@@ -71,7 +71,7 @@ class TestBaseModulePersistence:
         """Tracking gives the view its rows and three flags; the tables of other
         modules join it by their key, without tracking naming them."""
         from adapt.contracts import ProductTableWrite, ProductView
-        from adapt.execution.nodes.tracking import TrackingModule
+        from adapt.modules.tracking.node import TrackingModule
 
         (view,) = (s for s in TrackingModule.persistence if isinstance(s, ProductView))
         own = {s.table for s in TrackingModule.persistence if isinstance(s, ProductTableWrite)}

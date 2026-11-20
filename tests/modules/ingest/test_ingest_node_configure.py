@@ -7,8 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-from adapt.execution.nodes.ingest import LoadModule
 from adapt.modules.ingest.config import IngestConfig, IngestOptions
+from adapt.modules.ingest.node import LoadModule
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit

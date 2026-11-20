@@ -39,7 +39,6 @@ from adapt.contracts import (
     check_xlma_stat_minutes,
     check_xlma_stat_scan,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.xlma_stat.aggregate import cell_scan_rows
 from adapt.modules.xlma_stat.attribution import UNATTRIBUTED
@@ -143,6 +142,3 @@ class XlmaStatModule(BaseModule):
             self._flashes = read_flash_sorted_frames(nc_files)
             self._folder = folder
         return self._flashes
-
-
-registry.register(XlmaStatModule)

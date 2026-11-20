@@ -16,7 +16,6 @@ from adapt.contracts import (
     check_segmented_ds,
     require,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.detection.config import DetectionConfig, DetectionOptions
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
@@ -155,6 +154,3 @@ class DetectModule(BaseModule):
             f"seed_carry: advected label {int(advected.max())} exceeds prior cell count",
         )
         return CarriedLabels(labels=advected, ages=tuple(ages))
-
-
-registry.register(DetectModule)

@@ -13,10 +13,12 @@ process-wide cache deterministically (FD-leak lesson from the old registry).
 
 import sqlite3
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from adapt.contracts.execution_history import ModuleProvenance
 from adapt.persistence.sqlite_store import SqliteStore
 from adapt.persistence.store import REGISTRY_FILENAME, StoreError, _reject_legacy_root
 
@@ -231,6 +233,45 @@ class StoreRegistry(SqliteStore):
                 "SELECT * FROM run_modules WHERE run_id = ? ORDER BY module", (run_id,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_module_provenance(self, run_id: str, ran: Iterable[ModuleProvenance]) -> None:
+        """Keep what each module of ``ran`` runs with in run ``run_id``. A module
+        started again with the same options keeps one row, with the newer version."""
+        now = datetime.now(UTC).isoformat()
+        conn = self._get_connection()
+        with self._lock:
+            known = conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            if known is None:
+                raise StoreError(f"Run '{run_id}' does not exist")
+            conn.executemany(
+                "INSERT OR REPLACE INTO run_module_provenance "
+                "(run_id, module, options_hash, options_json, version, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (run_id, row.module, row.options_hash, row.options_json, row.version, now)
+                    for row in ran
+                ],
+            )
+            conn.commit()
+
+    def module_provenance(self, run_id: str) -> list[ModuleProvenance]:
+        """What the modules of run ``run_id`` ran with, oldest record first."""
+        conn = self._get_connection()
+        with self._lock:
+            rows = conn.execute(
+                "SELECT module, options_hash, options_json, version FROM run_module_provenance "
+                "WHERE run_id = ? ORDER BY recorded_at, module, options_hash",
+                (run_id,),
+            ).fetchall()
+        return [
+            ModuleProvenance(
+                module=row["module"],
+                options_hash=row["options_hash"],
+                options_json=row["options_json"],
+                version=row["version"],
+            )
+            for row in rows
+        ]
 
     def record_run_event(
         self, run_id: str, *, severity: str, module: str, message: str, context_json: str

@@ -1,23 +1,16 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Module registry — discover and instantiate registered modules.
+"""Module registry — the one in-process table of module classes.
 
-Modules register their class at import time by calling ``registry.register()``.
-The controller calls ``registry.create_modules()`` to get instantiated modules
-ready for graph construction.
+The catalog loader (``pipeline_builder.catalog_module_names``) registers the
+class each line of ``configuration/defaults.yaml`` names; a module file does
+not register itself. The controller calls ``registry.create_modules()`` to get
+instantiated modules ready for graph construction.
 
 Usage::
 
-    # In a module file (modules/detection/module.py):
-    from adapt.execution.module_registry import registry
-
-    class DetectModule(BaseModule):
-        name = "detection"
-        inputs = ["grid_volume"]
-        outputs = ["storm_cells"]
-        ...
-
+    # The catalog loader, for each line ``package.file:Class``:
     registry.register(DetectModule)
 
     # In the controller:
@@ -107,10 +100,6 @@ class ModuleRegistry:
         """Remove a module from the registry (primarily for testing)."""
         self._modules.pop(name, None)
 
-    def clear(self) -> None:
-        """Remove all registered modules (primarily for testing)."""
-        self._modules.clear()
-
     def __len__(self) -> int:
         return len(self._modules)
 
@@ -118,5 +107,5 @@ class ModuleRegistry:
         return name in self._modules
 
 
-# Global singleton — modules register here at import time.
+# Global singleton — filled by the catalog loader.
 registry = ModuleRegistry()

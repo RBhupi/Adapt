@@ -34,7 +34,13 @@ class TestInitStore:
             ).fetchall()
         finally:
             conn.close()
-        assert {r[0] for r in rows} == {"collections", "runs", "run_modules", "run_events"}
+        assert {r[0] for r in rows} == {
+            "collections",
+            "runs",
+            "run_modules",
+            "run_module_provenance",
+            "run_events",
+        }
 
     def test_init_twice_raises(self, tmp_path):
         root = tmp_path / "store"

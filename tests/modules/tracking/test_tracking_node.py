@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.tracking.node import TrackingModule
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -45,7 +45,7 @@ def _tracker_returning(monkeypatch, results):
     """Stand in for the tracker: each scan's tracker returns the next preset
     (tracked_cells, cell_events) pair."""
     from adapt.contracts import TrackingDecisions, TrackingScan
-    from adapt.execution.nodes import tracking as node
+    from adapt.modules.tracking import node
     from adapt.modules.tracking.module import TrackerState
 
     pending = list(results)

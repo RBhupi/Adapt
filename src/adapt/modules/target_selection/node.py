@@ -11,10 +11,9 @@ scan and rule in the ``target_selection`` table; ``radar_command`` acts on it.
 """
 
 from dataclasses import dataclass
+from importlib.resources import files
 
 from adapt.contracts import ProductTableWrite, SharedConfig, check_module_state, check_selection
-from adapt.execution.module_registry import registry
-from adapt.execution.nodes._options import preset_text
 from adapt.modules.base import BaseModule
 from adapt.modules.target_selection import (
     CurrentTarget,
@@ -25,7 +24,7 @@ from adapt.modules.target_selection import (
 )
 from adapt.modules.target_selection.table import selection_frame
 
-_PACKAGE, _PRESET = "adapt.modules.target_selection", "growing_isolated"
+_PRESET = files("adapt.modules.target_selection") / "presets" / "growing_isolated.yaml"
 
 
 @dataclass(frozen=True)
@@ -76,7 +75,7 @@ class TargetSelectionModule(BaseModule):
     @classmethod
     def options_preset(cls) -> str:
         """The packaged rule as commented YAML, ready to paste under ``params:``."""
-        return preset_text(_PACKAGE, _PRESET)
+        return _PRESET.read_text("utf-8")
 
     @classmethod
     def configure(cls, options: TSEConfig, shared: SharedConfig) -> TargetSelectionRun:
@@ -100,6 +99,3 @@ class TargetSelectionModule(BaseModule):
             "selection": selection_frame(decision, config_hash(config.rules)),
             "target_selection_state": SelectionState(engine.current_target),
         }
-
-
-registry.register(TargetSelectionModule)

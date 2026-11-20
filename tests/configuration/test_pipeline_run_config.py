@@ -13,7 +13,7 @@ folder is the store root.
 
 import json
 import shutil
-from dataclasses import replace
+import sqlite3
 from datetime import UTC, datetime
 
 import pytest
@@ -29,7 +29,10 @@ from adapt.modules.base import BaseModule
 from adapt.persistence.errors import StoreError
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
+from adapt.runtime.provenance import module_provenance
+from adapt.utils.identity import options_hash
 from tests.helpers.pipeline_files import API, export_api
+from tests.helpers.run_configs import record_run
 
 pytestmark = pytest.mark.unit
 
@@ -309,17 +312,7 @@ class TestProvenance:
 def _record(store_root, config, **changed) -> None:
     """Record ``config``'s run in the store, as the orchestrator does when it starts
     (``changed``: parts of the record that differ)."""
-    registry = StoreRegistry.get_instance(store_root)
-    registry.register_collection(config.downloader.radar, source_kind="aws_nexrad")
-    start = RunStart(
-        run_id=config.run_id,
-        collection_id=config.downloader.radar,
-        config_hash="h",
-        config_json=config.model_dump_json(),
-        pipeline_version="0",
-        environment_json="{}",
-    )
-    registry.begin_run(replace(start, **changed))
+    record_run(store_root, config, **changed)
 
 
 def _record_of_another_version(store_root, config) -> None:
@@ -340,9 +333,40 @@ def _record_with_a_retired_module_option(store_root, config) -> None:
     recorded = json.loads(config.model_dump_json())
     recorded["module_params"]["cell_volume_stats"]["retired_option"] = 1
     _record(store_root, config, config_json=json.dumps(recorded))
+    registry_db = sqlite3.connect(store_root / "registry.db")
+    try:  # what the run keeps of the module's options holds the retired one too
+        options_json = json.dumps(recorded["module_params"]["cell_volume_stats"])
+        registry_db.execute(
+            "UPDATE run_module_provenance SET options_json = ?, options_hash = ? "
+            "WHERE module = 'cell_volume_stats'",
+            (options_json, options_hash(options_json)),
+        )
+        registry_db.commit()
+    finally:
+        registry_db.close()
     StoreRegistry.get_instance(store_root).finalize_run(
         config.run_id, "completed", scans_processed=0
     )
+
+
+def _keep_without(store_root, module: str, option: str) -> None:
+    """Make the run's kept options of ``module`` those of a version that did not
+    have ``option`` yet."""
+    registry_db = sqlite3.connect(store_root / "registry.db")
+    try:
+        (kept,) = registry_db.execute(
+            "SELECT options_json FROM run_module_provenance WHERE module = ?", (module,)
+        ).fetchone()
+        options = json.loads(kept)
+        del options[option]
+        options_json = json.dumps(options)
+        registry_db.execute(
+            "UPDATE run_module_provenance SET options_json = ?, options_hash = ? WHERE module = ?",
+            (options_json, options_hash(options_json), module),
+        )
+        registry_db.commit()
+    finally:
+        registry_db.close()
 
 
 def _assert_names_the_unreadable_module_option(message: str) -> None:
@@ -817,6 +841,51 @@ class TestStoredRun:
             run_config(later, path, run_id=_RUN_ID)
 
         _assert_names_the_unreadable_module_option(str(exc.value))
+
+    def _stored_before_the_search_radius(self, path, tmp_path):
+        """A stored run that ran ``xlma_stat`` when it had no ``search_radius_m``
+        yet; returns the run's config and the options a file gives the module."""
+        ran_with = {"xlma_stat": {"input_dir": str(tmp_path)}}
+        recorded = self._stored(path, modules=(*_MODULES, "xlma_stat"), **ran_with)
+        _keep_without(path.parent, "xlma_stat", "search_radius_m")
+        return recorded, ran_with
+
+    def test_a_module_that_gained_an_option_since_the_run_may_run_over_it_again(
+        self, path, tmp_path
+    ):
+        """The run kept the module's options without the new one; this version
+        reads them with the new option at its default, as it would resume the run."""
+        _, ran_with = self._stored_before_the_search_radius(path, tmp_path)
+        later = _pipeline(run=self._STORED, modules=("xlma_stat",), params=ran_with)
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert config.modules == ["xlma_stat"]
+
+    def test_a_module_that_gained_an_option_is_still_refused_other_options(self, path, tmp_path):
+        self._stored_before_the_search_radius(path, tmp_path)
+        other = {"xlma_stat": {"input_dir": str(tmp_path), "search_radius_m": 750.0}}
+        later = _pipeline(run=self._STORED, modules=("xlma_stat",), params=other)
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        assert "  • params.xlma_stat.search_radius_m — recorded: " in str(exc.value)
+
+    def test_options_kept_twice_since_an_option_was_added_are_one_set_of_options(
+        self, path, tmp_path
+    ):
+        """The run kept them without the new option, and again with it at its
+        default when this version resumed the run."""
+        recorded, ran_with = self._stored_before_the_search_radius(path, tmp_path)
+        StoreRegistry.get_instance(path.parent).record_module_provenance(
+            _RUN_ID, module_provenance(recorded)
+        )
+        later = _pipeline(run=self._STORED, modules=("xlma_stat",), params=ran_with)
+
+        config = run_config(later, path, run_id=_RUN_ID)
+
+        assert config.modules == ["xlma_stat"]
 
     def test_the_wrong_options_of_several_listed_modules_are_told_together(self, path, tmp_path):
         self._stored(path)

@@ -24,10 +24,11 @@ in the ``target_selection`` table. Unknown keys raise; every key is required exc
 (``at_scan``, the causal view live selection has).
 """
 
-import hashlib
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from adapt.utils.identity import options_hash
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
@@ -192,4 +193,4 @@ class TSEConfig(BaseModel):
 
 def config_hash(cfg: TSEConfig) -> str:
     """16-hex-char identity of the effective rules: equal configs hash equal."""
-    return hashlib.sha256(cfg.model_dump_json().encode()).hexdigest()[:16]
+    return options_hash(cfg.model_dump_json())

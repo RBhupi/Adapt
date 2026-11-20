@@ -15,7 +15,7 @@ import pytest
 import xarray as xr
 
 from adapt.contracts import ContractViolation, check_prior_scans, check_seed_carry
-from adapt.execution.nodes.detection import DetectModule
+from adapt.modules.detection.node import DetectModule
 
 pytestmark = pytest.mark.unit
 

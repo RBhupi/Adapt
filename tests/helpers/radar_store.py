@@ -34,7 +34,7 @@ import pandas as pd
 import xarray as xr
 
 from adapt.contracts.persistence import NetcdfArtifact, PersistenceMeta
-from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
+from adapt.modules.cell_volume_stats.node import CellVolumeStatsModule
 from adapt.modules.tracking.tables import Lifecycle
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.persistence.store import Store, init_store

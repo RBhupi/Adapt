@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pandas as pd
 
 from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView, ScanRecord
-from adapt.execution.nodes.analysis import AnalysisModule
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.analysis.node import AnalysisModule
+from adapt.modules.tracking.node import TrackingModule
 from adapt.modules.tracking.tables import Lifecycle, scan_tables
 from adapt.persistence.output_router import StoreOutputRouter
 

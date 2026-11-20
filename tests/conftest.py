@@ -12,16 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from adapt.execution.nodes.analysis import AnalysisModule
-from adapt.execution.nodes.detection import DetectModule
-from adapt.execution.nodes.ingest import LoadModule
-from adapt.execution.nodes.projection import ProjectionModule
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.execution.pipeline_builder import _ensure_modules_registered
 from adapt.modules.analysis.config import AnalysisOptions
+from adapt.modules.analysis.node import AnalysisModule
 from adapt.modules.detection.config import DetectionOptions
+from adapt.modules.detection.node import DetectModule
 from adapt.modules.ingest.config import IngestOptions
+from adapt.modules.ingest.node import LoadModule
 from adapt.modules.projection.config import ProjectionOptions
+from adapt.modules.projection.node import ProjectionModule
 from adapt.modules.tracking.config import TrackingOptions
+from adapt.modules.tracking.node import TrackingModule
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import StoreRegistry
 from tests.helpers.run_configs import new_run_config
@@ -30,6 +31,13 @@ from tests.helpers.shared_config import SHARED
 # =============================================================================
 # Resource isolation
 # =============================================================================
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _catalog_loaded():
+    """A test may look a catalog module up by name without loading the catalog
+    itself: it is loaded once, as every ``adapt`` command loads it first."""
+    _ensure_modules_registered()
 
 
 @pytest.fixture(autouse=True)

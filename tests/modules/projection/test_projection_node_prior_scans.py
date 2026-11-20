@@ -14,7 +14,7 @@ import pytest
 import xarray as xr
 
 from adapt.contracts import check_prior_scans
-from adapt.execution.nodes.projection import ProjectionModule
+from adapt.modules.projection.node import ProjectionModule
 
 pytestmark = pytest.mark.unit
 

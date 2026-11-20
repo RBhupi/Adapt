@@ -16,7 +16,9 @@ from datetime import datetime
 
 @dataclass(frozen=True, slots=True)
 class RunProvenance:
-    """Environment snapshot for reproducibility. ``git_commit`` is None outside a checkout."""
+    """Environment snapshot for reproducibility. ``git_commit`` is the commit of
+    the checkout Adapt's code runs from, ending in ``-dirty`` when the code has
+    changed since; None outside a checkout."""
 
     git_commit: str | None
     hostname: str
@@ -24,6 +26,21 @@ class RunProvenance:
     python_version: str
     platform: str
     software_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleProvenance:
+    """What one module of a run ran with: its options and the Adapt version.
+
+    ``options_json`` is the module's validated options, complete, as JSON text
+    (``null`` for a module without options); ``options_hash`` identifies them
+    (``adapt.utils.identity.options_hash``).
+    """
+
+    module: str
+    options_hash: str
+    options_json: str
+    version: str
 
 
 @dataclass(frozen=True, slots=True)

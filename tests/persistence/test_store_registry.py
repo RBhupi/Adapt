@@ -156,3 +156,62 @@ def test_finalizing_a_resumed_run_adds_its_scan_counts(registry):
 
     row = registry.get_run("run-1")
     assert (row["scans_processed"], row["scans_failed"]) == (5, 1)
+
+
+def _ran(module: str, options_json: str, version: str = "1.2.3"):
+    from adapt.contracts.execution_history import ModuleProvenance
+    from adapt.utils.identity import options_hash
+
+    return ModuleProvenance(
+        module=module,
+        options_hash=options_hash(options_json),
+        options_json=options_json,
+        version=version,
+    )
+
+
+class TestModuleProvenance:
+    """What each module of a run ran with: its options, and the Adapt version."""
+
+    @pytest.fixture
+    def run(self, registry):
+        registry.register_collection("KILX", source_kind="nexrad")
+        registry.begin_run(_start())
+        return registry
+
+    def test_a_run_keeps_the_options_each_module_ran_with(self, run):
+        rows = [_ran("tracking", '{"max_speed_ms":30.0}'), _ran("ingest", "null")]
+
+        run.record_module_provenance("run-1", rows)
+
+        assert sorted(run.module_provenance("run-1"), key=lambda r: r.module) == sorted(
+            rows, key=lambda r: r.module
+        )
+
+    def test_a_run_without_a_record_has_none(self, run):
+        assert run.module_provenance("run-1") == []
+
+    def test_starting_again_with_the_same_options_keeps_one_row_with_the_newer_version(self, run):
+        run.record_module_provenance("run-1", [_ran("tracking", '{"a":1}', version="1.2.3")])
+
+        run.record_module_provenance("run-1", [_ran("tracking", '{"a":1}', version="1.3.0")])
+
+        assert run.module_provenance("run-1") == [_ran("tracking", '{"a":1}', version="1.3.0")]
+
+    def test_other_options_of_one_module_are_kept_beside_the_first(self, run):
+        run.record_module_provenance("run-1", [_ran("target_selection", '{"a":1}')])
+
+        run.record_module_provenance("run-1", [_ran("target_selection", '{"a":2}')])
+
+        kept = {row.options_json for row in run.module_provenance("run-1")}
+        assert kept == {'{"a":1}', '{"a":2}'}
+
+    def test_each_run_has_its_own_record(self, run):
+        run.begin_run(_start(run_id="run-2"))
+        run.record_module_provenance("run-1", [_ran("tracking", '{"a":1}')])
+
+        assert run.module_provenance("run-2") == []
+
+    def test_a_run_the_store_does_not_have_is_refused(self, run):
+        with pytest.raises(StoreError, match="run-9"):
+            run.record_module_provenance("run-9", [_ran("tracking", '{"a":1}')])

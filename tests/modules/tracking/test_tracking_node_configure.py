@@ -7,8 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-from adapt.execution.nodes.tracking import TrackingModule
 from adapt.modules.tracking.config import TrackingConfig, TrackingOptions
+from adapt.modules.tracking.node import TrackingModule
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit

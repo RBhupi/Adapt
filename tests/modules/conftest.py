@@ -10,7 +10,7 @@ import xarray as xr
 
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.execution.nodes.ingest import LoadModule
+from adapt.modules.ingest.node import LoadModule
 from tests.helpers.run_configs import new_run_config
 
 

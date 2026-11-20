@@ -19,9 +19,9 @@ certificate file. The environment is their only source, so no value in the file
 competes with it.
 """
 
-import hashlib
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from adapt.utils.identity import options_hash
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -148,4 +148,4 @@ class RadarCommandConfig(BaseModel):
 
 def config_hash(cfg: RadarCommandConfig) -> str:
     """16-hex-char identity of the effective config: equal configs hash equal."""
-    return hashlib.sha256(cfg.model_dump_json().encode()).hexdigest()[:16]
+    return options_hash(cfg.model_dump_json())

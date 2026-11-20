@@ -68,10 +68,16 @@ def format_seconds(seconds: float) -> str:
     return format_duration(seconds)
 
 
+def _short_commit(commit: str) -> str:
+    """Seven characters of the commit, with its mark of changed code kept."""
+    marked = "-dirty" if commit.endswith("-dirty") else ""
+    return commit[:7] + marked
+
+
 def format_header(start: RunStart) -> str:
     """One compact block summarising the run at a glance."""
     p = start.provenance
-    commit = p.git_commit[:7] if p.git_commit else "—"
+    commit = _short_commit(p.git_commit) if p.git_commit else "—"
     return "\n".join(
         [
             f"── Adapt run {start.run_id} {_RULE[: max(0, 48 - len(start.run_id))]}",

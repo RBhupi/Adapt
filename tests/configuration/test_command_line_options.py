@@ -20,6 +20,7 @@ from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from tests.helpers.pipeline_files import MODULES, TARGET_SELECTION, write_pipeline
+from tests.helpers.run_configs import record_run
 
 pytestmark = pytest.mark.unit
 
@@ -251,20 +252,8 @@ class TestTheRun:
         assert "--set" in message
 
     def test_a_rule_over_a_stored_run_may_be_set_on_the_command_line(self, root):
-        recorded = self._config(root, run_id=_RUN_ID)
-        registry = StoreRegistry.get_instance(root)
-        registry.register_collection("KTST", source_kind="aws_nexrad")
-        registry.begin_run(
-            RunStart(
-                run_id=_RUN_ID,
-                collection_id="KTST",
-                config_hash="h",
-                config_json=recorded.model_dump_json(),
-                pipeline_version="0",
-                environment_json="{}",
-            )
-        )
-        registry.finalize_run(_RUN_ID, "completed", scans_processed=0)
+        record_run(root, self._config(root, run_id=_RUN_ID))
+        StoreRegistry.get_instance(root).finalize_run(_RUN_ID, "completed", scans_processed=0)
         later = write_pipeline(
             root,
             "later",

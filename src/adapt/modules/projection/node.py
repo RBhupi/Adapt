@@ -7,7 +7,6 @@ from adapt.contracts import (
     check_projected_ds,
     check_segmented_ds,
 )
-from adapt.execution.module_registry import registry
 from adapt.modules.base import BaseModule
 from adapt.modules.projection.config import ProjectionConfig, ProjectionOptions
 from adapt.modules.projection.module import RadarCellProjector
@@ -76,6 +75,3 @@ class ProjectionModule(BaseModule):
         ds_list.append(context["segmented_ds"])
         projected = self._projector.project(ds_list)
         return {"projected_ds": projected}
-
-
-registry.register(ProjectionModule)

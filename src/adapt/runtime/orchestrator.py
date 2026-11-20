@@ -32,7 +32,7 @@ from adapt.runtime.history_handler import HistoryLogHandler
 from adapt.runtime.logging_setup import configure_logging, shutdown_logging
 from adapt.runtime.observability import build_observability, obs_settings
 from adapt.runtime.processor import RadarProcessor
-from adapt.runtime.provenance import capture_provenance, config_hash
+from adapt.runtime.provenance import capture_provenance, config_hash, module_provenance
 from adapt.runtime.run_reporter import RunReporter
 from adapt.runtime.sources import source_registry
 
@@ -246,6 +246,7 @@ class PipelineOrchestrator:
         else:
             # --run-id continuation: reopen the ONE run record.
             self.registry.resume_run(self.run_id)
+        self.registry.record_module_provenance(self.run_id, module_provenance(self.config))
         self.run_registered.set()
         header = RunStart(
             run_id=self.run_id,

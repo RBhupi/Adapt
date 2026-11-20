@@ -12,6 +12,7 @@ selection and radar_command are the real ones.
 import http.client
 import logging
 import signal
+import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -30,17 +31,20 @@ from tests.helpers.pipeline_files import (
 )
 from tests.helpers.tracking_store import TRACKING_TABLES, tracking_outputs
 
+from adapt import __version__ as adapt_version
 from adapt.api import StoreClient
 from adapt.contracts import PersistenceMeta, ProductTableWrite
 from adapt.execution.module_registry import registry
-from adapt.execution.nodes.analysis import AnalysisModule
-from adapt.execution.nodes.cell_volume_stats import CellVolumeStatsModule
-from adapt.execution.nodes.ingest import LoadModule
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.analysis.node import AnalysisModule
 from adapt.modules.base import BaseModule
+from adapt.modules.cell_volume_stats.node import CellVolumeStatsModule
+from adapt.modules.ingest.node import LoadModule
+from adapt.modules.tracking.node import TrackingModule
 from adapt.modules.tracking.tables import Lifecycle
 from adapt.persistence.products import SchemaLedger, TableWriter
 from adapt.persistence.store import Store
+from adapt.persistence.store_registry import StoreRegistry
+from adapt.utils.identity import options_hash
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -211,6 +215,16 @@ def _more_scans(case, count: int) -> None:
 def _run(root, run_id=None):
     with StoreClient(root) as client:
         return client.run(run_id) if run_id else client.latest_run("KTST")
+
+
+def _ran_with(root, run_id=RUN_ID) -> dict[str, list[str]]:
+    """The options (as recorded JSON) each module of the run ran with, by module."""
+    recorded: dict[str, list[str]] = {}
+    for row in StoreRegistry.get_instance(root).module_provenance(run_id):
+        assert row.options_hash == options_hash(row.options_json)
+        assert row.version == adapt_version
+        recorded.setdefault(row.module, []).append(row.options_json)
+    return recorded
 
 
 def _table(root, name, run_id=RUN_ID) -> pd.DataFrame:
@@ -593,3 +607,113 @@ def test_a_module_run_again_with_the_recorded_options_writes_the_same_rows(tagge
     assert adapt("run", "later", "--run-id", RUN_ID) == 0
 
     assert _table(tagged, "cli_echo").to_json() == before
+
+
+# ---------------------------------------------------------------------------
+# What each module ran with is kept with the run
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_keeps_the_options_each_of_its_modules_ran_with(tagged):
+    assert _ran_with(tagged) == {PROBE: ["null"], ECHO: ['{"tag":"first"}']}
+
+
+def test_a_pass_keeps_the_options_of_the_modules_it_ran(stored, adapt):
+    write_pipeline(stored, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "late"}})
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert _ran_with(stored) == {CELLS: ["null"], ECHO: ['{"tag":"late"}']}
+
+
+def test_a_module_first_run_by_a_pass_cannot_be_run_again_with_other_options(stored, adapt, capsys):
+    """The run itself never ran ``cli_echo``; the first pass did, and its rows
+    are keyed by scan alone, so a second pass would write over some of them."""
+    write_pipeline(stored, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "late"}})
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+    write_pipeline(stored, "again", run=STORED, modules=[ECHO], params={ECHO: {"tag": "other"}})
+
+    assert adapt("run", "again", "--run-id", RUN_ID) == 2
+
+    err = capsys.readouterr().err
+    assert f"run {RUN_ID} ran {ECHO} with other options" in err
+    assert f'  • params.{ECHO}.tag — recorded: "late"; this file: "other"' in err
+    assert _table(stored, "cli_echo")["tag"].tolist() == ["late"] * 3
+    assert _ran_with(stored)[ECHO] == ['{"tag":"late"}']
+
+
+def test_a_module_first_run_by_a_pass_may_be_run_again_with_the_same_options(stored, adapt):
+    write_pipeline(stored, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "late"}})
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    assert _ran_with(stored)[ECHO] == ['{"tag":"late"}']
+
+
+def test_every_rule_a_run_was_decided_with_is_kept_under_the_hash_in_its_rows(stored, adapt):
+    """``target_selection`` keys its rows by the hash of its rules: the run keeps
+    each set of rules under that same hash."""
+    write_pipeline(stored, "later", run=STORED, modules=["target_selection"], params=RULE)
+    adapt("run", "later", "--run-id", RUN_ID)
+    stricter = {
+        **TARGET_SELECTION,
+        "entry": {"gates": [{"field": "radar_reflectivity_max", "op": "ge", "value": 55.0}]},
+    }
+    write_pipeline(
+        stored,
+        "stricter",
+        run=STORED,
+        modules=["target_selection"],
+        params={"target_selection": stricter},
+    )
+    assert adapt("run", "stricter", "--run-id", RUN_ID) == 0
+
+    kept = {options_hash(text) for text in _ran_with(stored)["target_selection"]}
+
+    assert kept == set(_table(stored, "target_selection")["config_hash"])
+    assert len(kept) == 2
+
+
+def test_radar_command_rows_carry_the_hash_of_the_options_kept_with_the_run(stored, adapt):
+    write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=RADAR_PARAMS)
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    (kept,) = _ran_with(stored)["radar_command"]
+    assert set(_table(stored, "radar_commands")["config_hash"]) == {options_hash(kept)}
+
+
+def test_over_a_stored_run_radar_command_rows_carry_the_hash_of_its_options_without_api(
+    stored, adapt, monkeypatch
+):
+    """A pass never sends, so ``radar_command`` drops ``api`` before it plans:
+    its rows carry the hash of the options without it, the run keeps them whole."""
+    for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
+        monkeypatch.delenv(variable, raising=False)
+    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=params)
+    assert adapt("run", "later", "--run-id", RUN_ID) == 0
+
+    (kept,) = _ran_with(stored)["radar_command"]
+
+    assert '"api":{' in kept
+    assert set(_table(stored, "radar_commands")["config_hash"]) != {options_hash(kept)}
+
+
+def test_a_run_that_kept_no_options_of_its_modules_cannot_be_passed_over(stored, adapt, capsys):
+    """Runs recorded before Adapt kept each module's options have no such rows."""
+    registry_db = sqlite3.connect(stored / "registry.db")
+    try:
+        registry_db.execute("DELETE FROM run_module_provenance")
+        registry_db.commit()
+    finally:
+        registry_db.close()
+    write_pipeline(stored, "later", run=STORED, modules=[ECHO], params={ECHO: {"tag": "late"}})
+
+    assert adapt("run", "later", "--run-id", RUN_ID) == 2
+
+    err = capsys.readouterr().err
+    assert RUN_ID in err
+    assert "recorded before" in err
+    assert "start a new run" in err

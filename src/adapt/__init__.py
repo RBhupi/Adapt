@@ -5,7 +5,7 @@
 
 The layer stack and boundary rules live in .importlinter and are enforced
 by lint-imports and tests/test_architecture.py. Key subpackages: ``modules``
-(science), ``execution`` (graph + nodes), ``runtime`` (orchestration),
+(science, one package per module), ``execution`` (graph), ``runtime`` (orchestration),
 ``persistence`` (store), ``api`` (StoreClient read facade), ``consumers``
 (dashboard, target selection).
 

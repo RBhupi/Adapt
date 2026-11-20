@@ -495,7 +495,15 @@ class RadarProcessor(threading.Thread):
         row = self.collection.catalog.run_checkpoint(self.run_id)
         if row is None:
             return
-        saved = pickle.loads(read_checkpoint(self.collection, row["object_name"]))  # noqa: S301
+        payload = read_checkpoint(self.collection, row["object_name"])
+        try:
+            saved = pickle.loads(payload)  # noqa: S301
+        except (ImportError, AttributeError) as e:
+            raise StoreError(
+                f"Run '{self.run_id}' cannot go on from its checkpoint: it names a class this "
+                f"Adapt version cannot load ({e}), as a checkpoint written by another version "
+                "may; start a new run"
+            ) from e
         missing = sorted(self._carried_keys - set(saved["carried"]))
         if missing:
             raise StoreError(

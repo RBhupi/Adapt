@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Deterministic identity for raw source data.
+"""Deterministic identity: of raw source data, and of a module's options.
 
 ``scan_id`` is the single identity key joining tracking tables, catalog rows,
 artifacts, and consumer lookups (design/08_repository_evolution.md: "stable scan
@@ -24,3 +24,13 @@ def scan_id_from_bytes(data: bytes) -> str:
     if not isinstance(data, bytes):
         raise TypeError(f"scan_id_from_bytes expects bytes, got {type(data).__name__}")
     return hashlib.sha256(data).hexdigest()[:_SCAN_ID_HEX_CHARS]
+
+
+# 16 hex chars, as scan_id: short enough for a table key, and a row's hash can
+# be checked with standard tooling against the options JSON a run keeps.
+_OPTIONS_HASH_HEX_CHARS = 16
+
+
+def options_hash(options_json: str) -> str:
+    """Identity of a module's options, from their JSON text: equal text, equal hash."""
+    return hashlib.sha256(options_json.encode("utf-8")).hexdigest()[:_OPTIONS_HASH_HEX_CHARS]

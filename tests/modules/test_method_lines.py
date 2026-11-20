@@ -9,11 +9,11 @@ its own built config; a module without one has no line.
 
 import pytest
 
-from adapt.execution.nodes.analysis import AnalysisModule
-from adapt.execution.nodes.detection import DetectModule
-from adapt.execution.nodes.ingest import LoadModule
-from adapt.execution.nodes.projection import ProjectionModule
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.analysis.node import AnalysisModule
+from adapt.modules.detection.node import DetectModule
+from adapt.modules.ingest.node import LoadModule
+from adapt.modules.projection.node import ProjectionModule
+from adapt.modules.tracking.node import TrackingModule
 
 pytestmark = pytest.mark.unit
 

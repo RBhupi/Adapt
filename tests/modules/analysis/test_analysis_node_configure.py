@@ -7,8 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-from adapt.execution.nodes.analysis import AnalysisModule
 from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisConfig, AnalysisOptions
+from adapt.modules.analysis.node import AnalysisModule
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit

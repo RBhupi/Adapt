@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.execution.nodes.detection import DetectModule
-from adapt.execution.nodes.projection import ProjectionModule
+from adapt.modules.detection.node import DetectModule
+from adapt.modules.projection.node import ProjectionModule
 
 pytestmark = pytest.mark.unit
 

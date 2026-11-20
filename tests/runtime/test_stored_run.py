@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from adapt.contracts.persistence import PersistenceMeta
-from adapt.execution.nodes.tracking import TrackingModule
+from adapt.modules.tracking.node import TrackingModule
 from adapt.persistence.output_router import StoreOutputRouter
 from tests.helpers.analysis_nc import cell_block, make_analysis_ds
 from tests.helpers.lma import write_flash_sorted_nc

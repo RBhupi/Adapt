@@ -68,11 +68,13 @@ def _imported_adapt_modules(py_file: Path) -> set[str]:
 # Build the test matrix at collection time — works for any future module.
 _PACKAGES = _discover_module_packages()
 _SKIP = {"adapt.modules.base"}  # base.py is shared infrastructure, not a science module
+_MODULE_INTERFACE = "adapt.modules.base"
 
 
 @pytest.mark.parametrize("pkg", [p for p in _PACKAGES if p not in _SKIP])
 def test_module_does_not_import_other_modules(pkg: str) -> None:
-    """Scientific module must not import from any other adapt.modules subpackage.
+    """A module package imports no other module package; of ``adapt.modules`` it
+    may import only ``adapt.modules.base``, the interface its node implements.
 
     This test is parameterised over every subpackage discovered under adapt.modules.
     Adding a new module directory makes it appear here automatically.
@@ -83,7 +85,7 @@ def test_module_does_not_import_other_modules(pkg: str) -> None:
     for py_file in files:
         for imported in _imported_adapt_modules(py_file):
             # Allow self-imports (within the same subpackage)
-            if not imported.startswith(pkg):
+            if not imported.startswith(pkg) and imported != _MODULE_INTERFACE:
                 violations.append(f"  {py_file.name}: imports {imported!r}")
 
     assert not violations, (
@@ -223,13 +225,12 @@ def test_module_does_not_read_wall_clock_or_global_rng(pkg: str) -> None:
     )
 
 
-def test_execution_nodes_do_not_read_wall_clock() -> None:
+def test_the_execution_layer_does_not_read_wall_clock() -> None:
     """Graph nodes must be deterministic too, not just modules/*.
 
-    The pre-identity wall-clock scan_time fallback lived in
-    execution/nodes/ingest.py — exactly where the per-module fitness function
-    above does not look. Scan times come from the source boundary; nothing in
-    the execution layer may substitute a clock.
+    The pre-identity wall-clock scan_time fallback lived in the ingest node,
+    then a file of the execution layer. Scan times come from the source
+    boundary; nothing in the execution layer may substitute a clock.
     """
     execution_dir = _SRC_ADAPT / "execution"
     violations: list[str] = []
@@ -780,13 +781,43 @@ def _attributes_set_while_running(py_file: Path) -> set[str]:
     return found
 
 
+def _node_files() -> list[Path]:
+    """``modules/<name>/node.py``: the file holding the class the pipeline runs."""
+    return sorted((_SRC_ADAPT / "modules").glob("*/node.py"))
+
+
+def test_a_module_is_one_package_named_by_one_catalog_line() -> None:
+    """A module's class lives in ``modules/<name>/node.py``, ``<name>`` being the
+    name a pipeline file lists, and one line of the catalog names it."""
+    from adapt.execution.module_registry import registry
+    from adapt.execution.pipeline_builder import catalog_module_names
+
+    homes = [registry.get(name).__module__ for name in catalog_module_names()]
+
+    assert homes == [f"adapt.modules.{name}.node" for name in catalog_module_names()]
+    assert sorted(homes) == [f"adapt.modules.{f.parent.name}.node" for f in _node_files()]
+
+
+def test_the_execution_layer_holds_no_module() -> None:
+    """``execution/`` wires modules into a graph; it defines none."""
+    defined = [
+        f"{_rel(py_file, _SRC_ADAPT)}: class {node.name}"
+        for py_file in sorted((_SRC_ADAPT / "execution").rglob("*.py"))
+        for node in ast.walk(ast.parse(py_file.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ClassDef)
+        and any(isinstance(base, ast.Name) and base.id == "BaseModule" for base in node.bases)
+    ]
+
+    assert not defined, f"a module class belongs in modules/<name>/node.py: {defined}"
+    assert not (_SRC_ADAPT / "execution" / "nodes").exists()
+
+
 def test_a_module_node_carries_nothing_between_scans_in_its_attributes() -> None:
     """A run resumed from its checkpoint must go on as if it had not stopped,
     which holds only while every module's state is in the keys the runtime carries."""
-    nodes = _SRC_ADAPT / "execution" / "nodes"
     offenders = {
         _rel(py_file, _SRC_ADAPT): sorted(extra)
-        for py_file in sorted(nodes.glob("*.py"))
+        for py_file in _node_files()
         if (extra := _attributes_set_while_running(py_file) - _NODE_ATTRIBUTES)
     }
     assert not offenders, (

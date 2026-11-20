@@ -7,8 +7,8 @@ import pytest
 
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.execution.nodes.xlma_stat import XlmaStatModule
 from adapt.modules.xlma_stat.config import XlmaStatConfig
+from adapt.modules.xlma_stat.node import XlmaStatModule
 from tests.helpers.pipeline_files import MODULES
 from tests.helpers.shared_config import SHARED
 
@@ -38,7 +38,7 @@ def test_minute_rows_are_keyed_by_cell_uid_and_minute():
 def test_scan_rows_are_keyed_like_every_per_cell_table():
     """Run, scan and cell label: the key of ``cells_by_scan``, so each cell's
     lightning is read beside its uid, statistics and volume."""
-    from adapt.execution.nodes.analysis import AnalysisModule
+    from adapt.modules.analysis.node import AnalysisModule
 
     cell_stats = AnalysisModule.persistence[0]
 

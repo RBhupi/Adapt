@@ -272,3 +272,22 @@ def test_a_run_whose_modules_changed_cannot_go_on_from_its_checkpoint(processor,
 
     with pytest.raises(StoreError, match="probe_count"):
         processor(modules=[COUNTER, FLAKY])
+
+
+def test_a_checkpoint_naming_a_class_that_no_longer_exists_is_refused(processor, scans, store_env):
+    """A run checkpointed before its modules' classes moved cannot be resumed:
+    its saved state names classes by where they lived then."""
+    first = processor()
+    for scan in scans[:2]:
+        assert first.process_file(scan) is True
+    row = store_env.collection.catalog.run_checkpoint(first.run_id)
+    path = store_env.collection.objects_dir / row["object_name"]
+    path.write_bytes(b"cadapt.execution.nodes.tracking\nTrackingState\n.")  # a pickled class name
+
+    with pytest.raises(StoreError) as refusal:
+        processor()
+
+    message = str(refusal.value)
+    assert first.run_id in message
+    assert "adapt.execution.nodes" in message
+    assert "start a new run" in message

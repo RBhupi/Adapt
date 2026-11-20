@@ -16,6 +16,7 @@ import logging
 import math
 from dataclasses import replace
 from datetime import timedelta
+from importlib.resources import files
 
 import pandas as pd
 
@@ -26,8 +27,6 @@ from adapt.contracts import (
     check_radar_commands,
     check_selection,
 )
-from adapt.execution.module_registry import registry
-from adapt.execution.nodes._options import preset_text
 from adapt.modules.base import BaseModule
 from adapt.modules.radar_command.command import CommandValidationError, to_json
 from adapt.modules.radar_command.config import ApiConfig, RadarCommandConfig, config_hash
@@ -50,7 +49,7 @@ from adapt.modules.radar_command.transport import (
 
 logger = logging.getLogger(__name__)
 
-_PACKAGE, _PRESET = "adapt.modules.radar_command", "sandbox"
+_PRESET = files("adapt.modules.radar_command") / "presets" / "sandbox.yaml"
 # The outcomes after which a plan counts as published (a refused send is not
 # repeated: the next scan plans afresh).
 _NEWLY_PUBLISHED = frozenset(
@@ -94,7 +93,7 @@ class RadarCommandModule(BaseModule):
     @classmethod
     def options_preset(cls) -> str:
         """The packaged options as commented YAML, ready to paste under ``params:``."""
-        return preset_text(_PACKAGE, _PRESET)
+        return _PRESET.read_text("utf-8")
 
     @classmethod
     def configure(cls, options: RadarCommandConfig, shared: SharedConfig) -> RadarCommandConfig:
@@ -192,6 +191,3 @@ def _too_old(age: timedelta, api: ApiConfig) -> str | None:
             "(radar_command.api.max_scan_age_seconds)"
         )
     return None
-
-
-registry.register(RadarCommandModule)
