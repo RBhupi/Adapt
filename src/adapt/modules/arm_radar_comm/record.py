@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""What radar_command did at one scan, as the row the store keeps.
+"""What arm_radar_comm did at one scan, as the row the store keeps.
 
 One row per scan and config in ``radar_commands``: the selected cell, the
 outcome, and — when a command was planned — its id and its JSON as sent on the
@@ -103,7 +103,7 @@ def summary(record: CommandRecord) -> str:
     else:
         what = record.outcome.value.lower().replace("_", " ") + plan
     cell = f" for cell {record.cell_uid}" if record.cell_uid is not None else ""
-    return f"{_MARKS.get(record.outcome, '')}radar_command: {what}{cell}{_note(record)}"
+    return f"{_MARKS.get(record.outcome, '')}arm_radar_comm: {what}{cell}{_note(record)}"
 
 
 def _note(record: CommandRecord) -> str:

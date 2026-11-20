@@ -5,13 +5,19 @@
 
 Emits a plain config dict as YAML, annotating scalar leaves with their field
 descriptions as inline ``# comment`` text. Parsing the result reproduces the
-original data (comments and tuple→list normalisation aside). Pure formatting.
+original data (comments and tuple→list normalisation aside). ``insert`` adds
+such entries to a mapping of an existing YAML text, leaving every other line as
+it is. Pure formatting.
 """
 
 import re
+import textwrap
+from collections.abc import Sequence
 from typing import Any
 
 import yaml
+
+from adapt.configuration.schemas.errors import ConfigError
 
 # Descriptions are a tree mirroring the data: a key maps to either a leaf
 # description string or a nested dict of descriptions. A nested dict's
@@ -70,6 +76,13 @@ def _emit_sequence(key: str, value, comment: str, indent: int, lines: list[str])
     """A list at ``key``; ``comment`` ends its first line."""
     pad = "  " * indent
     items = list(value)
+    if items and all(_flat_mapping(i) for i in items):
+        # Flat mappings → one inline row each.
+        lines.append(f"{pad}{key}:{comment}")
+        for item in items:
+            inline = ", ".join(f"{scalar(k)}: {scalar(v)}" for k, v in item.items())
+            lines.append(f"{pad}  - {{{inline}}}")
+        return
     if any(isinstance(i, dict) for i in items):
         # Emitting only the dict keys (what the naive path would do) is
         # silent corruption — refuse loudly instead.
@@ -88,6 +101,74 @@ def _emit_sequence(key: str, value, comment: str, indent: int, lines: list[str])
     for item in items:
         inline = ", ".join(scalar(i) for i in item)
         lines.append(f"{item_pad}- [{inline}]")
+
+
+def _flat_mapping(item: Any) -> bool:
+    return isinstance(item, dict) and not any(
+        isinstance(v, dict | list | tuple) for v in item.values()
+    )
+
+
+def insert(text: str, at: Sequence[str], entries: str, gap: int = 0) -> str:
+    """``text``, a YAML document, with ``entries`` added at the end of its mapping at ``at``.
+
+    ``at`` is a key path. ``entries`` is YAML from column 0 (what ``dump``
+    writes); it is indented to the mapping's keys, after ``gap`` empty lines.
+    A key with no value yet (``params:``) takes them indented two spaces past
+    it. Every line of ``text`` is kept as it is, comments included.
+
+    Raises
+    ------
+    ConfigError
+        ``at`` holds something other than a block mapping or no value — a flow
+        mapping ``{...}``, a ``null``, a list or a scalar — so no line can be added
+        to it.
+    """
+    key, value = _find(yaml.compose(text), at)
+    if _no_value(value):
+        indent, after = key.start_mark.column + 2, key.end_mark.line
+    elif isinstance(value, yaml.MappingNode) and not value.flow_style:
+        indent, after = value.value[0][0].start_mark.column, _last_line(value)
+    else:
+        raise ConfigError(
+            f"{'.'.join(at)} is not written one entry per line (line {key.start_mark.line + 1}), "
+            "so options cannot be added to it — write it as a block mapping, one option per line"
+        )
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    added = ["\n"] * gap + [textwrap.indent(entries, " " * indent)]
+    return "".join([*lines[: after + 1], *added, *lines[after + 1 :]])
+
+
+def _find(node: yaml.Node | None, at: Sequence[str]) -> tuple[yaml.Node, yaml.Node]:
+    """The key and value nodes at key path ``at`` of the document ``node``."""
+    key: yaml.Node | None = None
+    for depth, name in enumerate(at, start=1):
+        if not isinstance(node, yaml.MappingNode):
+            raise ConfigError(f"{'.'.join(at[: depth - 1]) or 'The document'} is not a mapping")
+        found = [(k, v) for k, v in node.value if k.value == name]
+        if not found:
+            raise ConfigError(f"{'.'.join(at[:depth])} is not in the file")
+        key, node = found[0]
+    assert key is not None and node is not None, "at names at least one key"
+    return key, node
+
+
+def _no_value(node: yaml.Node) -> bool:
+    """A key written with nothing after it: ``params:``."""
+    return isinstance(node, yaml.ScalarNode) and node.tag.endswith(":null") and node.value == ""
+
+
+def _last_line(node: yaml.Node) -> int:
+    """The index of the last line that holds part of ``node``."""
+    if isinstance(node, yaml.MappingNode) and not node.flow_style:
+        key, value = node.value[-1]
+        return key.end_mark.line if _no_value(value) else _last_line(value)
+    if isinstance(node, yaml.SequenceNode) and not node.flow_style:
+        return _last_line(node.value[-1])
+    end = node.end_mark
+    return end.line if end.column else end.line - 1
 
 
 def scalar(value: Any) -> str:

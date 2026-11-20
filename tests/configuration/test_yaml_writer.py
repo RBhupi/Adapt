@@ -14,7 +14,8 @@ pytestmark = pytest.mark.unit
 
 import yaml  # noqa: E402
 
-from adapt.configuration.schemas.yaml_writer import dump  # noqa: E402
+from adapt.configuration.schemas.errors import ConfigError  # noqa: E402
+from adapt.configuration.schemas.yaml_writer import dump, insert  # noqa: E402
 
 
 class TestRoundTrip:
@@ -126,8 +127,65 @@ def test_empty_dict_round_trips_as_empty_dict():
     assert yaml.safe_load(out) == {"field_map": {}}
 
 
-def test_list_of_dicts_is_rejected_loudly():
-    # Today the writer silently emits only the dict keys — corrupted output
-    # is worse than no output.
+def test_a_list_of_flat_mappings_round_trips_one_row_each():
+    data = {"gates": [{"field": "n_scans", "op": "ge", "value": 2}, {"field": "x", "value": 0.5}]}
+
+    out = dump(data)
+
+    assert out == "gates:\n  - {field: n_scans, op: ge, value: 2}\n  - {field: x, value: 0.5}\n"
+    assert yaml.safe_load(out) == data
+
+
+def test_a_list_of_nested_mappings_is_rejected_loudly():
+    # Emitting only the dict keys would be silent corruption.
     with pytest.raises(ValueError, match="list of dicts"):
-        dump({"rows": [{"a": 1}]})
+        dump({"rows": [{"a": {"b": 1}}]})
+
+
+_DOC = """\
+# head
+params:
+  tracking:  # mine
+    max_speed_ms: 35  # changed
+    # a note
+  detection:
+    nested:
+      a: 1
+# tail
+"""
+
+
+class TestInsert:
+    def test_entries_go_at_the_end_of_the_mapping_indented_to_its_keys(self):
+        out = insert(_DOC, ("params", "tracking"), "latent_scans: 2  # N\n")
+
+        assert out == _DOC.replace(
+            "    max_speed_ms: 35  # changed\n",
+            "    max_speed_ms: 35  # changed\n    latent_scans: 2  # N\n",
+        )
+
+    def test_a_nested_mapping_takes_entries_at_its_own_depth(self):
+        out = insert(_DOC, ("params", "detection", "nested"), "b: 2\n")
+
+        assert "      a: 1\n      b: 2\n# tail\n" in out
+        assert yaml.safe_load(out)["params"]["detection"]["nested"] == {"a": 1, "b": 2}
+
+    def test_a_gap_puts_empty_lines_before_the_entries(self):
+        out = insert(_DOC, ("params",), "# projection\nprojection:\n  levels: 3\n", gap=2)
+
+        assert "      a: 1\n\n\n  # projection\n  projection:\n    levels: 3\n# tail" in out
+
+    def test_a_key_without_a_value_takes_entries_two_spaces_past_it(self):
+        out = insert("run: x\nparams:\n# end\n", ("params",), "tracking:\n  a: 1\n")
+
+        assert out == "run: x\nparams:\n  tracking:\n    a: 1\n# end\n"
+
+    def test_a_document_without_a_final_newline_is_extended(self):
+        assert insert("params:\n  a: 1", ("params",), "b: 2\n") == "params:\n  a: 1\n  b: 2\n"
+
+    @pytest.mark.parametrize("value", ["{a: 1}", "{}", "null", "[1]", "3"])
+    def test_what_is_not_a_block_mapping_is_refused_naming_it(self, value):
+        with pytest.raises(
+            ConfigError, match=r"params\.tracking is not written one entry per line"
+        ):
+            insert(f"params:\n  tracking: {value}\n", ("params", "tracking"), "b: 2\n")

@@ -1,12 +1,12 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""``adapt config --show NAME``: options with their defaults, as YAML ready to paste.
+"""``adapt config --params NAME...``: options with their defaults, as YAML ready to paste.
 
 NAME is a module (it shows its options under its own name) or a params
-section. The output is lines to paste under the file's ``params:`` line, which
-its first line names; pasted there, a fragment changes nothing: it prints the
-defaults.
+section; several may be named at once. The output is lines to paste under the
+file's ``params:`` line, which its first line names; pasted there, it changes
+nothing: it prints the defaults.
 """
 
 from importlib.resources import files
@@ -19,29 +19,29 @@ from adapt.configuration.schemas.module_resolver import module_options
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
 from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisOptions
+from adapt.modules.arm_radar_comm import RadarCommandConfig
 from adapt.modules.detection.config import DetectionOptions
 from adapt.modules.ingest.config import IngestOptions
 from adapt.modules.projection.config import ProjectionOptions
-from adapt.modules.radar_command import RadarCommandConfig
 from adapt.modules.target_selection import TSEConfig
 from adapt.modules.tracking.config import TrackingOptions
 
 pytestmark = pytest.mark.unit
 
 # Modules whose options are a packaged, commented rule, validated by these models.
-RULES = {"target_selection": TSEConfig, "radar_command": RadarCommandConfig}
+RULES = {"target_selection": TSEConfig, "arm_radar_comm": RadarCommandConfig}
 PARAMS_LINE = "# Paste these lines under the params: line of your pipeline file"
 TSE_PRESET = files("adapt.modules.target_selection") / "presets" / "growing_isolated.yaml"
-SANDBOX_PRESET = files("adapt.modules.radar_command") / "presets" / "sandbox.yaml"
+SANDBOX_PRESET = files("adapt.modules.arm_radar_comm") / "presets" / "sandbox.yaml"
 
 
 @pytest.fixture
 def show(adapt, capsys):
-    """``adapt config --show NAME``'s output; fails unless the command succeeds."""
+    """``adapt config --params NAME...``'s output; fails unless the command succeeds."""
 
-    def _show(name: str) -> str:
+    def _show(*names: str) -> str:
         capsys.readouterr()  # drop what earlier commands printed
-        assert adapt("config", "--show", name) == 0
+        assert adapt("config", "--params", *names) == 0
         return capsys.readouterr().out
 
     return _show
@@ -115,7 +115,7 @@ def test_a_modules_header_names_the_command_that_shows_the_shared_options(name, 
 
     assert header == (
         f"  # {name}: {registry.get(name).module_summary()}. "
-        "Options shared by every module: adapt config --show global"
+        "Options shared by every module: adapt config --params global"
     )
 
 
@@ -363,15 +363,23 @@ def test_target_selection_prints_its_packaged_rule_with_its_comments(show):
     assert f"  {rationale}" in out.splitlines()
 
 
-def test_radar_command_prints_the_sandbox_preset_a_dry_run(show):
-    section = yaml.safe_load(show("radar_command"))["radar_command"]
+def test_arm_radar_comm_prints_the_sandbox_preset_a_dry_run(show):
+    section = yaml.safe_load(show("arm_radar_comm"))["arm_radar_comm"]
 
-    assert section == yaml.safe_load(SANDBOX_PRESET.read_text("utf-8"))["radar_command"]
-    assert "api" not in section
+    assert section == yaml.safe_load(SANDBOX_PRESET.read_text("utf-8"))["arm_radar_comm"]
+    assert section["api"] is None
+
+
+def test_arm_radar_comm_is_printed_as_options_to_give_not_defaults(show):
+    lines = show("arm_radar_comm").splitlines()
+
+    assert lines[2] == (
+        "  # arm_radar_comm has no defaults: a file that lists it must give every option below."
+    )
 
 
 def test_an_unknown_name_lists_every_valid_name_by_kind(adapt, capsys):
-    assert adapt("config", "--show", "bogus") == 2
+    assert adapt("config", "--params", "bogus") == 2
 
     err = capsys.readouterr().err
     assert "bogus" in err
@@ -382,7 +390,7 @@ def test_an_unknown_name_lists_every_valid_name_by_kind(adapt, capsys):
 
 
 def test_the_sections_shown_are_downloader_global_and_logging(adapt, capsys):
-    adapt("config", "--show", "bogus")
+    adapt("config", "--params", "bogus")
 
     assert "  params sections: downloader, global, logging" in capsys.readouterr().err.splitlines()
 
@@ -401,9 +409,9 @@ def test_the_sections_shown_are_downloader_global_and_logging(adapt, capsys):
     ],
 )
 def test_a_section_nothing_reads_is_an_unknown_name(name, adapt, capsys):
-    assert adapt("config", "--show", name) == 2
+    assert adapt("config", "--params", name) == 2
 
-    assert f"Unknown name '{name}'" in capsys.readouterr().err
+    assert f"Unknown name(s) {name} " in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("name", _names())
@@ -426,8 +434,29 @@ def test_two_fragments_pasted_one_after_the_other_under_params_load(
     show, adapt, tmp_path, monkeypatch
 ):
     template = _template(tmp_path, adapt, monkeypatch)
-    # params: is the template's last line, so appending pastes under it (show NAME >> file).
+    # params: is the template's last line, so appending pastes under it (--params NAME >> file).
     pipeline = _load(tmp_path, template + show("detection") + show("tracking"))
 
     assert set(pipeline.params) == {"detection", "tracking"}
     assert _at_their_defaults(pipeline)
+
+
+def test_several_modules_print_under_one_line_two_empty_lines_apart(show):
+    out = show("tracking", "projection")
+
+    assert out.count(PARAMS_LINE) == 1
+    assert out == PARAMS_LINE + "\n" + "\n\n".join(
+        show(name).removeprefix(PARAMS_LINE + "\n") for name in ("tracking", "projection")
+    )
+    assert "\n\n\n  # projection: " in out
+    assert list(yaml.safe_load(out)) == ["tracking", "projection"]
+
+
+def test_a_module_and_a_section_print_together(show):
+    assert list(yaml.safe_load(show("global", "tracking"))) == ["global", "tracking"]
+
+
+def test_every_unknown_name_is_told_at_once(adapt, capsys):
+    assert adapt("config", "--params", "tracking", "bogus", "trackin") == 2
+
+    assert "Unknown name(s) bogus, trackin for adapt config --params" in capsys.readouterr().err

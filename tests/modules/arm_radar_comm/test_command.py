@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from adapt.modules.radar_command.command import (
+from adapt.modules.arm_radar_comm.command import (
     CommandValidationError,
     RadarCommand,
     TargetEntry,
@@ -17,7 +17,7 @@ from adapt.modules.radar_command.command import (
     to_json,
     validate,
 )
-from adapt.modules.radar_command.extent import GeoExtent
+from adapt.modules.arm_radar_comm.extent import GeoExtent
 
 pytestmark = pytest.mark.unit
 

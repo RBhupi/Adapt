@@ -13,10 +13,10 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from adapt.modules.radar_command.command import RadarCommand, TargetEntry
-from adapt.modules.radar_command.config import PlanningConfig, RadarCommandConfig, config_hash
-from adapt.modules.radar_command.extent import geographic_extent
-from adapt.modules.radar_command.target import SelectionRef, TargetGeometry, TargetUnavailable
+from adapt.modules.arm_radar_comm.command import RadarCommand, TargetEntry
+from adapt.modules.arm_radar_comm.config import PlanningConfig, RadarCommandConfig, config_hash
+from adapt.modules.arm_radar_comm.extent import geographic_extent
+from adapt.modules.arm_radar_comm.target import SelectionRef, TargetGeometry, TargetUnavailable
 from adapt.utils.time import to_scan_iso
 
 
@@ -40,7 +40,7 @@ def plan_times(frames: tuple[datetime, ...], planning: PlanningConfig) -> tuple[
     between = [t for t in times if t <= frames[-1] and t not in frames]
     if between:
         raise ValueError(
-            f"radar_command.planning.interval_seconds={planning.interval_seconds} does not "
+            f"arm_radar_comm.planning.interval_seconds={planning.interval_seconds} does not "
             f"fit the projection frames {to_scan_iso(frames[0])} .. {to_scan_iso(frames[-1])}: "
             f"plan time {to_scan_iso(between[0])} falls between frames"
         )
@@ -53,8 +53,11 @@ def plan_id(ref: SelectionRef, cfg_hash: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
-def build_plan(geometry: TargetGeometry, ref: SelectionRef, cfg: RadarCommandConfig) -> Plan:
-    """One target entry per plan time, boxing that minute's footprint, until the target ends."""
+def build_plan(
+    geometry: TargetGeometry, ref: SelectionRef, cfg: RadarCommandConfig, user_id: str
+) -> Plan:
+    """One target entry per plan time, boxing that minute's footprint, until the
+    target ends; the command carries ``user_id``."""
     by_time = {fp.time: fp for fp in geometry.footprints}
     margin_km = geometry.pixel_radius_km + cfg.extent.horizontal_buffer_km
     times = plan_times(tuple(by_time), cfg.planning)
@@ -71,7 +74,7 @@ def build_plan(geometry: TargetGeometry, ref: SelectionRef, cfg: RadarCommandCon
             f"{to_scan_iso(times[0])} after scan '{ref.scan_id}' of run '{ref.run_id}'"
         )
     pid = plan_id(ref, config_hash(cfg))
-    command = RadarCommand(cfg.radar.scan_pattern, cfg.radar.user_id, pid, tuple(entries))
+    command = RadarCommand(cfg.radar.scan_pattern, user_id, pid, tuple(entries))
     return Plan(
         plan_id=pid,
         command=command,

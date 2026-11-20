@@ -222,7 +222,7 @@ run:
 A realtime run starts with the newest scans of the last hour (up to 5), then
 looks for new ones every 300 seconds. It runs until you press `Ctrl-C`, or for
 `max_runtime_minutes` when you set it. The numbers are options of `downloader`
-(`adapt config --show downloader`).
+(`adapt config --params downloader`).
 
 ---
 
@@ -235,11 +235,20 @@ name of the module it belongs to. Give only what you change.
 1. Print the options of a module, with their defaults and meanings:
 
    ```bash
-   adapt config --show detection     # one module
-   adapt config --show global        # settings shared by several modules
+   adapt config --params detection tracking   # one module or several
+   adapt config --params global               # settings shared by several modules
    ```
 
-2. Write the ones you change under `params:`.
+2. Write the ones you change under `params:`. Or let Adapt write every option
+   of the modules the file lists, at its default, and edit the values there:
+
+   ```bash
+   adapt config --params --file nexrad.yaml             # every module the file lists
+   adapt config --params --file nexrad.yaml tracking    # one module, listed or not
+   ```
+
+   It only adds what the file does not give: your values and comments stay,
+   and running it again changes nothing.
 
    ```yaml
    params:
@@ -260,15 +269,15 @@ name of the module it belongs to. Give only what you change.
 
 What to know:
 
-- The names under `params:` are the modules the file lists, and three sections
+- The names under `params:` are the modules, and three sections
   that belong to no module: `global` (the altitude of the slice, the field cells
   are tracked on, the largest gap between scans), `downloader` and `logging`.
 - `adapt run` and `adapt graph` check every option before anything starts. A
   misspelled option or a value out of its bounds is refused with its full name
   and the reason, for example
   `params.detection.h_maxima — value -1 is out of range — Input should be greater than 0`.
-- Options of a module the file does not list are refused: list the module or
-  remove its options.
+- Only the modules under `modules:` run. Options of a module the file does not
+  list stay in the file unread, ready for when you list it.
 - Every run records the options it ran with, defaults included
   (`client.run_config(run_id)`).
 - **For one run, an option can be set on the command line** instead of in the
@@ -326,7 +335,7 @@ already have, see *Run a module later over a stored run* below.
 | `tracking` | Links the cells of this scan to those of the previous one and gives each a `cell_uid`. Records how each track begins and ends, and every split and merge. | `projection`, `analysis` | the slice with labels, motion and projections, a NetCDF file per scan (`segmentation2d`); tables `cell_identity`, `cell_events`, `cell_tracks`; the view `cells_by_scan`; its decision log |
 | `cell_volume_stats` | Measures each cell in the full volume: volume, base and top, echo-top heights at 10 to 50 dBZ, layering, polarimetric statistics. | `ingest`, `detection` | table `cell_volume_stats` |
 | `target_selection` | Chooses, at each scan, the cell a radar should follow, with a rule you can edit. | `tracking`, and the cells and tracks stored so far | table `target_selection` |
-| `radar_command` | Turns each choice into a radar command: a box around the projected cell, and a scan pattern. Records it; sends it only when you configure that. | `target_selection`, `tracking`, `cell_volume_stats` | table `radar_commands` |
+| `arm_radar_comm` | Turns each choice into a radar command: a box around the projected cell, and a scan pattern. Records it; sends it only when you configure that. | `target_selection`, `tracking`, `cell_volume_stats` | table `radar_commands` |
 | `xlma_stat` | Counts and describes the lightning flashes of each cell, minute by minute and summed up per scan, from Lightning Mapping Array files you provide. | `tracking` | tables `xlma_stat_minutes`, `xlma_stat_scan` (its `xlma_...` columns are in `cells_by_scan`) |
 
 The first six are on in `nexrad.yaml`; the last three are there as commented
@@ -348,14 +357,14 @@ modules:
   - tracking
   - cell_volume_stats
   - target_selection
-  - radar_command
+  - arm_radar_comm
 ```
 
 `adapt run nexrad` then also prints one line per scan for the command:
 
 ```
-radar_command: no target
-radar_command: command 8cbd87d5dbebeeab written for cell KD2WR93G0Q (dry run, nothing sent)
+arm_radar_comm: no target
+arm_radar_comm: command 8cbd87d5dbebeeab written for cell KD2WR93G0Q (dry run, nothing sent)
 ```
 
 | Table | One row per | Holds |
@@ -363,36 +372,51 @@ radar_command: command 8cbd87d5dbebeeab written for cell KD2WR93G0Q (dry run, no
 | `target_selection` | scan with tracked cells | the chosen `cell_uid` (empty when no cell qualifies), the reason (`NEW_TARGET`, `CONTINUATION`, `SWITCH`), the score, and the candidates |
 | `radar_commands` | decision | the outcome (`NO_TARGET`, `PUBLISHED`, ...) and the command itself (centre, extents, scan pattern) |
 
-Both modules run with a packaged rule and command setup.
-`adapt config --show target_selection` and `adapt config --show radar_command`
-print them, with the reasoning in comments. Change a part by giving only that
-part under `params:`:
+`adapt config --params target_selection arm_radar_comm` prints the options of
+both, with the reasoning in comments.
 
-```yaml
-params:
-  target_selection:
-    duration: {max_minutes: 15}     # the packaged rule with a 15-minute cap
-```
+- `target_selection` runs with a packaged rule. Change a part by giving only
+  that part under `params:`:
+
+  ```yaml
+  params:
+    target_selection:
+      duration: {max_minutes: 15}     # the packaged rule with a 15-minute cap
+  ```
+
+- `arm_radar_comm` has **no defaults**: a file that lists it must give every
+  one of its options, or the run is refused naming each one missing. Write them
+  all into the file, from the packaged dry-run example, with:
+
+  ```bash
+  adapt config --params --file nexrad.yaml arm_radar_comm
+  ```
+
+  The example names `ARM_ADAPT_USER`, the environment variable that holds the
+  user id sent with every command. Export it before `adapt run`, dry run
+  included: `export ARM_ADAPT_USER=...`.
 
 ### Sending commands to a radar
 
-**Nothing is sent to a radar unless you ask for it.** As packaged,
-`radar_command` is a dry run: commands are recorded in the table only, with
-outcome `PUBLISHED`.
+**Nothing is sent to a radar unless you ask for it.** `api: null` is a dry
+run: commands are recorded in the table only, with outcome `PUBLISHED`.
 
-To send them, add an `api:` part under `params: radar_command:`
-(`adapt config --show radar_command` prints it). The part holds no address, key
-or path. It names three environment variables, and the environment is the only
-source of what they hold. Export them before `adapt run`:
+To send them, replace `api: null` with the `api:` block the example shows under
+it. The block holds no address, key or path. It names three environment
+variables, and the environment is the only source of what they hold. The base
+URL is the radar's own (it ends with the radar, such as `/bnf`); commands are
+POSTed to `{base URL}/publish/command`. Export them before `adapt run`:
 
 ```bash
-export BNF_API_URL=https://apigw.vsn.arm.gov/bnf   # commands are POSTed to $BNF_API_URL/publish/command
-export ARM_API_CERT=/path/to/arm-ca.cer            # CA certificate (PEM) the API's certificate is checked against
-read -rs BNF_RADAR_API_KEY && export BNF_RADAR_API_KEY   # type or paste the key; it is not shown or saved in history
+export ARM_RADAR_URL=https://apigw.vsn.arm.gov/bnf   # api.base_url_env: the radar's API base URL
+export ARM_API_CERT=/path/to/arm-ca.cer           # api.ca_file_env: CA certificate (PEM) the API's certificate is checked against
+read -rs BNF_RADAR_API_KEY && export BNF_RADAR_API_KEY   # api.api_key_env: type or paste the key; it is not shown or saved in history
+export ARM_ADAPT_USER=...                         # radar.user_id_env: the user id sent with every command
 ```
 
-A run whose file has `api:` refuses to start when one of them is unset, the URL
-is not `https://`, or the CA file cannot be read. Each command is one request
+These are the names the example uses; the file may name others. A run whose
+file has `api:` refuses to start when one of them is unset, the URL is not
+`https://`, or the CA file cannot be read. Each command is one request
 of the form `{"AutoTarget": {...}}`, never repeated. Its console line starts
 with two marks: did the command go out, and did the API acknowledge it.
 
@@ -440,7 +464,7 @@ statistics to a finished run.
 
    modules:
      - target_selection
-     - radar_command
+     - arm_radar_comm
 
    params:
      target_selection:           # only the parts that differ from the packaged rule
@@ -457,12 +481,12 @@ statistics to a finished run.
    ```
 
 The new rows are stored under the same `run_id`. For `target_selection` and
-`radar_command` they sit beside the rows of the first rule: every row carries
+`arm_radar_comm` they sit beside the rows of the first rule: every row carries
 `config_hash`, a short code of the options that made it, so decisions under
 different rules stay apart.
 
 What can run alone this way: a module whose inputs are stored. Today that is
-`target_selection`, `radar_command` and `xlma_stat`. A module that reads the
+`target_selection`, `arm_radar_comm` and `xlma_stat`. A module that reads the
 grids from memory needs the modules that make them listed with it, and the
 message says which. For example, a run made without `cell_volume_stats` gets
 its volume statistics from this file:
@@ -634,7 +658,7 @@ controls and the wizard that starts a pipeline from the window.
 |--------------------|------------|
 | `adapt: command not found` | Activate the environment Adapt is installed in (`conda activate adapt_env`). |
 | `No Adapt store at ...: registry.db not found. Run 'adapt init' first.` | You are not in a store folder. `cd` into it, or run `adapt init`. |
-| `Store already initialized at ...` | The folder is a store already. Run a pipeline file, or write one with `adapt config nexrad`. |
+| `Store already initialized at ...` | The folder is a store already. Run a pipeline file, or write one with `adapt config --nexrad`. |
 | `No pipeline file .../NAME.yaml` | The file is not in the current folder. The message says how to make it. |
 | `adapt run takes the name of a pipeline file ... not a path` | Give `nexrad` or `nexrad.yaml`, from inside the store folder. |
 | `start_time is required when mode='historical'` | Set `run.start_time` and `run.end_time`. |

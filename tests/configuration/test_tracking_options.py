@@ -208,7 +208,7 @@ class TestRefusals:
         message = _refusal(path, tracking=options)
 
         assert f"  • params.tracking.{option} — unrecognized option" in message
-        assert message.splitlines()[-1] == "The options of tracking: adapt config --show tracking"
+        assert message.splitlines()[-1] == "The options of tracking: adapt config --params tracking"
 
     def test_the_section_that_held_these_options_is_an_unknown_key(self):
         with pytest.raises(ValueError, match="unknown params key 'tracker'"):
@@ -221,10 +221,6 @@ class TestRefusals:
         sections, modules = str(exc.value).split("the sections ")[1].split("; the modules ")
         assert "tracker" not in sections.split(", ")
         assert "tracking" in modules.split(", ")
-
-    def test_options_of_tracking_are_refused_when_the_file_does_not_list_it(self):
-        with pytest.raises(ValueError, match="params.tracking sets the options of tracking"):
-            _pipeline({"tracking": {"max_speed_ms": 30.0}}, modules=["ingest"])
 
 
 class TestRunRecord:

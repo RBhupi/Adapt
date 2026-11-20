@@ -239,7 +239,9 @@ class TestRefusals:
         message = _refusal(path, detection={option: 1})
 
         assert f"  • params.detection.{option} — unrecognized option" in message
-        assert message.splitlines()[-1] == "The options of detection: adapt config --show detection"
+        assert (
+            message.splitlines()[-1] == "The options of detection: adapt config --params detection"
+        )
 
     @pytest.mark.parametrize("method", ["conv_strat_raut", "threshold"])
     def test_a_parameter_a_method_does_not_have_is_refused_whether_or_not_the_run_uses_the_method(
@@ -261,10 +263,6 @@ class TestRefusals:
 
         modules = str(exc.value).split("the modules ")[1]
         assert "detection" in modules.split(", ")
-
-    def test_options_of_detection_are_refused_when_the_file_does_not_list_it(self):
-        with pytest.raises(ValueError, match="params.detection sets the options of detection"):
-            _pipeline({"detection": {"h_maxima": 2.5}}, modules=["ingest"])
 
 
 class TestRunRecord:

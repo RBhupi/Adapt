@@ -107,7 +107,7 @@ stopped run.
 Each step is a *module* with declared inputs and outputs. A pipeline file lists modules by name, and
 Adapt orders them by what each reads and writes. A new step is a new module: no existing module
 changes. Modules that ship with Adapt: `ingest`, `detection`, `projection`,
-`analysis`, `tracking`, `cell_volume_stats`, `target_selection`, `radar_command` and `xlma_stat`
+`analysis`, `tracking`, `cell_volume_stats`, `target_selection`, `arm_radar_comm` and `xlma_stat`
 (lightning statistics from a Lightning Mapping Array). See the
 [Module Developer Guide](https://arm-doe.github.io/Adapt/module-developer-guide.html) to write one.
 

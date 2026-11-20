@@ -8,8 +8,9 @@ file ``NAME.yaml`` in it::
 
     mkdir case && cd case
     adapt init                  # the store + one pipeline file per template (nexrad.yaml)
-    adapt config nexrad         # (re)write ./nexrad.yaml from the template
-    adapt config --show NAME    # NAME's options with their defaults, ready to paste
+    adapt config --nexrad       # write ./nexrad.yaml from the template (never over a file)
+    adapt config --params NAME...              # NAMEs' options with their defaults, to paste
+    adapt config --params --file nexrad.yaml   # add the options its modules lack
     adapt run nexrad            # run ./nexrad.yaml: its modules, scan by scan
     adapt run nexrad.yaml       # the same: the file may be named with its extension
     adapt graph nexrad          # print ./nexrad.yaml's module graph (Mermaid text)
@@ -53,7 +54,7 @@ def _init_cmd(args: argparse.Namespace) -> None:
     for name in PIPELINE_TEMPLATES:
         path = root / f"{name}.yaml"
         if path.exists():
-            print(f"Kept the existing pipeline file {path} (adapt config {name} rewrites it)")
+            print(f"Kept the existing pipeline file {path}")
             continue
         write_pipeline_template(name, path)
         print(f"Wrote the pipeline file {path}; run it from {root} with:  adapt run {name}")
@@ -65,46 +66,74 @@ def _init_cmd(args: argparse.Namespace) -> None:
 
 
 def _config_cmd(args: argparse.Namespace) -> None:
-    """Write ``./NAME.yaml`` from template NAME, or print an option fragment (``--show``)."""
-    if args.show is not None:
-        from adapt.cli._show import show
+    """Write ``./NAME.yaml`` from template NAME (``--NAME``), or print module
+    options (``--params NAME...``), or add them to a file (``--params --file``)."""
+    from adapt.cli._params import add_to_file, params
 
-        print(show(args.show), end="")
-        return
+    if args.template is not None:
+        if args.names or args.file is not None:
+            raise ConfigError(
+                f"adapt config --{args.template} writes ./{args.template}.yaml and takes no "
+                "module names or --file; to add options to a file:  "
+                "adapt config --params --file FILE [NAME...]"
+            )
+        _write_template(args.template, with_params=args.params)
+    elif not args.params:
+        raise ConfigError(
+            "adapt config needs --params (print or add module options) or a template to "
+            "write: " + ", ".join(f"--{name}" for name in _templates())
+        )
+    elif args.file is not None:
+        path = Path(args.file)
+        gained = add_to_file(path, args.names)
+        if gained:
+            print(f"Added the missing options of {', '.join(gained)} to {path}")
+        else:
+            print(f"{path} already gives every option of these modules; nothing changed")
+    elif args.names:
+        print(params(args.names), end="")
+    else:
+        raise ConfigError(
+            "adapt config --params needs module names to print, or --file FILE to add "
+            "the options of the modules FILE lists"
+        )
 
-    from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, write_pipeline_template
+
+def _templates() -> tuple[str, ...]:
+    from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES
+
+    return tuple(PIPELINE_TEMPLATES)
+
+
+def _write_template(name: str, *, with_params: bool) -> None:
+    """Write ``./NAME.yaml`` from template NAME, with every catalog module's
+    options under ``params:`` when ``with_params``; never over an existing file."""
+    from adapt.cli._params import add_params
+    from adapt.configuration.pipeline_template import pipeline_template
+    from adapt.execution.pipeline_builder import catalog_module_names
     from adapt.persistence.store import store_root
 
-    if args.name not in PIPELINE_TEMPLATES:
+    text = pipeline_template(name)
+    if with_params:
+        text, _ = add_params(text, catalog_module_names())
+    path = Path.cwd() / f"{name}.yaml"
+    try:
+        with path.open("x", encoding="utf-8") as file:
+            file.write(text)
+    except FileExistsError:
         raise ConfigError(
-            f"Unknown pipeline template '{args.name}'. Available: {', '.join(PIPELINE_TEMPLATES)}"
-        )
-    path = Path.cwd() / f"{args.name}.yaml"
-    if path.exists():
-        print(f"[adapt config] File already exists: {path}")
-        if not _confirm("Overwrite? [y/N] "):
-            print("Aborted.")
-            return
-    write_pipeline_template(args.name, path)
+            f"{path} already exists, and adapt config does not overwrite it. Add the "
+            f"options it lacks with:  adapt config --params --file {path.name}  — or "
+            "move it away first"
+        ) from None
     print(f"Pipeline file written: {path}")
     if store_root(path.parent) == path.parent:
-        print(f"Edit it, then run it from this folder with:  adapt run {args.name}")
+        print(f"Edit it, then run it from this folder with:  adapt run {name}")
     else:
         print(
             "Edit it. This folder is not an Adapt store yet: run  adapt init  here, "
-            f"then  adapt run {args.name}"
+            f"then  adapt run {name}"
         )
-
-
-def _confirm(prompt: str) -> bool:
-    """Ask a yes/no question; no input (EOF) is a no, Ctrl-C aborts the command."""
-    try:
-        return input(prompt).strip().lower() == "y"
-    except EOFError:
-        return False
-    except KeyboardInterrupt:
-        print("\nAborted.")
-        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -202,14 +231,48 @@ def _parser() -> argparse.ArgumentParser:
 
     config = commands.add_parser(
         "config",
-        help="Write a pipeline file, or show options to paste into one.",
-        description="Write ./NAME.yaml from pipeline template NAME, or print the "
-        "options of a module or params section with their defaults.",
+        help="Write a pipeline file, or print or add module options.",
+        description="Write ./NAME.yaml from a pipeline template (never over a file), "
+        "print modules' options with their defaults, or add the options a pipeline "
+        "file lacks. Adding keeps every line the file has, comments included, and "
+        "adds nothing the second time.",
+        epilog="examples:\n"
+        "  adapt config --nexrad                      write ./nexrad.yaml, empty params:\n"
+        "  adapt config --nexrad --params             ... with every module's options\n"
+        "  adapt config --params tracking projection  print these modules' options\n"
+        "  adapt config --params global               print a params section's options\n"
+        "  adapt config --params --file nexrad.yaml tracking\n"
+        "                                             add tracking's missing options\n"
+        "  adapt config --params --file nexrad.yaml   ... of every module it lists",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    which = config.add_mutually_exclusive_group(required=True)
-    which.add_argument("name", nargs="?", help="Pipeline template to write, e.g. nexrad.")
-    which.add_argument(
-        "--show", metavar="NAME", help="Print NAME's options as YAML to paste into the file."
+    template = config.add_mutually_exclusive_group()
+    for name in _templates():
+        template.add_argument(
+            f"--{name}",
+            dest="template",
+            action="store_const",
+            const=name,
+            help=f"Write ./{name}.yaml from the {name} pipeline template; refused when "
+            "it exists. With --params, every module's options go under params:.",
+        )
+    config.set_defaults(template=None)
+    config.add_argument(
+        "--params",
+        action="store_true",
+        help="Print the options of the modules (or params sections) NAME with their "
+        "defaults, or with --file add the options the file lacks.",
+    )
+    config.add_argument(
+        "--file",
+        metavar="FILE",
+        default=None,
+        help="With --params: the pipeline file to add options to — of the modules "
+        "NAME, or of every module it lists when no NAME is given. Settings of a module "
+        "it does not list may stay in it; only listed modules run.",
+    )
+    config.add_argument(
+        "names", nargs="*", metavar="NAME", help="Modules (or, to print, params sections)."
     )
     config.set_defaults(func=_config_cmd)
 

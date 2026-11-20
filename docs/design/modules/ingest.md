@@ -37,7 +37,7 @@ A `Path` object pointing to a downloaded NEXRAD Level-II file (`.gz` or uncompre
 
 ### Input: `config`
 
-Ingest's own options, set in the pipeline file under `params.ingest` (`adapt config --show ingest` prints them). Ingest reads:
+Ingest's own options, set in the pipeline file under `params.ingest` (`adapt config --params ingest` prints them). Ingest reads:
 - `params.ingest.grid_shape`, `grid_limits`, `roi_func`, `min_radius`, `weighting_function` — grid shape, spatial extent, interpolation parameters
 - `params.ingest.field_map` — source-to-canonical variable renames applied once here
 - `params.ingest.fields` — explicit canonical keep-list (empty = keep all)

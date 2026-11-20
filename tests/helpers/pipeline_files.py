@@ -22,11 +22,14 @@ TARGET_SELECTION = {
     "duration": {"max_minutes": 30.0},
     "snapshot": {"growth_window_scans": 2, "trend_fields": []},
 }
-# Radar command options (a dry run: no api: part).
+# Radar command options: every one must be given; a dry run (api: null).
 RADAR_COMMAND = {
-    "radar": {"scan_pattern": "ppi_sector", "user_id": "operator"},
-    "extent": {"horizontal_buffer_km": 1.0},
+    "planning": {"horizon_minutes": 12, "interval_seconds": 60},
+    "radar": {"scan_pattern": "ppi_sector", "user_id_env": "ADAPT_TEST_USER"},
+    "extent": {"horizontal_buffer_km": 1.0, "vertical_band": None},
+    "api": None,
 }
+USER_ID = "operator"
 # The api: part names the environment variables; ``export_api`` sets them.
 API = {
     "base_url_env": "ADAPT_TEST_URL",
@@ -39,9 +42,14 @@ API_URL = "https://radar.example.test/site"
 API_KEY = "a-test-key"
 
 
+def export_user(monkeypatch) -> None:
+    """Set the variable ``RADAR_COMMAND`` names for the user id: ``USER_ID``."""
+    monkeypatch.setenv("ADAPT_TEST_USER", USER_ID)
+
+
 def export_api(monkeypatch, **values: str) -> None:
-    """Set the variables ``API`` names: ``API_URL``, ``API_KEY`` and a CA file
-    (the installed certifi bundle, a real PEM file on every platform)."""
+    """Set the variables ``API`` names: ``API_URL``, ``API_KEY`` and a
+    CA file (the installed certifi bundle, a real PEM file on every platform)."""
     exported = {
         "ADAPT_TEST_URL": API_URL,
         "ADAPT_TEST_KEY": API_KEY,
@@ -51,15 +59,24 @@ def export_api(monkeypatch, **values: str) -> None:
         monkeypatch.setenv(name, value)
 
 
+def with_radar_command(modules, params: dict) -> dict:
+    """``params``, where ``modules`` lists arm_radar_comm, giving all its options: it
+    has no defaults, so they are ``RADAR_COMMAND``'s with the parts given in place."""
+    if "arm_radar_comm" not in modules:
+        return params
+    return {**params, "arm_radar_comm": {**RADAR_COMMAND, **params.get("arm_radar_comm", {})}}
+
+
 def write_pipeline(root: Path, name: str, **sections) -> Path:
     """Write pipeline file ``root/NAME.yaml``: a historical KTST run of ``MODULES``
-    unless overridden."""
+    unless overridden (arm_radar_comm, when listed, given ``with_radar_command``)."""
     data = {
         "run": {"source": "aws_nexrad", "radar": "KTST", "mode": "historical"},
         "modules": list(MODULES),
         "params": {},
         **sections,
     }
+    data["params"] = with_radar_command(data["modules"], data["params"] or {})
     path = root / f"{name}.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path

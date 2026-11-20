@@ -22,7 +22,7 @@ def _keyed() -> list[str]:
 
 
 def test_the_modules_that_key_their_rows_by_their_options():
-    assert _keyed() == ["radar_command", "target_selection"]
+    assert _keyed() == ["arm_radar_comm", "target_selection"]
 
 
 def test_every_table_of_such_a_module_has_the_options_hash_in_its_key():

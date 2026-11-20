@@ -164,7 +164,7 @@ def init_store(root: str | Path) -> Path:
     if (root_path / REGISTRY_FILENAME).exists():
         raise AlreadyInitializedError(
             f"Store already initialized at {root_path}. Write a pipeline file there with "
-            "'adapt config NAME', or run one with 'adapt run NAME'."
+            "'adapt config --NAME' (a template: --nexrad), or run one with 'adapt run NAME'."
         )
     if root_path.is_file():
         raise StoreError(f"{root_path} is a file; a store is a folder")

@@ -1,9 +1,9 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""Every option ``adapt config --show`` can print carries a description.
+"""Every option ``adapt config --params`` can print carries a description.
 
-``--show`` prints a section of the run config or a module's options model, each
+``--params`` prints a section of the run config or a module's options model, each
 option with its ``Field`` description as the comment that says what it means.
 """
 

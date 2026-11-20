@@ -235,6 +235,6 @@ def scan_graph(
             raise ValueError(
                 f"{reads}, which module '{elsewhere[key]}' produces — list "
                 f"'{elsewhere[key]}' under modules:, or change {module.name}'s options so "
-                f"it does not read it (adapt config --show {module.name})"
+                f"it does not read it (adapt config --params {module.name})"
             )
     return GraphBuilder(modules, provided=provided).build()

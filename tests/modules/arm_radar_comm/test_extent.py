@@ -8,7 +8,7 @@ import math
 import numpy as np
 import pytest
 
-from adapt.modules.radar_command.extent import VerticalBounds, geographic_extent
+from adapt.modules.arm_radar_comm.extent import VerticalBounds, geographic_extent
 
 pytestmark = pytest.mark.unit
 

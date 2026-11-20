@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from adapt.modules.radar_command.extent import EARTH_RADIUS_KM, GeoExtent
+from adapt.modules.arm_radar_comm.extent import EARTH_RADIUS_KM, GeoExtent
 
 _WIRE = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
 

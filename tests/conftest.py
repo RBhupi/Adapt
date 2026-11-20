@@ -25,6 +25,7 @@ from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.node import TrackingModule
 from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import StoreRegistry
+from tests.helpers.pipeline_files import export_user
 from tests.helpers.run_configs import new_run_config
 from tests.helpers.shared_config import SHARED
 
@@ -52,6 +53,13 @@ def _reset_repository_registry():
     """
     yield
     StoreRegistry.close_all()
+
+
+@pytest.fixture(autouse=True)
+def _radar_user_exported(monkeypatch):
+    """The user id ``RADAR_COMMAND`` names exported, as a user running
+    arm_radar_comm exports it; a test of an unset variable removes it."""
+    export_user(monkeypatch)
 
 
 # =============================================================================

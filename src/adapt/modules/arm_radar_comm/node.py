@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""radar_command — turn each scan's target selection into a command for the radar.
+"""arm_radar_comm — turn each scan's target selection into a command for the radar.
 
 It boxes the selected cell's projected footprints (from the scan's analysis
 dataset) with the cell's vertical extent, records the command in the
@@ -27,29 +27,35 @@ from adapt.contracts import (
     check_radar_commands,
     check_selection,
 )
-from adapt.modules.base import BaseModule
-from adapt.modules.radar_command.command import CommandValidationError, to_json
-from adapt.modules.radar_command.config import ApiConfig, RadarCommandConfig, config_hash
-from adapt.modules.radar_command.plan import build_plan
-from adapt.modules.radar_command.record import (
+from adapt.modules.arm_radar_comm.command import CommandValidationError, to_json
+from adapt.modules.arm_radar_comm.config import (
+    ApiConfig,
+    RadarCommandConfig,
+    RadarCommandRun,
+    config_hash,
+)
+from adapt.modules.arm_radar_comm.plan import build_plan
+from adapt.modules.arm_radar_comm.record import (
     FAILED,
     CommandRecord,
     Outcome,
     command_frame,
     summary,
 )
-from adapt.modules.radar_command.target import SelectionRef, TargetUnavailable, target_geometry
-from adapt.modules.radar_command.transport import (
+from adapt.modules.arm_radar_comm.target import SelectionRef, TargetUnavailable, target_geometry
+from adapt.modules.arm_radar_comm.transport import (
     EndpointError,
     NotSent,
     SendError,
     endpoint,
     send,
+    user_id,
 )
+from adapt.modules.base import BaseModule
 
 logger = logging.getLogger(__name__)
 
-_PRESET = files("adapt.modules.radar_command") / "presets" / "sandbox.yaml"
+_PRESET = files("adapt.modules.arm_radar_comm") / "presets" / "sandbox.yaml"
 # The outcomes after which a plan counts as published (a refused send is not
 # repeated: the next scan plans afresh).
 _NEWLY_PUBLISHED = frozenset(
@@ -57,16 +63,16 @@ _NEWLY_PUBLISHED = frozenset(
 )
 _VOLUME_STATS = "cell_volume_stats_rows"
 # Carried from scan to scan: the ids of the plans this run has published.
-_STATE = "radar_command_state"
+_STATE = "arm_radar_comm_state"
 
 
-class RadarCommandModule(BaseModule):
+class ArmRadarCommModule(BaseModule):
     """Plan, record and (when configured) send the command for each scan's target."""
 
-    name = "radar_command"
+    name = "arm_radar_comm"
     summary = "command the radar to the selected cell; needs target_selection"
     inputs = [
-        "radar_command_config",
+        "arm_radar_comm_config",
         "selection",
         "analysis_ds",
         _VOLUME_STATS,
@@ -78,6 +84,7 @@ class RadarCommandModule(BaseModule):
     ]
     outputs = ["radar_commands", _STATE]
     options_class = RadarCommandConfig
+    every_option_written = True  # what is sent to a radar is never a default
     rows_keyed_by_options = True  # config_hash is in the table's key
     input_contracts = {"selection": check_selection}
     output_contracts = {"radar_commands": check_radar_commands, _STATE: check_module_state}
@@ -92,31 +99,34 @@ class RadarCommandModule(BaseModule):
 
     @classmethod
     def options_preset(cls) -> str:
-        """The packaged options as commented YAML, ready to paste under ``params:``."""
+        """Every option as commented YAML, a dry run, to copy under ``params:``."""
         return _PRESET.read_text("utf-8")
 
     @classmethod
-    def configure(cls, options: RadarCommandConfig, shared: SharedConfig) -> RadarCommandConfig:
-        """The run's config. A run over a stored run never sends; a run that sends
-        must have its API address, key and CA file in the environment now."""
+    def configure(cls, options: RadarCommandConfig, shared: SharedConfig) -> RadarCommandRun:
+        """The run's config: the options and the user id the environment holds now.
+        A run over a stored run never sends; a run that sends must have its API
+        address, radar, key and CA file in the environment now. A variable that is
+        missing or unusable refuses the run, by name."""
+        run = RadarCommandRun(options=options, user_id=user_id(options.radar))
         if options.api is None:
-            return options
+            return run
         if shared.source == "stored_run":
-            return options.model_copy(update={"api": None})
-        endpoint(options.api)  # raises naming the variable that is unset or unusable
-        return options
+            return replace(run, options=options.model_copy(update={"api": None}))
+        endpoint(options.api)
+        return run
 
     @classmethod
-    def inputs_for(cls, config: RadarCommandConfig) -> list[str]:
+    def inputs_for(cls, config: RadarCommandRun) -> list[str]:
         """A fixed vertical band needs no measured cell base and top."""
-        if config.extent.vertical_band is None:
+        if config.options.extent.vertical_band is None:
             return cls.inputs
         return [key for key in cls.inputs if key != _VOLUME_STATS]
 
     def run(self, context: dict) -> dict:
-        config: RadarCommandConfig = context["radar_command_config"]
+        run: RadarCommandRun = context["arm_radar_comm_config"]
         published: frozenset[str] = context[_STATE] or frozenset()
-        record = self._decide(config, context, published)
+        record = self._decide(run, context, published)
         if record.outcome in _NEWLY_PUBLISHED and record.plan_id is not None:
             published = published | {record.plan_id}
         level = logging.WARNING if record.outcome in FAILED else logging.INFO
@@ -125,8 +135,9 @@ class RadarCommandModule(BaseModule):
         return {"radar_commands": command_frame(record), _STATE: published}
 
     def _decide(
-        self, config: RadarCommandConfig, context: dict, published: frozenset[str]
+        self, run: RadarCommandRun, context: dict, published: frozenset[str]
     ) -> CommandRecord:
+        config = run.options
         selection = context["selection"].iloc[0]
         record = CommandRecord(
             outcome=Outcome.NO_TARGET,
@@ -147,7 +158,7 @@ class RadarCommandModule(BaseModule):
             geometry = target_geometry(
                 context["analysis_ds"], ref, context.get(_VOLUME_STATS), config.extent.vertical_band
             )
-            plan = build_plan(geometry, ref, config)
+            plan = build_plan(geometry, ref, config, run.user_id)
         except TargetUnavailable as exc:
             return replace(
                 record, outcome=Outcome.TARGET_UNAVAILABLE, detail=f"{type(exc).__name__}: {exc}"
@@ -188,6 +199,6 @@ def _too_old(age: timedelta, api: ApiConfig) -> str | None:
     if seconds > api.max_scan_age_seconds:
         return (
             f"scan is {math.ceil(seconds)} s old; the limit is {api.max_scan_age_seconds:g} s "
-            "(radar_command.api.max_scan_age_seconds)"
+            "(arm_radar_comm.api.max_scan_age_seconds)"
         )
     return None

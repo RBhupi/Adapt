@@ -51,8 +51,8 @@ def test_wrong_options_of_two_modules_and_a_section_are_told_together(refusal, c
         f"  • params.detection.h_maxima — value -1 {_OUT_OF_RANGE}",
         f"  • params.tracking.max_speed_ms — value 0 {_OUT_OF_RANGE}",
         f"  • params.global.max_scan_gap_minutes — value 0 {_OUT_OF_RANGE}",
-        "The options of detection: adapt config --show detection",
-        "The options of tracking: adapt config --show tracking",
+        "The options of detection: adapt config --params detection",
+        "The options of tracking: adapt config --params tracking",
     ]
 
 
@@ -71,7 +71,7 @@ def test_wrong_options_of_all_three_sections_and_a_module_are_told_together(refu
         "  • params.downloader.latest_files",
         "  • params.global.max_scan_gap_minutes",
         "  • params.logging.level",
-        "The options of tracking: adapt config --show tracking",
+        "The options of tracking: adapt config --params tracking",
     ]
 
 
@@ -82,7 +82,7 @@ def test_two_wrong_options_of_one_module_name_its_command_once(refusal, command)
     assert [line.split(" — ")[0] for line in told] == [
         "  • params.tracking.max_speed_ms",
         "  • params.tracking.no_such_option",
-        "The options of tracking: adapt config --show tracking",
+        "The options of tracking: adapt config --params tracking",
     ]
 
 
@@ -90,7 +90,7 @@ def test_two_wrong_options_of_one_module_name_its_command_once(refusal, command)
 def test_a_single_wrong_module_option_reads_as_it_always_did(refusal, command):
     assert refusal(command, detection={"h_maxima": -1}) == [
         f"  • params.detection.h_maxima — value -1 {_OUT_OF_RANGE}",
-        "The options of detection: adapt config --show detection",
+        "The options of detection: adapt config --params detection",
     ]
 
 

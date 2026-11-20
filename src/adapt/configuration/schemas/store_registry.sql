@@ -57,9 +57,9 @@ CREATE TABLE IF NOT EXISTS run_modules (
 -- What each module of a run ran with. Written when a run, a resumed run or a
 -- run over the stored run starts, for every module it lists. Starting again
 -- with the same options replaces the row; a module that keys its rows by its
--- options (target_selection, radar_command) has one row per set of options it
+-- options (target_selection, arm_radar_comm) has one row per set of options it
 -- was ever run with, under the hash its rows carry. One exception: over a
--- stored run radar_command plans without its api part, so its rows carry the
+-- stored run arm_radar_comm plans without its api part, so its rows carry the
 -- hash of the options without it.
 CREATE TABLE IF NOT EXISTS run_module_provenance (
     run_id        TEXT NOT NULL REFERENCES runs(run_id),

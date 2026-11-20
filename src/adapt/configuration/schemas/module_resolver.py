@@ -24,7 +24,13 @@ from adapt.configuration.schemas.internal import InternalConfig
 from adapt.contracts import SharedConfig, config_key
 from adapt.execution.module_registry import registry
 
-__all__ = ["module_options", "recorded_options", "resolve_module_configs"]
+__all__ = [
+    "missing_options",
+    "module_defaults",
+    "module_options",
+    "recorded_options",
+    "resolve_module_configs",
+]
 
 
 class _NoOptions(BaseModel):
@@ -37,8 +43,10 @@ def module_options(name: str, given: Mapping[str, Any], *, source: str) -> BaseM
     """Module ``name``'s validated options: its defaults with ``given`` laid over.
 
     The defaults are the module's packaged preset when it ships one, else those
-    of its options model. ``given`` (a pipeline file's ``params.<name>``, or a
-    run's recorded options) is laid over them by the model's schema: a part
+    of its options model; a module whose every option must be written
+    (``every_option_written``) has none, so ``given`` must hold them all.
+    ``given`` (a pipeline file's ``params.<name>``, or a run's recorded options)
+    is laid over them by the model's schema: a part
     that is itself a model of options is changed key by key, so one key deep
     inside may be given alone; any other option — a list, a mapping of free
     keys, a ``null`` — replaces the default whole. None for a module without
@@ -53,14 +61,13 @@ def module_options(name: str, given: Mapping[str, Any], *, source: str) -> BaseM
     """
     cls = registry.get(name)
     model = _NoOptions if cls.options_class is None else cls.options_class
-    preset = cls.options_preset()
-    defaults = {} if preset is None else yaml.safe_load(preset)[name]
+    defaults = {} if cls.every_option_written else _packaged(name) or {}
     try:
         options = validated(
             model, _laid_over(model, defaults, given), source=source, at=("params", name)
         )
     except OptionsRefused as exc:
-        hint = f"The options of {name}: adapt config --show {name}"
+        hint = f"The options of {name}: adapt config --params {name}"
         raise OptionsRefused(source, exc.lines, hints=[hint]) from exc
     return None if cls.options_class is None else options
 
@@ -78,6 +85,54 @@ def _laid_over(
         else:
             merged[key] = value
     return merged
+
+
+def module_defaults(name: str) -> dict[str, Any]:
+    """Module ``name``'s default options as a file would give them: its packaged
+    preset when it ships one (the example of every option, for a module whose
+    every option must be written), else every option of its model at its default
+    (``{}`` for a module without options)."""
+    packaged = _packaged(name)
+    if packaged is not None:
+        return packaged
+    model = registry.get(name).options_class
+    return {} if model is None else model().model_dump()
+
+
+def missing_options(
+    name: str, given: Mapping[str, Any]
+) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
+    """The default options of module ``name`` that ``given`` (a file's
+    ``params.<name>``) lacks: ``(path, entries)`` for each mapping of ``given``
+    that lacks some, ``path`` leading from ``params.<name>`` to it.
+
+    Only the parts that ``module_options`` lays over key by key are looked into;
+    any other option that ``given`` holds replaces its default whole, so
+    nothing it lacks is missing. Adding the entries changes no resolved option.
+    """
+    model = registry.get(name).options_class
+    if model is None:
+        return []
+    return _missing(model, module_defaults(name), given, ())
+
+
+def _missing(
+    model: type[BaseModel], base: Mapping[str, Any], given: Mapping[str, Any], at: tuple[str, ...]
+) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
+    here = {key: value for key, value in base.items() if key not in given}
+    found = [(at, here)] if here else []
+    for key, value in given.items():
+        part = _options_model(model, key)
+        ours = base.get(key)
+        if part is not None and isinstance(value, Mapping) and isinstance(ours, Mapping):
+            found += _missing(part, ours, value, (*at, key))
+    return found
+
+
+def _packaged(name: str) -> dict[str, Any] | None:
+    """Module ``name``'s packaged preset as data; None when it ships none."""
+    preset = registry.get(name).options_preset()
+    return None if preset is None else dict(yaml.safe_load(preset)[name])
 
 
 def _options_model(model: type[BaseModel], key: str) -> type[BaseModel] | None:

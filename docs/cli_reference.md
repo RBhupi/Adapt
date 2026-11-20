@@ -7,10 +7,11 @@ section of the file accepts, what is checked and when. The words *store*,
 *run*, *scan* and *module* are explained in the User Guide.
 
 ```
-adapt init                 # create a store and its pipeline file (nexrad.yaml)
-adapt config NAME          # (re)write the pipeline file ./NAME.yaml from template NAME
-adapt config --show NAME   # print NAME's options with their defaults, ready to paste
-adapt run NAME             # run the pipeline file ./NAME.yaml
+adapt init                           # create a store and its pipeline file (nexrad.yaml)
+adapt config --nexrad [--params]     # write ./nexrad.yaml from the template, never over a file
+adapt config --params NAME...        # print NAMEs' options with their defaults, ready to paste
+adapt config --params --file F [NAME...]  # add to F the options its modules lack
+adapt run NAME                       # run the pipeline file ./NAME.yaml
 adapt graph NAME           # print the module graph of ./NAME.yaml (Mermaid text)
 adapt dashboard            # open the GUI dashboard
 ```
@@ -52,42 +53,76 @@ adapt init /data/kilx # initialize a specific directory
 ## `adapt config`
 
 ```bash
-adapt config nexrad                   # (re)write ./nexrad.yaml; asks before overwriting
-adapt config --show detection         # print options to paste into a pipeline file
-adapt config --show target_selection  # a module's packaged options, with their comments
+adapt config --nexrad                         # write ./nexrad.yaml: the modules, an empty params:
+adapt config --nexrad --params                # the same, with every module's options under params:
+adapt config --params tracking projection     # print these modules' options to paste
+adapt config --params global                  # print a section's options to paste
+adapt config --params --file nexrad.yaml tracking projection   # add their missing options
+adapt config --params --file nexrad.yaml      # ... of every module the file lists
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `NAME` | Pipeline template to write as `./NAME.yaml`. Available: `nexrad`. An unknown name lists the available templates. |
-| `--show NAME` | Print NAME's options as commented lines to paste under the pipeline file's `params:` line, each with a one-line meaning. |
+| `--nexrad` | Write `./nexrad.yaml` from the `nexrad` pipeline template (one flag per template). Refused when the file exists: it is never overwritten. With `--params`, every module of the catalog, listed or not, gets all its options under `params:`. Takes no `NAME` and no `--file`. |
+| `--params` | Print the options of each `NAME`, or with `--file` add them to the file. Needs `NAME`s or `--file`. |
+| `--file FILE` | With `--params`: the pipeline file to add options to. |
+| `NAME...` | Modules (to print, also the sections `global`, `downloader`, `logging`). An unknown name lists every valid one. |
 
-`--show` accepts:
+### Printing options
+
+`--params NAME...` accepts:
 
 - a **module** (`ingest`, `detection`, `projection`, `analysis`, `tracking`,
-  `cell_volume_stats`, `target_selection`, `radar_command`, `xlma_stat`): its
-  options under its own name, each with its default. `target_selection` and
-  `radar_command` print their packaged options with the reasoning in comments
-  (the `growing_isolated` rule, and the dry-run `sandbox` command setup);
+  `cell_volume_stats`, `target_selection`, `arm_radar_comm`, `xlma_stat`): its
+  options under its own name, each with its default and a one-line meaning,
+  after a heading comment naming the module. `target_selection` prints its
+  packaged rule (`growing_isolated`) with the reasoning in comments;
+  `arm_radar_comm`, which has no defaults, prints every option it needs as a
+  dry-run example to copy, with the environment variables it reads;
 - `global` (the settings of the whole run, shared by several modules),
   `downloader` or `logging`.
 
-An unknown name lists every valid one.
-
 The first line of the output names the line to paste the rest under: the
-file's `params:` line. The entries are indented to sit under that line, and
-fragments pasted one after another load together. The template ends with
-`params:`, so `adapt config --show NAME >> nexrad.yaml` pastes them there too.
+file's `params:` line. The entries are indented to sit under that line, two
+empty lines between them, and they load together. The template ends with
+`params:`, so `adapt config --params NAME >> nexrad.yaml` pastes them there too.
 An entry given twice is an error.
 
-You rarely need the whole fragment: a module listed under `modules:` runs with
+You rarely need the whole output: a module listed under `modules:` runs with
 its defaults. Give only what you change (see *How options are read* below).
+
+### Adding options to a file
+
+`--params --file FILE NAME...` adds to `FILE` every option of the modules
+`NAME` that it does not give, at its default; with no `NAME`, of every module
+`FILE` lists under `modules:`. A `NAME` may be a module `FILE` does not list:
+its options are kept in the file and used once the module is listed.
+
+- A module that `params:` does not give is added at the end of `params:`, as
+  `--params NAME` prints it: a heading comment, then its options, two empty
+  lines before it.
+- A module that `params:` gives keeps every value it gives, and gains the
+  options missing from each part it gives, at the end of that part. One
+  changed key deep inside a nested part (`projection.flow_params.levels`)
+  stays, and the other keys of that part are added beside it. A list or a
+  mapping of free keys (`target_selection.score.weights`) is replaced whole by
+  what the file gives (*How options are read*), so nothing is added to it.
+- Every other line of the file is kept as it is: values, comments, empty lines
+  and the order. Adding a default changes no option the run uses.
+- A second run adds nothing and leaves the file untouched; so does a run on a
+  file written with `--nexrad --params`.
+
+Refused, with the file left as it was: a `FILE` that does not exist, is not
+valid YAML or is not a valid pipeline file; a `NAME` that is not a module
+(a section included: print it and paste it); a module or part written on one
+line (`tracking: {max_speed_ms: 35}`), which cannot take more lines: write it
+one option per line first.
 
 ---
 
 ## The pipeline file
 
-`adapt init` and `adapt config nexrad` write this file (shown here without its
+`adapt init` and `adapt config --nexrad` write this file (shown here without its
 header comments). Only names are listed; every option not given under `params:`
 uses its default. The file does not hold its own name, so a copy of it is a
 valid pipeline file as it is.
@@ -110,7 +145,7 @@ modules:                      # per-scan modules; Adapt orders them by their inp
   - tracking                  # link cells across scans
   - cell_volume_stats         # 3D volume stats per cell (base, top, echo-top heights)
   # - target_selection        # choose the cell the radar should watch
-  # - radar_command           # command the radar to the selected cell; needs target_selection
+  # - arm_radar_comm          # command the radar to the selected cell; needs target_selection
   # - xlma_stat               # Lightning (xLMA) statistics on minute-projected cells; needs params: xlma_stat: {input_dir: ...}
 
 params:
@@ -147,18 +182,19 @@ modules* in the [User Guide](USAGE.md); the tables and files are described in
 
 ### `params`
 
-A mapping from a name to options. The valid names are the modules the file
-lists, and three sections of the run:
+A mapping from a name to options. The valid names are the modules of the
+catalog, and three sections of the run:
 
 | Name | Options of |
 |------|-----------|
-| a listed module (`ingest`, `detection`, `tracking`, ...) | that module |
+| a module (`ingest`, `detection`, `tracking`, ...) | that module |
 | `global` | the whole run, shared by several modules: `tracking_field`, `z_level`, `max_scan_gap_minutes` |
 | `downloader` | fetching scans: polling interval, how far back a realtime run looks |
 | `logging` | the log file and the console |
 
-Options of a module the file does not list are refused: list the module or
-remove them. `params.downloader` cannot set `radar`, `mode`, `start_time` or
+Only the modules listed under `modules:` run, so only their options are read
+and checked. Options of a module the file does not list are kept as they are
+and not read: listing the module turns them on. `params.downloader` cannot set `radar`, `mode`, `start_time` or
 `end_time`; those belong to `run:`. Any other unknown name is an error that
 lists the valid ones.
 
@@ -176,9 +212,9 @@ changes the cap and keeps every other part of the rule. This holds at any
 depth: one key deep inside a nested part can be given alone
 (`score: {site_preference: {projection_steps: 2}}`). The exceptions:
 
-- A part that is off by default (`radar_command.api`,
-  `radar_command.extent.vertical_band`) has no defaults to keep: give all of
-  its required keys.
+- `arm_radar_comm` has no defaults at all: every option is given, `api` and
+  `extent.vertical_band` included (`null` for none). `adapt config --params
+  --file FILE arm_radar_comm` writes them all.
 - A list, and an option that is a mapping of free keys
   (`target_selection.score.weights`, `ingest.field_map`), is replaced whole.
 - `null` is a value like any other, never "use the default": it is refused for
@@ -193,7 +229,7 @@ Rules about values:
 - Free text is trimmed of the spaces around it in the options of `ingest`,
   `detection`, `projection`, `analysis` and `tracking` and in
   `global.tracking_field`: `" velocity "` is `velocity`.
-- An option with a fixed set of values takes one of them exactly as `--show`
+- An option with a fixed set of values takes one of them exactly as `--params`
   prints it: `projection.method` must be `adapt_default`; capital letters, or
   spaces around it, are refused.
 
@@ -213,7 +249,7 @@ this order:
    Invalid configuration (pipeline file /data/kilx/nexrad.yaml):
      • params.detection.h_maxima — value -1 is out of range — Input should be greater than 0
      • params.detection.h_maximum — unrecognized option (value: 3) — not a valid 'detection' setting; remove it or check for a typo or a renamed field
-   The options of detection: adapt config --show detection
+   The options of detection: adapt config --params detection
    ```
 
 3. **What a module refuses itself** and the wiring, one at a time: the two
@@ -221,11 +257,12 @@ this order:
    the `xlma_stat` folder, a module missing an input, a missing time window.
 
 `adapt run` then also checks the source (for `local_directory`, the folder and
-its files) and, when `radar_command` has an `api:` part, its settings in the
-environment: the base URL (`https://`), the key and a readable CA certificate
-file, each in the variable the part names (`base_url_env`, `api_key_env`,
-`ca_file_env`). The environment is their only source; the file never holds
-them.
+its files) and, when the file lists `arm_radar_comm`, the user id in the
+variable `radar.user_id_env` names; when it also has an `api:` part, the base
+URL (`https://`, the radar's own, such as `https://apigw.vsn.arm.gov/bnf`), the
+key and a readable CA certificate file, each in the variable the part names
+(`base_url_env`, `api_key_env`, `ca_file_env`). The environment is
+their only source; the file never holds them.
 
 ---
 
@@ -268,7 +305,7 @@ stored when it finishes.
   exits `1`, with a summary that says so (`COMPLETED, 2 SCANS FAILED`).
 - **The console.** One line per scan, with the time each module took. Warnings
   and errors are printed as they happen. Everything else goes to the log file
-  `logs/pipeline_<RADAR>.log`. `radar_command` also prints one line per scan:
+  `logs/pipeline_<RADAR>.log`. `arm_radar_comm` also prints one line per scan:
   the command it wrote or sent, or why there is none.
 - **Stopping.** `Ctrl-C` (or SIGTERM) stops the run: no new scan starts, the
   scan in progress is finished and saved, and the run is recorded `cancelled`.
@@ -278,7 +315,7 @@ stored when it finishes.
   `~/.adapt/pipeline.pid`; one left behind by a pipeline that has exited is
   ignored).
 
-The outcomes `radar_command` records are: `NO_TARGET`, `TARGET_UNAVAILABLE`,
+The outcomes `arm_radar_comm` records are: `NO_TARGET`, `TARGET_UNAVAILABLE`,
 `VALIDATION_FAILED`, `DUPLICATE`, `PUBLISHED` (a dry run), and, only when
 `api:` is set, `STALE` (the scan was older than `api.max_scan_age_seconds`:
 held back), `SENT` (sent and acknowledged as queued, not as run by the radar),
@@ -332,7 +369,7 @@ run:
 
 modules:
   - target_selection
-  - radar_command
+  - arm_radar_comm
 
 params:
   target_selection:           # only the parts that differ from the packaged rule
@@ -376,12 +413,12 @@ The rules:
   message names each option that differs, with the recorded value and the
   file's. Give the module the recorded options, or start a new run with the
   new ones.
-- `target_selection` and `radar_command` are exempt from that refusal: their
+- `target_selection` and `arm_radar_comm` are exempt from that refusal: their
   rows are keyed by the hash of the options that made them (`config_hash`), so
   decisions under different rules sit side by side in the same tables.
 - A module whose input is not in the store for a scan is skipped for that scan,
   with the reason recorded.
-- `radar_command` never sends over a stored run, with or without `api:`.
+- `arm_radar_comm` never sends over a stored run, with or without `api:`.
 - The run's checkpoint is left as it is.
 - A table with one row per run, scan and cell label that the pass stores is
   read through the view `cells_by_scan` from then on (see
@@ -399,7 +436,7 @@ adapt run nexrad --set params.global.z_level=3000 --set params.detection.thresho
 adapt graph nexrad --set params.detection.h_maxima=4     # check it first, nothing runs
 ```
 
-- The path is the option's full name as `adapt config --show` and the error
+- The path is the option's full name as `adapt config --params` and the error
   messages give it: `params`, then a module or one of the sections `global`,
   `downloader`, `logging`, then the option. A key deep inside a nested part is
   set alone, like in the file. Only `params` can be set; `run:` and
@@ -446,7 +483,7 @@ declared inputs and outputs and the file's options:
   module hands the next, e.g. `ingest -->|grid_ds_2d, grid_ds| detection`.
 - `scan` and `prior_scans`: what Adapt provides to every scan. `scan` is the
   file, its identity and the machine's time as the module that reads it starts
-  (`wall_time`, which `radar_command` compares with the scan's time before it
+  (`wall_time`, which `arm_radar_comm` compares with the scan's time before it
   sends). `prior_scans` is what modules read back from the scans before. A
   module that needs a prior scan is skipped on the first scan and after a
   too-long gap, and so is every module downstream of it.
@@ -455,7 +492,7 @@ declared inputs and outputs and the file's options:
   listed module produces.
 
 An option can change what a module reads: with
-`radar_command.extent.vertical_band` set, `radar_command` no longer reads
+`arm_radar_comm.extent.vertical_band` set, `arm_radar_comm` no longer reads
 `cell_volume_stats`, and the arrow is gone. A file a run would refuse (an
 unknown module, a wrong option, a module listed without the one that produces
 its input) is refused here with the same message, exit code `2`.
@@ -489,10 +526,10 @@ version of Adapt. A new user can skip it.
 
 A file with the sections of earlier versions (`core:`, `extended:`,
 `consumers:`, `postprocessing:`) is refused: write a new one with
-`adapt config nexrad` and list the modules under `modules:`.
+`adapt config --nexrad` and list the modules under `modules:`.
 
 Earlier versions kept the options of five modules under other names. Those
-names are now unknown, both under `params:` and for `adapt config --show`, and
+names are now unknown, both under `params:` and for `adapt config --params`, and
 are refused with the list of valid ones. Move the options under the module that
 uses them:
 
@@ -517,10 +554,10 @@ refused as before, under the new key.
 
 What else is different from earlier versions:
 
-- **Options of a module the file does not list** are refused
-  (`params.tracking` in a file whose `modules:` has no `tracking`). Earlier
-  versions accepted the old sections of a module that was not listed, and
-  ignored them. List the module, or remove its options.
+- **Options of a module the file does not list** are kept and not read
+  (`params.tracking` in a file whose `modules:` has no `tracking`), as earlier
+  versions did with the old sections. Only a name that is no module or section
+  is refused.
 - **The two rules on `global.tracking_field`** (it must be in
   `analysis.radar_variables`, and in `ingest.fields` when that list is not
   empty) are each checked by the module they concern, so they apply only in a

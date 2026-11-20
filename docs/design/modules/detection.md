@@ -37,7 +37,7 @@ The 2D Cartesian grid from the ingest module. Detection reads the canonical refl
 
 ### Input: `config`
 
-Detection's own options, set in the pipeline file under `params.detection` (`adapt config --show detection` prints them). Detection reads:
+Detection's own options, set in the pipeline file under `params.detection` (`adapt config --params detection` prints them). Detection reads:
 - `params.detection.threshold_params.threshold` — minimum reflectivity to consider (dBZ), with the default `method: threshold`
 - `params.detection.min_cellsize_gridpoint` — minimum cell area in grid points
 - `params.detection.max_cellsize_gridpoint` — maximum cell area in grid points

@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""RadarCommandModule: one scan's selection -> the command recorded (and sent)."""
+"""ArmRadarCommModule: one scan's selection -> the command recorded (and sent)."""
 
 import json
 import logging
@@ -10,15 +10,21 @@ from datetime import timedelta
 
 import pandas as pd
 import pytest
-import yaml
 
 from adapt.configuration.schemas.module_resolver import module_options
 from adapt.contracts import check_radar_commands
-from adapt.modules.radar_command import RadarCommandConfig, node
-from adapt.modules.radar_command.node import RadarCommandModule
-from adapt.modules.radar_command.transport import NotSent, SendError
+from adapt.modules.arm_radar_comm import RadarCommandConfig, RadarCommandRun, node
+from adapt.modules.arm_radar_comm.node import ArmRadarCommModule
+from adapt.modules.arm_radar_comm.transport import NotSent, SendError
 from tests.helpers import radar_store
-from tests.helpers.pipeline_files import API, API_KEY, API_URL, RADAR_COMMAND, export_api
+from tests.helpers.pipeline_files import (
+    API,
+    API_KEY,
+    API_URL,
+    RADAR_COMMAND,
+    USER_ID,
+    export_api,
+)
 from tests.helpers.shared_config import SHARED
 
 pytestmark = pytest.mark.unit
@@ -35,9 +41,12 @@ def _selection(cell_uid: str | None) -> pd.DataFrame:
 
 
 def _context(config, cell_uid=radar_store.UID_A, scan=1, **overrides) -> dict:
+    """What the module runs with: ``config`` as configured, or options with the exported user."""
+    if isinstance(config, RadarCommandConfig):
+        config = RadarCommandRun(options=config, user_id=USER_ID)
     outputs = radar_store.scan_outputs(scan)
     return {
-        "radar_command_config": config,
+        "arm_radar_comm_config": config,
         "selection": _selection(cell_uid),
         "analysis_ds": outputs["analysis_ds"],
         "cell_volume_stats_rows": outputs["cell_volume_stats_rows"],
@@ -45,7 +54,7 @@ def _context(config, cell_uid=radar_store.UID_A, scan=1, **overrides) -> dict:
         "scan_id": f"scan-{scan}",
         "scan_time": radar_store.SCAN_TIMES[scan],
         "wall_time": radar_store.SCAN_TIMES[scan] + timedelta(seconds=120),  # a fresh scan
-        "radar_command_state": None,  # nothing published yet
+        "arm_radar_comm_state": None,  # nothing published yet
         **overrides,
     }
 
@@ -61,7 +70,7 @@ def _row(result: dict) -> pd.Series:
 
 
 def test_a_selected_cell_gets_a_published_command():
-    row = _row(RadarCommandModule().run(_context(_config())))
+    row = _row(ArmRadarCommModule().run(_context(_config())))
 
     assert row["outcome"] == "PUBLISHED"
     assert row["cell_uid"] == radar_store.UID_A
@@ -74,14 +83,14 @@ def test_a_selected_cell_gets_a_published_command():
 
 
 def test_no_selected_cell_is_recorded_as_no_target():
-    row = _row(RadarCommandModule().run(_context(_config(), cell_uid=None)))
+    row = _row(ArmRadarCommModule().run(_context(_config(), cell_uid=None)))
 
     assert row["outcome"] == "NO_TARGET"
     assert row["plan_id"] is None and row["command_json"] is None
 
 
 def test_a_cell_that_cannot_be_located_is_recorded_with_why():
-    row = _row(RadarCommandModule().run(_context(_config(), cell_uid="uid-zz")))
+    row = _row(ArmRadarCommModule().run(_context(_config(), cell_uid="uid-zz")))
 
     assert row["outcome"] == "TARGET_UNAVAILABLE"
     assert "uid-zz" in row["detail"]
@@ -89,11 +98,11 @@ def test_a_cell_that_cannot_be_located_is_recorded_with_why():
 
 def test_the_same_plan_is_not_published_twice_by_one_run():
     """What was published is carried from scan to scan as the module's state."""
-    first_result = RadarCommandModule().run(_context(_config()))
+    first_result = ArmRadarCommModule().run(_context(_config()))
     first = _row(first_result)
-    published = first_result["radar_command_state"]
+    published = first_result["arm_radar_comm_state"]
 
-    again = _row(RadarCommandModule().run(_context(_config(), radar_command_state=published)))
+    again = _row(ArmRadarCommModule().run(_context(_config(), arm_radar_comm_state=published)))
 
     assert published == frozenset({first["plan_id"]})
     assert again["outcome"] == "DUPLICATE"
@@ -101,11 +110,11 @@ def test_the_same_plan_is_not_published_twice_by_one_run():
 
 
 def test_a_scan_without_a_command_leaves_the_state_as_it_was():
-    result = RadarCommandModule().run(
-        _context(_config(), cell_uid=None, radar_command_state=frozenset({"earlier-plan"}))
+    result = ArmRadarCommModule().run(
+        _context(_config(), cell_uid=None, arm_radar_comm_state=frozenset({"earlier-plan"}))
     )
 
-    assert result["radar_command_state"] == frozenset({"earlier-plan"})
+    assert result["arm_radar_comm_state"] == frozenset({"earlier-plan"})
 
 
 def test_a_fixed_band_needs_no_measured_extent():
@@ -113,10 +122,14 @@ def test_a_fixed_band_needs_no_measured_extent():
     context = _context(config)
     del context["cell_volume_stats_rows"]
 
-    row = _row(RadarCommandModule().run(context))
+    row = _row(ArmRadarCommModule().run(context))
 
-    assert "cell_volume_stats_rows" not in RadarCommandModule.inputs_for(config)
-    assert "cell_volume_stats_rows" in RadarCommandModule.inputs_for(_config())
+    assert "cell_volume_stats_rows" not in ArmRadarCommModule.inputs_for(
+        context["arm_radar_comm_config"]
+    )
+    assert "cell_volume_stats_rows" in ArmRadarCommModule.inputs_for(
+        _context(_config())["arm_radar_comm_config"]
+    )
     assert (row["outcome"], row["vertical_source"]) == ("PUBLISHED", "config")
 
 
@@ -127,7 +140,7 @@ def test_a_configured_api_is_sent_the_command_with_the_key(monkeypatch):
         node, "send", lambda command_json, target: sent.append((command_json, target)) or "queued"
     )
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API))))
 
     assert (row["outcome"], row["detail"]) == ("SENT", "queued")
     ((command_json, target),) = sent
@@ -142,7 +155,7 @@ def test_the_command_sent_is_one_wrapped_auto_target(monkeypatch):
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", lambda command_json, target: sent.append(command_json) or "")
 
-    RadarCommandModule().run(_context(_config(api=API)))
+    ArmRadarCommModule().run(_context(_config(api=API)))
 
     assert list(json.loads(sent[0])) == ["AutoTarget"]
 
@@ -154,7 +167,7 @@ def test_an_api_that_refuses_is_recorded_and_does_not_raise(monkeypatch):
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", refuse)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API))))
 
     assert row["outcome"] == "NOT_ACKNOWLEDGED"
     assert "HTTP 503" in row["detail"]
@@ -175,7 +188,7 @@ def _sends(monkeypatch) -> list:
 def test_a_scan_within_the_age_limit_is_sent(monkeypatch, age):
     sent = _sends(monkeypatch)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(age))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(age))))
 
     assert row["outcome"] == "SENT"
     assert len(sent) == 1
@@ -185,7 +198,7 @@ def test_a_scan_within_the_age_limit_is_sent(monkeypatch, age):
 def test_a_scan_older_than_the_limit_is_recorded_and_not_sent(monkeypatch, age):
     sent = _sends(monkeypatch)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(age))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(age))))
 
     assert sent == []
     assert row["outcome"] == "STALE"
@@ -197,7 +210,7 @@ def test_a_scan_older_than_the_limit_is_recorded_and_not_sent(monkeypatch, age):
 def test_an_age_just_over_the_limit_is_not_reported_as_the_limit(monkeypatch):
     _sends(monkeypatch)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(300.4))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(300.4))))
 
     assert row["outcome"] == "STALE"
     assert "301 s old; the limit is 300 s" in row["detail"]
@@ -207,7 +220,7 @@ def test_a_scan_ahead_of_the_machines_clock_is_held_back(monkeypatch):
     # The limit cannot be trusted when the clock (the machine's or the radar's) is off.
     sent = _sends(monkeypatch)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(-400.0))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(-400.0))))
 
     assert (row["outcome"], sent) == ("STALE", [])
     assert "400 s ahead of this machine's clock" in row["detail"]
@@ -215,14 +228,14 @@ def test_a_scan_ahead_of_the_machines_clock_is_held_back(monkeypatch):
 
 def test_an_old_scan_whose_command_already_went_out_stays_a_duplicate(monkeypatch):
     _sends(monkeypatch)
-    first = RadarCommandModule().run(_context(_config(api=API)))
+    first = ArmRadarCommModule().run(_context(_config(api=API)))
 
     again = _row(
-        RadarCommandModule().run(
+        ArmRadarCommModule().run(
             _context(
                 _config(api=API),
                 wall_time=_at(811.0),
-                radar_command_state=first["radar_command_state"],
+                arm_radar_comm_state=first["arm_radar_comm_state"],
             )
         )
     )
@@ -234,7 +247,7 @@ def test_the_age_limit_is_the_one_the_options_give(monkeypatch):
     sent = _sends(monkeypatch)
     patient = _config(api={**API, "max_scan_age_seconds": 900})
 
-    row = _row(RadarCommandModule().run(_context(patient, wall_time=_at(811.0))))
+    row = _row(ArmRadarCommModule().run(_context(patient, wall_time=_at(811.0))))
 
     assert (row["outcome"], len(sent)) == ("SENT", 1)
 
@@ -242,13 +255,13 @@ def test_the_age_limit_is_the_one_the_options_give(monkeypatch):
 def test_a_scan_too_old_to_send_is_not_marked_as_published(monkeypatch):
     _sends(monkeypatch)
 
-    result = RadarCommandModule().run(_context(_config(api=API), wall_time=_at(811.0)))
+    result = ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(811.0)))
 
-    assert not result["radar_command_state"]
+    assert not result["arm_radar_comm_state"]
 
 
 def test_a_dry_run_records_the_command_of_an_old_scan_all_the_same():
-    row = _row(RadarCommandModule().run(_context(_config(), wall_time=_at(86400.0))))
+    row = _row(ArmRadarCommModule().run(_context(_config(), wall_time=_at(86400.0))))
 
     assert row["outcome"] == "PUBLISHED"
 
@@ -257,18 +270,18 @@ def test_a_scan_too_old_to_send_says_so_on_the_console_without_marks(monkeypatch
     caplog.set_level(logging.INFO)
     _sends(monkeypatch)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API), wall_time=_at(811.0))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API), wall_time=_at(811.0))))
 
     assert _console_line(caplog) == (
-        f"radar_command: command {row['plan_id']} held back for cell {radar_store.UID_A}"
-        ": scan is 811 s old; the limit is 300 s (radar_command.api.max_scan_age_seconds)"
+        f"arm_radar_comm: command {row['plan_id']} held back for cell {radar_store.UID_A}"
+        ": scan is 811 s old; the limit is 300 s (arm_radar_comm.api.max_scan_age_seconds)"
     )
-    (record,) = [r for r in caplog.records if "radar_command:" in r.getMessage()]
+    (record,) = [r for r in caplog.records if "arm_radar_comm:" in r.getMessage()]
     assert record.levelno == logging.INFO  # held back on purpose: not a failure
 
 
 def _console_line(caplog) -> str:
-    (record,) = [r for r in caplog.records if "radar_command:" in r.getMessage()]
+    (record,) = [r for r in caplog.records if "arm_radar_comm:" in r.getMessage()]
     assert record.console is True
     return record.getMessage()
 
@@ -276,11 +289,11 @@ def _console_line(caplog) -> str:
 def test_a_dry_run_says_on_the_console_that_nothing_was_sent(caplog):
     caplog.set_level(logging.INFO)
 
-    row = _row(RadarCommandModule().run(_context(_config())))
+    row = _row(ArmRadarCommModule().run(_context(_config())))
 
     line = _console_line(caplog)
     assert line == (
-        f"radar_command: command {row['plan_id']} written for cell {radar_store.UID_A} "
+        f"arm_radar_comm: command {row['plan_id']} written for cell {radar_store.UID_A} "
         "(dry run, nothing sent)"
     )
 
@@ -290,10 +303,10 @@ def test_a_command_sent_and_acknowledged_gets_two_ticks_on_the_console(monkeypat
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", lambda command_json, target: "HTTP 200: published, and more")
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API))))
 
     assert _console_line(caplog) == (
-        f"✓✓ radar_command: command {row['plan_id']} sent for cell {radar_store.UID_A} "
+        f"✓✓ arm_radar_comm: command {row['plan_id']} sent for cell {radar_store.UID_A} "
         "(queued by the radar API)"
     )
 
@@ -306,11 +319,11 @@ def test_a_command_sent_but_not_acknowledged_gets_a_tick_then_a_cross(monkeypatc
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", refuse)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API))))
 
     line = _console_line(caplog)
     assert row["outcome"] == "NOT_ACKNOWLEDGED"
-    assert line.startswith(f"✓✗ radar_command: command {row['plan_id']} not acknowledged for cell")
+    assert line.startswith(f"✓✗ arm_radar_comm: command {row['plan_id']} not acknowledged for cell")
     assert "HTTP 401: no such key" in line
     assert len(line) < 200 < len(row["detail"])  # the whole answer is in the table
 
@@ -323,11 +336,11 @@ def test_a_command_that_did_not_go_out_gets_a_cross_and_no_second_mark(monkeypat
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", unreachable)
 
-    row = _row(RadarCommandModule().run(_context(_config(api=API))))
+    row = _row(ArmRadarCommModule().run(_context(_config(api=API))))
 
     assert row["outcome"] == "SEND_FAILED"
     assert _console_line(caplog) == (
-        f"✗– radar_command: command {row['plan_id']} not sent for cell {radar_store.UID_A}"
+        f"✗– arm_radar_comm: command {row['plan_id']} not sent for cell {radar_store.UID_A}"
         ": unreachable: connection refused"
     )
 
@@ -339,11 +352,11 @@ def test_a_command_that_failed_is_not_sent_again_at_the_next_scan(monkeypatch, f
 
     export_api(monkeypatch)
     monkeypatch.setattr(node, "send", fail)
-    first = RadarCommandModule().run(_context(_config(api=API)))
+    first = ArmRadarCommModule().run(_context(_config(api=API)))
 
     again = _row(
-        RadarCommandModule().run(
-            _context(_config(api=API), radar_command_state=first["radar_command_state"])
+        ArmRadarCommModule().run(
+            _context(_config(api=API), arm_radar_comm_state=first["arm_radar_comm_state"])
         )
     )
 
@@ -355,17 +368,18 @@ def test_api_settings_lost_during_the_run_are_recorded_and_do_not_raise(monkeypa
     config = _configured("aws_nexrad", {**RADAR_COMMAND, "api": API})
     monkeypatch.delenv("ADAPT_TEST_CA")
 
-    row = _row(RadarCommandModule().run(_context(config)))
+    row = _row(ArmRadarCommModule().run(_context(config)))
 
     assert row["outcome"] == "SEND_FAILED"
     assert "ADAPT_TEST_CA" in row["detail"]
     assert row["command_json"] is not None
 
 
-def _configured(source: str, params: dict) -> RadarCommandConfig:
-    """The config a run from ``source`` gets from these ``params.radar_command``."""
-    options = module_options("radar_command", params, source="a test")
-    return RadarCommandModule.configure(options, replace(SHARED, source=source))
+def _configured(source: str, params: dict) -> RadarCommandRun:
+    """The config a run from ``source`` gets from ``params.arm_radar_comm``: these parts
+    in place of those of ``RADAR_COMMAND``, which gives every option."""
+    options = module_options("arm_radar_comm", {**RADAR_COMMAND, **params}, source="a test")
+    return ArmRadarCommModule.configure(options, replace(SHARED, source=source))
 
 
 @pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
@@ -389,8 +403,8 @@ def test_a_run_with_its_api_settings_exported_is_configured_to_send(monkeypatch)
 
     config = _configured("aws_nexrad", {"api": API})
 
-    assert config.api is not None
-    assert API_KEY not in config.model_dump_json()
+    assert config.options.api is not None
+    assert API_KEY not in config.options.model_dump_json()
 
 
 def test_over_a_stored_run_nothing_is_sent(monkeypatch):
@@ -399,13 +413,27 @@ def test_over_a_stored_run_nothing_is_sent(monkeypatch):
 
     config = _configured("stored_run", {"api": API})
 
-    assert config.api is None
+    assert config.options.api is None
 
 
-def test_the_files_parts_are_laid_over_the_packaged_options():
-    config = _configured("aws_nexrad", {"planning": {"horizon_minutes": 6}})
-    packaged = yaml.safe_load(RadarCommandModule.options_preset())["radar_command"]
+@pytest.mark.parametrize("source", ["aws_nexrad", "stored_run"])
+def test_the_run_is_configured_with_the_user_id_its_variable_holds(monkeypatch, source):
+    monkeypatch.setenv("ADAPT_TEST_USER", "adapt_ops")
 
-    assert config.planning.horizon_minutes == 6
-    assert config.planning.interval_seconds == packaged["planning"]["interval_seconds"]
-    assert config.radar.scan_pattern == packaged["radar"]["scan_pattern"]
+    assert _configured(source, {}).user_id == "adapt_ops"
+
+
+@pytest.mark.parametrize("source", ["aws_nexrad", "stored_run"])
+def test_a_run_whose_user_id_variable_is_unset_is_refused_dry_run_or_not(monkeypatch, source):
+    monkeypatch.delenv("ADAPT_TEST_USER")
+
+    with pytest.raises(ValueError, match="ADAPT_TEST_USER.*arm_radar_comm.radar.user_id_env"):
+        _configured(source, {})
+
+
+def test_the_command_carries_the_user_id_the_run_was_configured_with(monkeypatch):
+    monkeypatch.setenv("ADAPT_TEST_USER", "adapt_ops")
+
+    row = _row(ArmRadarCommModule().run(_context(_configured("aws_nexrad", {}))))
+
+    assert json.loads(row["command_json"])["AutoTarget"]["user_id"] == "adapt_ops"

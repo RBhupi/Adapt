@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from adapt.modules.radar_command.config import AltitudeBand
-from adapt.modules.radar_command.extent import VerticalBounds
-from adapt.modules.radar_command.target import SelectionRef, TargetUnavailable, target_geometry
+from adapt.modules.arm_radar_comm.config import AltitudeBand
+from adapt.modules.arm_radar_comm.extent import VerticalBounds
+from adapt.modules.arm_radar_comm.target import SelectionRef, TargetUnavailable, target_geometry
 from tests.helpers.radar_store import RUN, SCAN_TIMES, UID_A, UID_B, analysis_ds, volume_rows
 
 pytestmark = pytest.mark.unit

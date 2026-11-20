@@ -84,6 +84,9 @@ class BaseModule(ABC):
     # The module's options: a frozen model that refuses unknown keys and gives
     # each option its default, bounds and description. None = no options.
     options_class: ClassVar[type[BaseModel] | None] = None
+    # True when a pipeline file must give every option: ``options_preset`` is
+    # then an example to copy, never laid under the file's options.
+    every_option_written: ClassVar[bool] = False
     # True when the key of every table this module writes holds a hash of its
     # options: rows made with other options are other rows, never overwritten.
     rows_keyed_by_options: ClassVar[bool] = False
@@ -112,6 +115,8 @@ class BaseModule(ABC):
 
         None (the default) when the defaults of ``options_class`` are the
         module's defaults; a module whose options are a packaged rule returns it.
+        With ``every_option_written`` it is an example of every option, not a
+        default.
         """
         return None
 

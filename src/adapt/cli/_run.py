@@ -9,7 +9,7 @@ The file is named with or without its extension: ``adapt run nexrad.yaml`` is
 The whole file is checked first — the run section, every listed module
 (configured as it will run, with every input it reads accounted for), the
 source, and the radar API settings in the environment (base URL, key, CA file)
-when radar_command is to send — and nothing starts if any check fails.
+when arm_radar_comm is to send — and nothing starts if any check fails.
 
 The orchestrator then runs on its own thread until the source is exhausted
 (historical), the time is up, or Ctrl-C / SIGTERM stops it.
@@ -116,12 +116,12 @@ def pipeline_path(root: Path, name: str, command: str) -> Path:
     if path.is_file():
         return path
     if name in PIPELINE_TEMPLATES:
-        hint = f"Write it from its template with:  adapt config {name}"
+        hint = f"Write it from its template with:  adapt config --{name}"
     else:
         template = next(iter(PIPELINE_TEMPLATES))
         hint = (
             f"Start it from a template's file, e.g.:  cp {template}.yaml {name}.yaml  "
-            f"(adapt config {template} writes {template}.yaml; templates: "
+            f"(adapt config --{template} writes {template}.yaml; templates: "
             f"{', '.join(PIPELINE_TEMPLATES)})"
         )
     raise ConfigError(f"No pipeline file {path}. {hint}")

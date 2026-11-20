@@ -206,7 +206,8 @@ class TestRefusals:
 
         assert f"  • params.projection.{option} — unrecognized option" in message
         assert (
-            message.splitlines()[-1] == "The options of projection: adapt config --show projection"
+            message.splitlines()[-1]
+            == "The options of projection: adapt config --params projection"
         )
 
     def test_the_section_that_held_these_options_is_an_unknown_key(self):
@@ -220,10 +221,6 @@ class TestRefusals:
         sections, modules = str(exc.value).split("the sections ")[1].split("; the modules ")
         assert "projector" not in sections.split(", ")
         assert "projection" in modules.split(", ")
-
-    def test_options_of_projection_are_refused_when_the_file_does_not_list_it(self):
-        with pytest.raises(ValueError, match="params.projection sets the options of projection"):
-            _pipeline({"projection": {"max_projection_steps": 7}}, modules=["ingest"])
 
 
 class TestRunRecord:

@@ -7,7 +7,7 @@ The rule (entry gates, score, hold gates, switching, duration cap) decides from
 the run's cells up to this scan: the runtime hands them over as
 ``cells_so_far`` and ``tracks_so_far``, read back from the store once tracking
 has written this scan. The decision is the ``selection`` output, one row per
-scan and rule in the ``target_selection`` table; ``radar_command`` acts on it.
+scan and rule in the ``target_selection`` table; ``arm_radar_comm`` acts on it.
 """
 
 from dataclasses import dataclass

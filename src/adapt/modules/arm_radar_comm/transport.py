@@ -4,7 +4,9 @@
 """Publish a command to the radar API: one POST per command, never repeated.
 
 Where to publish comes from the environment, through the variables the config
-names (``endpoint``): the base URL, the API key and the CA certificate file. The
+names (``endpoint``): the base URL, the API key and the CA certificate file;
+so does the user id every command carries
+(``user_id``). The
 key is held as a SecretStr and sent only as the ``X-API-Key`` header — never
 written to a command, the store, a log or an error message. The server's
 certificate is verified against that CA alone, and only for these requests.
@@ -28,8 +30,8 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from adapt.modules.radar_command.command import AutoTargetCommand, from_json
-from adapt.modules.radar_command.config import ApiConfig
+from adapt.modules.arm_radar_comm.command import AutoTargetCommand, from_json
+from adapt.modules.arm_radar_comm.config import ApiConfig, RadarConfig
 
 ENDPOINT = "/publish/command"
 PUBLISHED, QUEUE = "published", "scan_commands"  # the acknowledgment of a queued command
@@ -61,35 +63,36 @@ class Endpoint:
 
 
 def endpoint(api: ApiConfig) -> Endpoint:
-    """The endpoint the environment describes, through the variables ``api`` names.
+    """The endpoint the environment describes, through the variables ``api`` names:
+    ``{base URL}/publish/command``.
 
     Raises EndpointError naming the variable — never what it holds, except the
     CA file's path — when one is unset or empty, the base URL is not a plain
     ``https://`` address, the key is not visible ASCII, or the CA file cannot be
     read as PEM certificates.
     """
-    base_url = _exported(api.base_url_env, "base_url_env", "the radar API base URL")
+    base_url = _exported(api.base_url_env, "api.base_url_env", "the radar API base URL")
     if not _plain_https(base_url):
         raise EndpointError(
-            f"Environment variable {api.base_url_env!r} (radar_command.api.base_url_env) must "
+            f"Environment variable {api.base_url_env!r} (arm_radar_comm.api.base_url_env) must "
             "hold an https:// URL of a host with an optional port and path, and nothing else: "
             "no user or password, query, fragment or whitespace"
         )
-    key = _exported(api.api_key_env, "api_key_env", "the radar API key")
+    key = _exported(api.api_key_env, "api.api_key_env", "the radar API key")
     if not re.fullmatch(_VISIBLE_ASCII, key):
         raise EndpointError(
-            f"Environment variable {api.api_key_env!r} (radar_command.api.api_key_env) holds a "
+            f"Environment variable {api.api_key_env!r} (arm_radar_comm.api.api_key_env) holds a "
             "key with a space, a line end or a character that is not plain ASCII; export the "
             "key alone"
         )
-    ca_file = _exported(api.ca_file_env, "ca_file_env", "the path of the CA certificate file")
+    ca_file = _exported(api.ca_file_env, "api.ca_file_env", "the path of the CA certificate file")
     try:
         # Only this CA is trusted, for this context alone; the server's
         # certificate and host name are both checked.
         tls = ssl.create_default_context(cafile=ca_file)
     except OSError as exc:  # a missing or unreadable file, or one holding no certificate
         raise EndpointError(
-            f"Environment variable {api.ca_file_env!r} (radar_command.api.ca_file_env) names "
+            f"Environment variable {api.ca_file_env!r} (arm_radar_comm.api.ca_file_env) names "
             f"CA certificate file {ca_file!r}, which cannot be read as PEM certificates: {exc}"
         ) from exc
     return Endpoint(
@@ -100,11 +103,26 @@ def endpoint(api: ApiConfig) -> Endpoint:
     )
 
 
+def user_id(radar: RadarConfig) -> str:
+    """The user id every command carries, from the variable ``radar.user_id_env`` names.
+
+    Raises EndpointError naming the variable when it is unset or empty, or holds
+    a space, a line end or a character that is not plain ASCII.
+    """
+    value = _exported(radar.user_id_env, "radar.user_id_env", "the user id sent with every command")
+    if not re.fullmatch(_VISIBLE_ASCII, value):
+        raise EndpointError(
+            f"Environment variable {radar.user_id_env!r} (arm_radar_comm.radar.user_id_env) holds "
+            "a user id with a space, a line end or a character that is not plain ASCII"
+        )
+    return value
+
+
 def _exported(variable: str, option: str, holds: str) -> str:
     value = os.environ.get(variable, "")
     if not value:
         raise EndpointError(
-            f"Environment variable {variable!r} (radar_command.api.{option}) is not set "
+            f"Environment variable {variable!r} (arm_radar_comm.{option}) is not set "
             f"or empty; it must hold {holds}"
         )
     return value

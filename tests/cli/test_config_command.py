@@ -1,11 +1,19 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""``adapt config NAME``: write ``./NAME.yaml`` from the template, asking before overwriting."""
+"""``adapt config --nexrad [--params]``: write ``./nexrad.yaml`` from the template.
+
+The file is never written over an existing one.
+
+With ``--params`` the file also gives every catalog module's options at their
+defaults under ``params:``. ``adapt config`` needs a template or ``--params``.
+"""
 
 import pytest
 
 from adapt.configuration.pipeline_file import load_pipeline_file
+from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, pipeline_template
+from adapt.execution.pipeline_builder import catalog_module_names
 
 pytestmark = pytest.mark.unit
 
@@ -17,64 +25,67 @@ def cwd(tmp_path, monkeypatch):
 
 
 def test_writes_the_short_pipeline_file_in_the_current_directory(cwd, adapt, capsys):
-    assert adapt("config", "nexrad") == 0
+    assert adapt("config", "--nexrad") == 0
 
     path = cwd / "nexrad.yaml"
-    assert path.read_text().startswith("# Adapt pipeline file. Run it with:  adapt run ")
-    assert load_pipeline_file(path).modules
+    assert path.read_text() == pipeline_template("nexrad")
+    assert load_pipeline_file(path).params == {}
     assert "adapt run nexrad" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(("answer", "kept"), [("y", False), ("n", True), ("", True)])
-def test_asks_before_overwriting(cwd, adapt, monkeypatch, capsys, answer, kept):
+def test_with_params_every_catalog_module_gets_its_options_under_its_heading(cwd, adapt):
+    assert adapt("config", "--nexrad", "--params") == 0
+
+    text = (cwd / "nexrad.yaml").read_text()
+    assert text.startswith(pipeline_template("nexrad"))
+    pipeline = load_pipeline_file(cwd / "nexrad.yaml")
+    assert list(pipeline.params) == catalog_module_names()
+    assert pipeline.modules == PIPELINE_TEMPLATES["nexrad"].modules  # the others stay off
+    for name in catalog_module_names():
+        assert f"\n  # {name}: " in text
+    assert "\n\n\n  # detection: " in text  # two empty lines between modules
+
+
+@pytest.mark.parametrize("flags", [(), ("--params",)])
+def test_an_existing_file_is_refused_and_kept(cwd, adapt, capsys, flags):
     path = cwd / "nexrad.yaml"
     path.write_text("# mine\n")
-    monkeypatch.setattr("builtins.input", lambda prompt: answer)
 
-    assert adapt("config", "nexrad") == 0
+    assert adapt("config", "--nexrad", *flags) == 2
 
-    assert (path.read_text() == "# mine\n") is kept
-    if kept:
-        assert "Aborted" in capsys.readouterr().out
-
-
-def test_unknown_template_lists_the_available_ones_and_writes_nothing(cwd, adapt, capsys):
-    assert adapt("config", "bogus") == 2
-
-    assert "nexrad" in capsys.readouterr().err
-    assert not (cwd / "bogus.yaml").exists()
-
-
-def test_needs_a_name_or_show(cwd, adapt):
-    assert adapt("config") == 2
-
-
-def test_name_and_show_are_exclusive(cwd, adapt):
-    assert adapt("config", "nexrad", "--show", "tracking") == 2
+    assert path.read_text() == "# mine\n"
+    err = capsys.readouterr().err
+    assert "already exists" in err
+    assert "adapt config --params --file nexrad.yaml" in err
 
 
 @pytest.mark.parametrize(
-    ("interrupt", "code"), [(EOFError, 0), (KeyboardInterrupt, 1)], ids=["eof", "ctrl-c"]
+    "args",
+    [("--nexrad", "tracking"), ("--nexrad", "--params", "--file", "nexrad.yaml")],
+    ids=["names", "file"],
 )
-def test_an_interrupted_overwrite_prompt_aborts_cleanly(
-    cwd, adapt, monkeypatch, capsys, interrupt, code
-):
-    path = cwd / "nexrad.yaml"
-    path.write_text("# mine\n")
+def test_the_template_takes_no_module_names_or_file(cwd, adapt, capsys, args):
+    assert adapt("config", *args) == 2
 
-    def _interrupt(prompt):
-        raise interrupt
+    assert "takes no module names or --file" in capsys.readouterr().err
+    assert not (cwd / "nexrad.yaml").exists()
 
-    monkeypatch.setattr("builtins.input", _interrupt)
 
-    assert adapt("config", "nexrad") == code
+@pytest.mark.parametrize("args", [(), ("tracking",), ("--file", "nexrad.yaml")])
+def test_without_a_template_params_is_needed(cwd, adapt, capsys, args):
+    assert adapt("config", *args) == 2
 
-    assert path.read_text() == "# mine\n"
-    assert "Aborted" in capsys.readouterr().out
+    assert "adapt config needs --params" in capsys.readouterr().err
+
+
+def test_params_alone_needs_names_or_a_file(cwd, adapt, capsys):
+    assert adapt("config", "--params") == 2
+
+    assert "--params needs module names to print, or --file FILE" in capsys.readouterr().err
 
 
 def test_outside_a_store_the_next_step_is_adapt_init(cwd, adapt, capsys):
-    assert adapt("config", "nexrad") == 0
+    assert adapt("config", "--nexrad") == 0
 
     out = capsys.readouterr().out
     assert "adapt init" in out

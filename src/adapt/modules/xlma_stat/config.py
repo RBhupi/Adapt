@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class XlmaStatConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # No default folder: None leaves `adapt config --show xlma_stat` a slot to fill,
+    # No default folder: None leaves `adapt config --params xlma_stat` a slot to fill,
     # and the node's configure refuses a run without it.
     input_dir: str | None = Field(
         None,

@@ -19,7 +19,7 @@ from adapt.api import StoreClient
 
 pytestmark = pytest.mark.unit
 
-RADAR = [*MODULES, "target_selection", "radar_command"]
+RADAR = [*MODULES, "target_selection", "arm_radar_comm"]
 STORED = {"source": "stored_run", "radar": "KTST", "mode": "historical"}
 
 
@@ -92,7 +92,7 @@ def test_a_missing_template_file_names_the_command_writing_it(store, adapt, caps
 
     assert adapt("run", "nexrad") == 2
 
-    assert "adapt config nexrad" in capsys.readouterr().err
+    assert "adapt config --nexrad" in capsys.readouterr().err
 
 
 def test_a_missing_file_named_with_its_extension_is_looked_for_under_that_name(
@@ -113,8 +113,8 @@ def test_a_path_is_refused_even_to_the_stores_own_file(store, adapt, capsys):
     assert "'./nexrad.yaml'" in err
 
 
-def test_radar_command_needs_target_selection_in_the_same_file(store, live, adapt, capsys):
-    live(modules=[*MODULES, "radar_command"])
+def test_arm_radar_comm_needs_target_selection_in_the_same_file(store, live, adapt, capsys):
+    live(modules=[*MODULES, "arm_radar_comm"])
 
     assert adapt("run", "case") == 2
 
@@ -123,7 +123,7 @@ def test_radar_command_needs_target_selection_in_the_same_file(store, live, adap
 
 
 def test_a_wrong_option_of_a_module_is_named(store, live, adapt, capsys):
-    live(modules=RADAR, params={"radar_command": {"radar": {"scan_patern": "ppi"}}})
+    live(modules=RADAR, params={"arm_radar_comm": {"radar": {"scan_patern": "ppi"}}})
 
     assert adapt("run", "case") == 2
 
@@ -137,7 +137,7 @@ def test_a_run_that_sends_needs_its_radar_api_settings_before_it_starts(
 ):
     export_api(monkeypatch)
     monkeypatch.delenv(variable)
-    live(modules=RADAR, params={"radar_command": {**RADAR_COMMAND, "api": API}})
+    live(modules=RADAR, params={"arm_radar_comm": {**RADAR_COMMAND, "api": API}})
 
     assert adapt("run", "case") == 2
 

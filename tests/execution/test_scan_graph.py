@@ -138,7 +138,7 @@ def test_an_earlier_scan_output_must_come_from_a_listed_module():
     assert "which module 'projection' produces" in message
     assert "list 'projection' under modules:" in message
     assert "or change detection's options so it does not read it" in message
-    assert "(adapt config --show detection)" in message
+    assert "(adapt config --params detection)" in message
 
 
 def test_a_module_may_read_its_own_outputs_of_earlier_scans():

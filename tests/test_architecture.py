@@ -827,7 +827,7 @@ def test_a_module_node_carries_nothing_between_scans_in_its_attributes() -> None
 
 
 # ── A module's defaults are complete ──────────────────────────────────────────
-# ``adapt config --show`` and the option resolver take a module's defaults from
+# ``adapt config --params`` and the option resolver take a module's defaults from
 # its packaged preset, else from its options model built with no argument. A
 # part of the options given alone is filled from the part's own defaults.
 

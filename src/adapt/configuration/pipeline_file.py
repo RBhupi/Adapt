@@ -6,10 +6,11 @@
 Sections: ``run`` (where scans come from), ``modules`` (the per-scan modules to
 run, by name, checked against the module catalog; Adapt orders them by their
 inputs and outputs) and ``params`` (a section of the run config — ``global``,
-``downloader``, ``logging`` — or the name of a listed module -> options). The
-options themselves are checked when a run of the file is configured, see
-``pipeline_run``: a section's by the run config's model of it, a module's by
-the module's own options model.
+``downloader``, ``logging`` — or the name of a catalog module -> options). Only
+the listed modules run: the params of a module the file does not list are kept
+in the file but never read. The options themselves are checked when a run of
+the file is configured, see ``pipeline_run``: a section's by the run config's
+model of it, a module's by the module's own options model.
 
 ``load_pipeline_file`` reads and validates a file; ``pipeline_run`` turns it
 into a run's config. The folder that holds the file is the store root.
@@ -32,7 +33,6 @@ from pydantic import (
     BaseModel,
     Field,
     PositiveInt,
-    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -194,21 +194,16 @@ class PipelineFile(AdaptBaseModel):
 
     @field_validator("params")
     @classmethod
-    def _params_are_sections_or_listed_modules(
-        cls, params: dict[str, dict[str, Any]], info: ValidationInfo
+    def _params_are_sections_or_modules(
+        cls, params: dict[str, dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
+        # A module the file does not list keeps its params here unread: only the
+        # listed modules run, and only their options are read and validated.
         sections = tuple(param_section_models())
         catalog_module_names()  # registers every catalog module
         modules = sorted(registry.list_modules())  # each sets its options under its name
         for key in params:
-            if key in modules:
-                # "modules" is absent from info.data when it failed its own validation.
-                if "modules" in info.data and key not in info.data["modules"]:
-                    raise ValueError(
-                        f"params.{key} sets the options of {key}, which this file does not "
-                        f"run — list it under 'modules:', or remove params.{key}"
-                    )
-            elif key not in sections:
+            if key not in modules and key not in sections:
                 raise ValueError(
                     f"unknown params key '{key}'. Valid keys: the sections "
                     f"{', '.join(sections)}; the modules {', '.join(modules)}"
@@ -264,7 +259,7 @@ def _setting(given: str) -> tuple[list[str], Any]:
     if not equals or len(keys) < 3 or keys[0] != "params" or not all(keys):
         raise ConfigError(
             f"--set {given}: a setting has the form {_SETTING}, with the option's path as "
-            "'adapt config --show' and the pipeline file give it, e.g. "
+            "'adapt config --params' and the pipeline file give it, e.g. "
             "params.tracking.max_speed_ms=35"
         )
     try:

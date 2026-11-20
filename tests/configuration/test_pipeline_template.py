@@ -2,13 +2,14 @@
 # See LICENSE for terms and disclaimer.
 
 """Pipeline templates: the short, commented pipeline file ``adapt init`` /
-``adapt config NAME`` write.
+``adapt config --NAME`` write.
 
 Only names are listed: the module catalog, each module commented with its
 one-line summary, the template's modules on and the others offered commented
 out. The written file loads and runs as is.
 """
 
+import textwrap
 from datetime import UTC, datetime
 
 import pytest
@@ -27,8 +28,9 @@ _NEXRAD = """\
 # Adapt pipeline file. Run it with:  adapt run <this file's name>
 # Turn a module on by uncommenting its line; Adapt orders the modules by what each reads.
 # Everything not set here keeps its default. To see a module's options:
-#   adapt config --show NAME
-# and give only the ones you change, under params:.
+#   adapt config --params NAME
+# and give only the ones you change, under params:. To add every option a listed
+# module lacks, with its default:  adapt config --params --file <this file's name>
 # To see how the listed modules feed each other:  adapt graph <this file's name>
 
 run:
@@ -48,7 +50,7 @@ modules:                      # per-scan modules; Adapt orders them by their inp
   - tracking                  # {tracking}
   - cell_volume_stats         # {cell_volume_stats}
   # - target_selection        # {target_selection}
-  # - radar_command           # {radar_command}
+  # - arm_radar_comm          # {arm_radar_comm}
   # - xlma_stat               # {xlma_stat}
 
 params:
@@ -95,23 +97,26 @@ def test_written_file_loads_with_the_templates_modules_on_and_the_rest_offered(t
     offered = [line for line in path.read_text(encoding="utf-8").splitlines() if "# - " in line]
     assert [line.split()[2] for line in offered] == [
         "target_selection",
-        "radar_command",
+        "arm_radar_comm",
         "xlma_stat",
     ]
 
 
-def test_uncommenting_the_offered_radar_modules_gives_a_runnable_file(tmp_path):
+def test_uncommenting_the_offered_radar_modules_gives_a_runnable_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARM_ADAPT_USER", "adapt_ops")  # the variable the packaged example names
     root = init_store(tmp_path / "store")
     path = root / "nexrad.yaml"
     write_pipeline_template("nexrad", path)
     text = path.read_text(encoding="utf-8")
-    for module in ("target_selection", "radar_command"):
+    for module in ("target_selection", "arm_radar_comm"):
         text = text.replace(f"  # - {module}", f"  - {module}")
+    # arm_radar_comm has no defaults: its options are pasted under params:, the last line.
+    text += textwrap.indent(registry.get("arm_radar_comm").options_preset(), "  ")
     path.write_text(text, encoding="utf-8")
 
     config = run_config(load_pipeline_file(path), path)
 
-    assert config.modules[-2:] == ["target_selection", "radar_command"]
+    assert config.modules[-2:] == ["target_selection", "arm_radar_comm"]
     assert set(config.module_params) == {
         "ingest",
         "detection",
@@ -120,7 +125,7 @@ def test_uncommenting_the_offered_radar_modules_gives_a_runnable_file(tmp_path):
         "tracking",
         "cell_volume_stats",
         "target_selection",
-        "radar_command",
+        "arm_radar_comm",
     }
 
 

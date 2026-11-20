@@ -4,7 +4,7 @@
 """A module's options: its defaults with the pipeline file's ``params.<module>`` laid over.
 
 For the modules that own their options (cell_volume_stats, xlma_stat,
-target_selection, radar_command): which config each gets from a pipeline file,
+target_selection, arm_radar_comm): which config each gets from a pipeline file,
 how a wrong option is refused, and what a run records of them. The expected
 configs are written out by hand, from the packaged defaults.
 """
@@ -23,12 +23,12 @@ from adapt.configuration.schemas.module_resolver import module_options, resolve_
 from adapt.contracts import config_key
 from adapt.execution.module_registry import registry
 from adapt.modules.analysis.config import AnalysisOptions
+from adapt.modules.arm_radar_comm import RadarCommandConfig, RadarCommandRun
 from adapt.modules.base import BaseModule
 from adapt.modules.cell_volume_stats.config import CellVolumeStatsConfig
 from adapt.modules.detection.config import DetectionOptions
 from adapt.modules.ingest.config import IngestOptions
 from adapt.modules.projection.config import ProjectionOptions
-from adapt.modules.radar_command import RadarCommandConfig
 from adapt.modules.target_selection import TSEConfig
 from adapt.modules.target_selection.node import TargetSelectionRun
 from adapt.modules.tracking.config import TrackingOptions
@@ -39,7 +39,7 @@ from tests.helpers.pipeline_files import API, export_api
 pytestmark = pytest.mark.unit
 
 _CORE = ("ingest", "detection", "projection", "analysis", "tracking")
-_OWNERS = ("cell_volume_stats", "xlma_stat", "target_selection", "radar_command")
+_OWNERS = ("cell_volume_stats", "xlma_stat", "target_selection", "arm_radar_comm")
 _BAND = {"altitude_min_m": 500.0, "altitude_max_m": 12000.0}
 _GATE = {"field": "n_scans", "op": "ge", "value": 3}
 
@@ -55,9 +55,23 @@ def _rule(**parts) -> TSEConfig:
     return TSEConfig.model_validate({**_packaged("target_selection", "growing_isolated"), **parts})
 
 
+def _command_params(**parts) -> dict:
+    """Every option of the packaged radar command example, with these parts in place
+    of its own: arm_radar_comm has no defaults, so a file gives them all."""
+    return {**_packaged("arm_radar_comm", "sandbox"), **parts}
+
+
 def _command(**parts) -> RadarCommandConfig:
-    """The packaged radar command options with these parts in place of their own."""
-    return RadarCommandConfig.model_validate({**_packaged("radar_command", "sandbox"), **parts})
+    return RadarCommandConfig.model_validate(_command_params(**parts))
+
+
+_USER_ID = "adapt_ops"
+
+
+@pytest.fixture(autouse=True)
+def _user_exported(monkeypatch):
+    """The variable the packaged example names for the user id, set as a user exports it."""
+    monkeypatch.setenv("ARM_ADAPT_USER", _USER_ID)
 
 
 def _volume_stats(**options) -> CellVolumeStatsConfig:
@@ -88,6 +102,7 @@ def _pipeline(path, params: dict) -> PipelineFile:
     """A run of every module; xlma_stat reads the file's own folder unless told otherwise."""
     params = {name: dict(options) for name, options in params.items()}
     params.setdefault("xlma_stat", {}).setdefault("input_dir", str(path.parent))
+    params["arm_radar_comm"] = _command_params(**params.get("arm_radar_comm", {}))
     return PipelineFile.model_validate(
         {
             "run": {"source": "aws_nexrad", "radar": "KBOX", "mode": "realtime"},
@@ -219,44 +234,36 @@ class TestConfigEachModuleGets:
         assert config == TargetSelectionRun(rules=_rule(), tracking_field="velocity")
 
     @pytest.mark.parametrize(
-        ("given", "expected"),
+        "parts",
         [
-            pytest.param({}, {}, id="nothing: the packaged options"),
+            pytest.param({}, id="the packaged example"),
+            pytest.param({"api": API}, id="an api part: commands are sent"),
             pytest.param(
-                {"planning": {"horizon_minutes": 6}},
-                {"planning": {"horizon_minutes": 6, "interval_seconds": 60}},
-                id="one key of a part",
-            ),
-            pytest.param({"api": None}, {"api": None}, id="a null api: a dry run"),
-            pytest.param({"api": API}, {"api": API}, id="an api part the packaged options lack"),
-            pytest.param(
-                {"extent": {"vertical_band": _BAND}},
-                {"extent": {"horizontal_buffer_km": 2.0, "vertical_band": _BAND}},
-                id="an optional nested part",
+                {"extent": {"horizontal_buffer_km": 0.0, "vertical_band": _BAND}},
+                id="a fixed vertical band",
             ),
             pytest.param(
-                {"extent": {"vertical_band": None}},
-                {"extent": {"horizontal_buffer_km": 2.0, "vertical_band": None}},
-                id="a null for an optional nested part",
-            ),
-            pytest.param(
-                {"radar": {"user_id": "someone"}, "extent": {"horizontal_buffer_km": 0}},
-                {
-                    "radar": {"scan_pattern": "rhi3_ppi7", "user_id": "someone"},
-                    "extent": {"horizontal_buffer_km": 0.0},
-                },
-                id="keys of two parts",
+                {"planning": {"horizon_minutes": 6, "interval_seconds": 120}}, id="planning"
             ),
         ],
     )
-    def test_radar_command_gets_its_packaged_options_with_the_files_parts_laid_over(
-        self, path, monkeypatch, given, expected
+    def test_arm_radar_comm_gets_the_options_the_file_gives_and_the_exported_user(
+        self, path, monkeypatch, parts
     ):
         export_api(monkeypatch)
 
-        config = _config(path, "radar_command", {"radar_command": given})
+        config = _config(path, "arm_radar_comm", {"arm_radar_comm": parts})
 
-        assert config == _command(**expected)
+        assert config == RadarCommandRun(options=_command(**parts), user_id=_USER_ID)
+
+    def test_arm_radar_comm_has_no_defaults_to_fill_what_the_file_leaves_out(self):
+        with pytest.raises(ConfigError) as exc:
+            module_options("arm_radar_comm", {}, source="a file")
+
+        missing = [line for line in str(exc.value).splitlines() if "required option" in line]
+        assert [line.split(" — ")[0] for line in missing] == [
+            f"  • params.arm_radar_comm.{part}" for part in ("planning", "radar", "extent", "api")
+        ]
 
 
 class TestRefusals:
@@ -296,8 +303,8 @@ class TestRefusals:
                 id="a null where a list is needed",
             ),
             pytest.param(
-                {"radar_command": {"planning": {"horizon_minutes": 0}}},
-                "params.radar_command.planning.horizon_minutes — value 0 is out of range — "
+                {"arm_radar_comm": {"planning": {"horizon_minutes": 0}}},
+                "params.arm_radar_comm.planning.horizon_minutes — value 0 is out of range — "
                 "Input should be greater than or equal to 1",
                 id="out of range, in a part",
             ),
@@ -327,9 +334,19 @@ class TestRefusals:
                 id="a null where a part is needed",
             ),
             pytest.param(
-                {"radar_command": {"api": {"base_url_env": "ADAPT_TEST_URL"}}},
-                "params.radar_command.api.api_key_env — required option is missing",
+                {"arm_radar_comm": {"api": {"base_url_env": "ADAPT_TEST_URL"}}},
+                "params.arm_radar_comm.api.api_key_env — required option is missing",
                 id="a part given without a required option",
+            ),
+            pytest.param(
+                {"arm_radar_comm": {"planning": {"horizon_minutes": 12}}},
+                "params.arm_radar_comm.planning.interval_seconds — required option is missing",
+                id="no default fills an option of arm_radar_comm",
+            ),
+            pytest.param(
+                {"arm_radar_comm": {"extent": {"horizontal_buffer_km": 2.0}}},
+                "params.arm_radar_comm.extent.vertical_band — required option is missing",
+                id="a null option must be written too",
             ),
         ],
     )
@@ -340,7 +357,7 @@ class TestRefusals:
     def test_the_refusal_ends_with_how_to_see_the_modules_options(self, path, module):
         lines = _refusal(path, {module: {"no_such_option": 1}})
 
-        assert lines[-1] == f"The options of {module}: adapt config --show {module}"
+        assert lines[-1] == f"The options of {module}: adapt config --params {module}"
 
     def test_a_file_is_refused_without_a_store_as_adapt_graph_checks_it(self, tmp_path):
         path = tmp_path / "nexrad.yaml"
@@ -383,7 +400,7 @@ class TestModuleWithoutOptions:
             module_options(plain_module, {"depth": 2}, source="a test")
 
         assert str(exc.value).splitlines()[-1] == (
-            "The options of plain_probe: adapt config --show plain_probe"
+            "The options of plain_probe: adapt config --params plain_probe"
         )
 
 
@@ -396,10 +413,12 @@ _RECORDED_SHAPES = [
     ("target_selection", {"score": {"weights": {}}}),
     ("target_selection", {"score": {"site_preference": {"projection_steps": 1}}}),
     ("target_selection", {"entry": {"gates": [_GATE]}, "hold": {"gates": [_GATE]}}),
-    ("radar_command", {}),
-    ("radar_command", {"api": None}),
-    ("radar_command", {"api": API, "extent": {"vertical_band": _BAND}}),
-    ("radar_command", {"planning": {"horizon_minutes": 10, "interval_seconds": 120}}),
+    ("arm_radar_comm", _command_params()),
+    (
+        "arm_radar_comm",
+        _command_params(api=API, extent={"horizontal_buffer_km": 1.0, "vertical_band": _BAND}),
+    ),
+    ("arm_radar_comm", _command_params(planning={"horizon_minutes": 10, "interval_seconds": 120})),
 ]
 
 
@@ -410,7 +429,7 @@ class TestRunRecord:
         export_api(monkeypatch)
         params = {
             "cell_volume_stats": {"gap_tolerance_m": 250.0},
-            "radar_command": {"planning": {"horizon_minutes": 6}},
+            "arm_radar_comm": {"planning": {"horizon_minutes": 6, "interval_seconds": 60}},
         }
 
         recorded = run_config(_pipeline(path, params), path).module_params
@@ -431,9 +450,9 @@ class TestRunRecord:
             },
             "xlma_stat": {"input_dir": str(path.parent), "search_radius_m": 500.0},
             "target_selection": _rule().model_dump(mode="json"),
-            "radar_command": {
+            "arm_radar_comm": {
                 "planning": {"horizon_minutes": 6, "interval_seconds": 60},
-                "radar": {"scan_pattern": "rhi3_ppi7", "user_id": "adapt_sandbox"},
+                "radar": {"scan_pattern": "rhi3_ppi7", "user_id_env": "ARM_ADAPT_USER"},
                 "extent": {"horizontal_buffer_km": 2.0, "vertical_band": None},
                 "api": None,
             },
@@ -453,7 +472,10 @@ class TestRunRecord:
         params = {
             "cell_volume_stats": {"thresholds": [30, 45.5]},
             "target_selection": {"duration": {"max_minutes": None}, "score": {"weights": {}}},
-            "radar_command": {"api": API, "extent": {"vertical_band": _BAND}},
+            "arm_radar_comm": {
+                "api": API,
+                "extent": {"horizontal_buffer_km": 2.0, "vertical_band": _BAND},
+            },
         }
         config = run_config(_pipeline(path, params), path)
 
@@ -510,5 +532,5 @@ class TestRunRecord:
             "JSON holds no infinity or NaN):",
             "  • params.target_selection.duration.max_minutes — value inf would be read back "
             "as null; give a finite number, or leave the option empty if it may be",
-            "The options of tracking: adapt config --show tracking",
+            "The options of tracking: adapt config --params tracking",
         ]

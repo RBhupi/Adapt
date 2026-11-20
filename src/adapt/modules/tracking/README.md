@@ -67,7 +67,7 @@ enters only through the excess `e = polarity·(f − cell_threshold)₊`.
 `split_overlap_threshold` (τ_s), `merge_overlap_threshold` (τ_m), `latent_scans` (N),
 `identity_intensity_weight` (γ), `identity_score_margin` (δ_S), `core_field_threshold`
 (diagnostic only), `uid_width` (characters of a `cell_uid`). Any other key is refused as
-an unrecognized option. `adapt config --show tracking` prints them with their defaults.
+an unrecognized option. `adapt config --params tracking` prints them with their defaults.
 
 ## References
 

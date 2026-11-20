@@ -13,5 +13,5 @@ pipeline:
     - adapt.modules.tracking.node:TrackingModule
     - adapt.modules.cell_volume_stats.node:CellVolumeStatsModule
     - adapt.modules.target_selection.node:TargetSelectionModule
-    - adapt.modules.radar_command.node:RadarCommandModule
+    - adapt.modules.arm_radar_comm.node:ArmRadarCommModule
     - adapt.modules.xlma_stat.node:XlmaStatModule

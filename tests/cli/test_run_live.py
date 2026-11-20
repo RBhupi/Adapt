@@ -6,7 +6,7 @@
 Each run is real — orchestrator, processor, store — over a local folder of
 synthetic scans (historical mode). The science upstream of target selection is
 one fake module that hands on each scan's cells as the real modules do; target
-selection and radar_command are the real ones.
+selection and arm_radar_comm are the real ones.
 """
 
 import http.client
@@ -52,9 +52,9 @@ PROBE = "cli_probe"
 ECHO = "cli_echo"
 CELLS = "cli_cells"
 RUN_ID = "2024MAY18-1200-KTST"
-RADAR = [CELLS, "target_selection", "radar_command"]
+RADAR = [CELLS, "target_selection", "arm_radar_comm"]
 RULE = {"target_selection": TARGET_SELECTION}
-RADAR_PARAMS = {**RULE, "radar_command": RADAR_COMMAND}
+RADAR_PARAMS = {**RULE, "arm_radar_comm": RADAR_COMMAND}
 STORED = {"source": "stored_run", "radar": "KTST", "mode": "historical"}
 
 
@@ -296,7 +296,7 @@ def test_a_module_that_owns_its_options_gets_the_files(case, adapt):
     assert _table(root, "cli_echo")["tag"].tolist() == ["live"]
 
 
-def test_target_selection_and_radar_command_act_on_every_scan_in_order(case, adapt, capsys):
+def test_target_selection_and_arm_radar_comm_act_on_every_scan_in_order(case, adapt, capsys):
     """Three scans; the first has no projection. uid-a (50 dBZ) is the one cell
     with a 45 dBZ core: selected at the first scan and kept."""
     root, _ = case
@@ -317,7 +317,7 @@ def test_target_selection_and_radar_command_act_on_every_scan_in_order(case, ada
     assert '"scan_pattern": "ppi_sector"' in commands["command_json"].iloc[2]
     # What the radar was asked to do is on the console, one line per scan.
     console = capsys.readouterr().err
-    assert console.count("radar_command: command") == 2
+    assert console.count("arm_radar_comm: command") == 2
     assert f"written for cell {radar_store.UID_A}" in console
 
 
@@ -333,7 +333,7 @@ def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
 
     monkeypatch.setattr(http.client.HTTPSConnection, "connect", refused)
     any_age = {**API, "max_scan_age_seconds": 1.0e12}  # the case's scans are years old
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": any_age}}
+    params = {**RADAR_PARAMS, "arm_radar_comm": {**RADAR_COMMAND, "api": any_age}}
     _live(case, modules=RADAR, params=params)
 
     assert adapt("run", "case", "--run-id", RUN_ID) == 0
@@ -341,7 +341,7 @@ def test_a_radar_api_that_cannot_be_reached_is_recorded_and_the_run_goes_on(
     commands = _table(root, "radar_commands")
     assert commands["outcome"].tolist() == ["TARGET_UNAVAILABLE", "SEND_FAILED"]
     assert "unreachable" in commands["detail"].iloc[1]
-    assert "✗– radar_command: command" in capsys.readouterr().err
+    assert "✗– arm_radar_comm: command" in capsys.readouterr().err
     assert API_KEY not in commands.to_json()  # the key is never stored
 
 
@@ -357,7 +357,7 @@ def test_a_run_over_old_scans_sends_none_of_them(case, adapt, monkeypatch, capsy
         raise ConnectionRefusedError(61, "Connection refused")
 
     monkeypatch.setattr(http.client.HTTPSConnection, "connect", attempted)
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    params = {**RADAR_PARAMS, "arm_radar_comm": {**RADAR_COMMAND, "api": API}}
     _live(case, modules=RADAR, params=params)
 
     assert adapt("run", "case", "--run-id", RUN_ID) == 0
@@ -565,10 +565,10 @@ def test_running_the_same_modules_over_it_again_changes_nothing(stored, adapt):
     assert again == first
 
 
-def test_radar_command_never_sends_over_a_stored_run(stored, adapt, monkeypatch):
+def test_arm_radar_comm_never_sends_over_a_stored_run(stored, adapt, monkeypatch):
     for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
         monkeypatch.delenv(variable, raising=False)  # none is needed: nothing is sent
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    params = {**RADAR_PARAMS, "arm_radar_comm": {**RADAR_COMMAND, "api": API}}
     write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=params)
 
     assert adapt("run", "later", "--run-id", RUN_ID) == 0
@@ -675,27 +675,27 @@ def test_every_rule_a_run_was_decided_with_is_kept_under_the_hash_in_its_rows(st
     assert len(kept) == 2
 
 
-def test_radar_command_rows_carry_the_hash_of_the_options_kept_with_the_run(stored, adapt):
+def test_arm_radar_comm_rows_carry_the_hash_of_the_options_kept_with_the_run(stored, adapt):
     write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=RADAR_PARAMS)
 
     assert adapt("run", "later", "--run-id", RUN_ID) == 0
 
-    (kept,) = _ran_with(stored)["radar_command"]
+    (kept,) = _ran_with(stored)["arm_radar_comm"]
     assert set(_table(stored, "radar_commands")["config_hash"]) == {options_hash(kept)}
 
 
-def test_over_a_stored_run_radar_command_rows_carry_the_hash_of_its_options_without_api(
+def test_over_a_stored_run_arm_radar_comm_rows_carry_the_hash_of_its_options_without_api(
     stored, adapt, monkeypatch
 ):
-    """A pass never sends, so ``radar_command`` drops ``api`` before it plans:
+    """A pass never sends, so ``arm_radar_comm`` drops ``api`` before it plans:
     its rows carry the hash of the options without it, the run keeps them whole."""
     for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
         monkeypatch.delenv(variable, raising=False)
-    params = {**RADAR_PARAMS, "radar_command": {**RADAR_COMMAND, "api": API}}
+    params = {**RADAR_PARAMS, "arm_radar_comm": {**RADAR_COMMAND, "api": API}}
     write_pipeline(stored, "later", run=STORED, modules=RADAR[1:], params=params)
     assert adapt("run", "later", "--run-id", RUN_ID) == 0
 
-    (kept,) = _ran_with(stored)["radar_command"]
+    (kept,) = _ran_with(stored)["arm_radar_comm"]
 
     assert '"api":{' in kept
     assert set(_table(stored, "radar_commands")["config_hash"]) != {options_hash(kept)}

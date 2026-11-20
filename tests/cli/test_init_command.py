@@ -29,7 +29,7 @@ def test_the_written_pipeline_file_is_the_nexrad_template_and_loads(tmp_path, ad
     root = tmp_path / "case"
     adapt("init", str(root))
     monkeypatch.chdir(tmp_path)
-    adapt("config", "nexrad")
+    adapt("config", "--nexrad")
 
     assert (root / "nexrad.yaml").read_text() == (tmp_path / "nexrad.yaml").read_text()
     assert load_pipeline_file(root / "nexrad.yaml").modules

@@ -12,7 +12,7 @@ from adapt.api.store_client import StoreClient
 pytestmark = pytest.mark.unit
 
 _REALTIME = {"source": "aws_nexrad", "radar": "KTST", "mode": "realtime"}
-_NO_BAND = "params.radar_command.extent.vertical_band"
+_NO_BAND = "params.arm_radar_comm.extent.vertical_band"
 
 
 @pytest.fixture
@@ -38,11 +38,13 @@ def test_a_wrong_value_set_for_the_graph_is_refused_as_the_run_would(store, adap
 
 
 def test_an_option_set_for_the_graph_changes_what_a_module_reads(store, adapt, capsys):
-    """radar_command with a fixed vertical band needs no cell_volume_stats."""
-    modules = [*MODULES[:-1], "target_selection", "radar_command"]
+    """arm_radar_comm with a fixed vertical band needs no cell_volume_stats."""
+    modules = [*MODULES[:-1], "target_selection", "arm_radar_comm"]
     params = {
         "target_selection": TARGET_SELECTION,
-        "radar_command": {"radar": {"scan_pattern": "ppi_sector", "user_id": "operator"}},
+        "arm_radar_comm": {
+            "radar": {"scan_pattern": "ppi_sector", "user_id_env": "ADAPT_TEST_USER"}
+        },
     }
     write_pipeline(store, "case", run=_REALTIME, modules=modules, params=params)
 
@@ -51,7 +53,7 @@ def test_an_option_set_for_the_graph_changes_what_a_module_reads(store, adapt, c
     band = f"{_NO_BAND}={{altitude_min_m: 500.0, altitude_max_m: 9000.0}}"
 
     assert adapt("graph", "case", "--set", band) == 0
-    assert "radar_command" in capsys.readouterr().out
+    assert "arm_radar_comm" in capsys.readouterr().out
 
 
 def test_set_may_be_given_more_than_once(store, adapt, capsys):

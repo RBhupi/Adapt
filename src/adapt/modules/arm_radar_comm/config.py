@@ -3,21 +3,23 @@
 
 """Frozen configuration for radar command generation.
 
-The ``radar_command`` entry of a pipeline file's ``params:``, validated with
+The ``arm_radar_comm`` entry of a pipeline file's ``params:``, validated with
 ``RadarCommandConfig.model_validate``. Every command is recorded in the
-``radar_commands`` table. Unknown keys raise and every number must be finite.
-A missing key raises too, except these:
+``radar_commands`` table. Every key must be given — none has a default — an
+unknown key raises and every number must be finite. Two keys take ``null``:
 
-- ``planning`` (and each of its keys): a 12-minute plan, one entry a minute;
-- ``extent.vertical_band``: none, so each target's vertical extent is its
-  cell's measured base and top (the ``cell_volume_stats`` module must run);
-- ``api``: none, so commands are only recorded (a dry run).
+- ``extent.vertical_band: null``: each target's vertical extent is its cell's
+  measured base and top (the ``cell_volume_stats`` module must run);
+- ``api: null``: commands are only recorded (a dry run).
 
-The ``api`` part holds no address, credential or machine path: it names the
-environment variables that hold the API's base URL, its key and the CA
-certificate file. The environment is their only source, so no value in the file
-competes with it.
+The file holds no address, credential or user: it names the environment
+variables that hold the user id sent with every command (``radar.user_id_env``)
+and, under ``api``, the API's base URL (the radar's, such as
+``https://apigw.vsn.arm.gov/bnf``), the key and the CA certificate file. The
+environment is their only source, so no value in the file competes with it.
 """
+
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -35,10 +37,10 @@ class PlanningConfig(BaseModel):
     model_config = _FROZEN
 
     horizon_minutes: int = Field(
-        default=12, ge=1, le=60, description="How far ahead (minutes) each plan reaches"
+        ge=1, le=60, description="How far ahead (minutes) each plan reaches"
     )
     interval_seconds: int = Field(
-        default=60, gt=0, description="Spacing (seconds, whole minutes) of a plan's target entries"
+        gt=0, description="Spacing (seconds, whole minutes) of a plan's target entries"
     )
 
     @model_validator(mode="after")
@@ -59,7 +61,10 @@ class RadarConfig(BaseModel):
     model_config = _FROZEN
 
     scan_pattern: str = Field(min_length=1, description="Scan pattern the radar is asked to run")
-    user_id: str = Field(min_length=1, description="User id sent with every command")
+    user_id_env: str = Field(
+        min_length=1,
+        description="Environment variable that holds the user id sent with every command",
+    )
 
 
 class ApiConfig(BaseModel):
@@ -72,8 +77,9 @@ class ApiConfig(BaseModel):
 
     base_url_env: str = Field(
         min_length=1,
-        description="Environment variable that holds the API base URL (https://...); "
-        "commands are POSTed to {base URL}/publish/command",
+        description="Environment variable that holds the radar's API base URL (https://..., "
+        "such as https://apigw.vsn.arm.gov/bnf); commands are POSTed to "
+        "{base URL}/publish/command",
     )
     api_key_env: str = Field(
         min_length=1,
@@ -126,8 +132,7 @@ class ExtentConfig(BaseModel):
         "a grid pixel",
     )
     vertical_band: AltitudeBand | None = Field(
-        default=None,
-        description="Fixed altitude band for every target; unset, each cell's measured "
+        description="Fixed altitude band for every target; null, each cell's measured "
         "base and top are used (needs the cell_volume_stats module)",
     )
 
@@ -136,14 +141,22 @@ class RadarCommandConfig(BaseModel):
     model_config = _FROZEN
 
     planning: PlanningConfig = Field(
-        default=PlanningConfig(),
         description="How far ahead a plan reaches and how its entries are spaced",
     )
     radar: RadarConfig = Field(description="What the radar is asked to do")
     extent: ExtentConfig = Field(description="Size of the target box around each footprint")
     api: ApiConfig | None = Field(
-        default=None, description="Where commands are sent; absent, they are only recorded"
+        description="Where commands are sent; null, they are only recorded (a dry run)"
     )
+
+
+@dataclass(frozen=True)
+class RadarCommandRun:
+    """What a run's commands are made with: its options, and the user id the
+    environment held when the run was configured."""
+
+    options: RadarCommandConfig
+    user_id: str
 
 
 def config_hash(cfg: RadarCommandConfig) -> str:

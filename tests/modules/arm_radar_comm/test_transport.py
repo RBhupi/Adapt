@@ -18,9 +18,9 @@ from pathlib import Path
 import certifi
 import pytest
 
-from adapt.modules.radar_command.command import CommandValidationError
-from adapt.modules.radar_command.config import ApiConfig
-from adapt.modules.radar_command.transport import NotSent, SendError, endpoint, send
+from adapt.modules.arm_radar_comm.command import CommandValidationError
+from adapt.modules.arm_radar_comm.config import ApiConfig, RadarConfig
+from adapt.modules.arm_radar_comm.transport import NotSent, SendError, endpoint, send, user_id
 
 pytestmark = pytest.mark.unit
 
@@ -211,6 +211,32 @@ def test_a_port_and_a_path_are_part_of_the_address(monkeypatch, exported):
     monkeypatch.setenv("ADAPT_TEST_URL", "https://radar.example.test:8443/a/b//")
 
     assert endpoint(_API).url == "https://radar.example.test:8443/a/b/publish/command"
+
+
+def test_the_radar_is_part_of_the_base_url(monkeypatch, exported):
+    monkeypatch.setenv("ADAPT_TEST_URL", "https://apigw.example.test/bnf")
+
+    assert endpoint(_API).url == "https://apigw.example.test/bnf/publish/command"
+
+
+_RADAR = RadarConfig(scan_pattern="rhi3_ppi7", user_id_env="ADAPT_TEST_USER")
+
+
+def test_the_user_id_is_what_its_variable_holds(monkeypatch):
+    monkeypatch.setenv("ADAPT_TEST_USER", "adapt_ops")
+
+    assert user_id(_RADAR) == "adapt_ops"
+
+
+@pytest.mark.parametrize("value", [None, "", "two words", "line\nend"])
+def test_a_user_id_variable_unset_or_unusable_is_refused_naming_it(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("ADAPT_TEST_USER", raising=False)
+    else:
+        monkeypatch.setenv("ADAPT_TEST_USER", value)
+
+    with pytest.raises(ValueError, match="ADAPT_TEST_USER.*arm_radar_comm.radar.user_id_env"):
+        user_id(_RADAR)
 
 
 @pytest.mark.parametrize(

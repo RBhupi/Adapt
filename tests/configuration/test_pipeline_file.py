@@ -155,7 +155,7 @@ class TestModules:
             _load(tmp_path, _file(modules=None))
 
     def test_any_catalog_module_may_be_listed(self, tmp_path):
-        modules = [*_MODULES, "target_selection", "radar_command", "xlma_stat"]
+        modules = [*_MODULES, "target_selection", "arm_radar_comm", "xlma_stat"]
 
         assert _load(tmp_path, _file(modules=modules)).modules == tuple(modules)
 
@@ -301,24 +301,25 @@ class TestParams:
         ("module", "options"),
         [
             ("cell_volume_stats", {"thresholds": [99.0]}),
-            ("xlma_stat", {"input_dir": "/does/not/exist"}),
-            ("target_selection", {"duration": {"max_minutes": 15}}),
+            ("xlma_stat", {"input_dir": "/does/not/exist", "input_dirr": "/typo"}),
+            ("target_selection", {"duration": {"max_minutes": -15}}),
         ],
     )
-    def test_params_of_a_module_the_file_does_not_list_are_refused(self, tmp_path, module, options):
-        with pytest.raises(ConfigError) as exc:
-            _load(tmp_path, _file(modules=_MODULES[:-1], params={module: options}))
+    def test_params_of_a_module_the_file_does_not_list_are_kept_and_not_read(
+        self, tmp_path, module, options
+    ):
+        # Even options the module would refuse: a module that does not run is not configured.
+        data = _file(modules=_MODULES[:-1], params={module: options})
 
-        message = str(exc.value)
-        assert f"params.{module}" in message
-        assert "'modules:'" in message
+        assert _load(tmp_path, data).params == {module: options}
+        assert module not in {type(node).name for node in _configure(tmp_path, data)}
 
     def test_a_part_of_a_packaged_rule_may_be_given_alone(self, tmp_path):
         params = {
             "target_selection": {"duration": {"max_minutes": 15}},
-            "radar_command": {"api": {"base_url_env": "ADAPT_TEST_URL"}},
+            "arm_radar_comm": {"api": {"base_url_env": "ADAPT_TEST_URL"}},
         }
-        modules = [*_MODULES, "target_selection", "radar_command"]
+        modules = [*_MODULES, "target_selection", "arm_radar_comm"]
 
         assert _load(tmp_path, _file(modules=modules, params=params)).params == params
 

@@ -36,7 +36,7 @@ Module defaults    ← each module's options model, or its packaged preset
 InternalConfig     ← single frozen result, with every listed module's options
 ```
 
-A value set in the pipeline file wins over the module's default. If the file does not set a value, the default from the module's options model is used (for `target_selection` and `radar_command`, the default is the packaged preset).
+A value set in the pipeline file wins over the module's default. If the file does not set a value, the default from the module's options model is used (for `target_selection` and `arm_radar_comm`, the default is the packaged preset).
 
 This means a pipeline file holds only what its author changes. A module listed under `modules:` with no `params:` entry runs with its defaults.
 
@@ -119,7 +119,7 @@ The **one entrypoint** from a loaded pipeline file to a run's `InternalConfig`. 
 
 - **New run**: a new run id (the minute it starts, or `--run-id`), every listed module's options validated and recorded.
 - **Resumed run** (`--run-id` of a run in the store): the recorded config, with only `base_dir` set to where the store is now. The run is configured from its recorded options, not from the file: the file's options are not read, so they are not checked.
-- **Stored-run pass** (`run.source: stored_run`): the stored run's recorded config, with the file's module list. A listed module starts from its own defaults, then the file. `params.global`, `params.downloader` and `params.logging` are refused. If the stored run already ran a listed module with other options, the pass is refused, unless the module's rows are keyed by its options (`rows_keyed_by_options`: `target_selection`, `radar_command`).
+- **Stored-run pass** (`run.source: stored_run`): the stored run's recorded config, with the file's module list. A listed module starts from its own defaults, then the file. `params.global`, `params.downloader` and `params.logging` are refused. If the stored run already ran a listed module with other options, the pass is refused, unless the module's rows are keyed by its options (`rows_keyed_by_options`: `target_selection`, `arm_radar_comm`).
 
 In every case all listed modules are then configured and wired into the graph, so a wrong option or a module missing an input is refused before anything starts.
 
@@ -132,7 +132,7 @@ A recorded config that this version cannot read (for example, of a run recorded 
 ```
 Invalid configuration (pipeline file /data/kilx/nexrad.yaml):
   • params.detection.h_maxima — value -1 is out of range — Input should be greater than 0
-The options of detection: adapt config --show detection
+The options of detection: adapt config --params detection
 ```
 
 The options of a file that fail validation are reported together (`together()`): one message holds those of every listed module and of `global`, `downloader` and `logging`, then one such last line per module that has one. What a module's `configure` refuses, a module missing an input, and a missing time window are reported once the options validate.
@@ -141,7 +141,7 @@ The options are recorded with the run as JSON and the run is configured from tha
 
 ### Templates and the module catalog (`pipeline_template.py`, `defaults.yaml`)
 
-`pipeline_template.py` writes the short, commented pipeline file a new pipeline starts from (`adapt init`, `adapt config NAME`). `defaults.yaml` is the module catalog: the node modules a pipeline file may list. It holds no option values.
+`pipeline_template.py` writes the short, commented pipeline file a new pipeline starts from (`adapt init`, `adapt config --NAME`). `defaults.yaml` is the module catalog: the node modules a pipeline file may list. It holds no option values.
 
 ---
 

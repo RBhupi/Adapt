@@ -222,8 +222,8 @@ mentally separate.
 ### 1. Pipeline files — `NAME.yaml` (in the store)
 
 Owned and interpreted by `adapt run NAME`, which reads `./NAME.yaml` from the
-store folder. `adapt init` writes `nexrad.yaml`; `adapt config nexrad` rewrites
-it. The dashboard never touches these, except its own `dashboard.yaml`, which the
+store folder. `adapt init` writes `nexrad.yaml`; `adapt config --params --file
+nexrad.yaml` adds the module options it lacks. The dashboard never touches these, except its own `dashboard.yaml`, which the
 wizard writes from the `nexrad` template on every launch.
 
 ```yaml
@@ -239,7 +239,7 @@ modules:
   - analysis
   - tracking
   - cell_volume_stats
-params:       # paste `adapt config --show NAME` here; an option not given is a default
+params:       # paste `adapt config --params NAME` here; an option not given is a default
 ```
 
 See the [CLI Reference](cli_reference.md) for every section.

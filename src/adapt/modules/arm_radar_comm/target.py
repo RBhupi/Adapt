@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from adapt.modules.radar_command.config import AltitudeBand
-from adapt.modules.radar_command.extent import VerticalBounds
+from adapt.modules.arm_radar_comm.config import AltitudeBand
+from adapt.modules.arm_radar_comm.extent import VerticalBounds
 
 
 @dataclass(frozen=True)
@@ -123,7 +123,7 @@ def _vertical(
     if volume_stats is None:
         raise TargetUnavailable(
             f"No cell_volume_stats rows for scan '{ref.scan_id}' of run '{ref.run_id}' and "
-            f"radar_command.extent.vertical_band is not configured; no vertical extent for "
+            f"arm_radar_comm.extent.vertical_band is not configured; no vertical extent for "
             f"cell '{ref.cell_uid}'"
         )
     rows = (

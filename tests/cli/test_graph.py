@@ -16,7 +16,7 @@ from adapt.modules.base import BaseModule
 
 pytestmark = pytest.mark.unit
 
-RADAR = [*MODULES, "target_selection", "radar_command"]
+RADAR = [*MODULES, "target_selection", "arm_radar_comm"]
 # Detection carries seeds between scans along projection's flow; without projection it is off.
 NO_CARRY = {"detection": {"seed_carry_frames": 0}}
 
@@ -72,30 +72,33 @@ def test_modules_are_listed_in_file_order(graph):
     assert _listed(graph(modules=reordered)[1]) == reordered
 
 
-def test_target_selection_and_radar_command_are_modules_like_any_other(graph):
+def test_target_selection_and_arm_radar_comm_are_modules_like_any_other(graph):
     lines = graph(modules=RADAR)[1].splitlines()
 
     assert _listed("\n".join(lines)) == RADAR
     assert "  tracking -->|cell_identity| target_selection" in lines
-    assert "  target_selection -->|selection| radar_command" in lines
-    assert "  tracking -->|analysis_ds| radar_command" in lines
-    assert "  cell_volume_stats -->|cell_volume_stats_rows| radar_command" in lines
+    assert "  target_selection -->|selection| arm_radar_comm" in lines
+    assert "  tracking -->|analysis_ds| arm_radar_comm" in lines
+    assert "  cell_volume_stats -->|cell_volume_stats_rows| arm_radar_comm" in lines
 
 
 def test_an_option_that_spares_a_module_an_input_removes_its_edge(graph):
-    """A fixed vertical band: radar_command needs no measured cell base and top."""
-    band = {"vertical_band": {"altitude_min_m": 500.0, "altitude_max_m": 15000.0}}
+    """A fixed vertical band: arm_radar_comm needs no measured cell base and top."""
+    band = {
+        "horizontal_buffer_km": 1.0,
+        "vertical_band": {"altitude_min_m": 500.0, "altitude_max_m": 15000.0},
+    }
     without_volume_stats = [m for m in RADAR if m != "cell_volume_stats"]
 
-    code, out, _ = graph(modules=without_volume_stats, params={"radar_command": {"extent": band}})
+    code, out, _ = graph(modules=without_volume_stats, params={"arm_radar_comm": {"extent": band}})
 
     assert code == 0
     assert "cell_volume_stats" not in out
-    assert "  tracking -->|analysis_ds| radar_command" in out.splitlines()
+    assert "  tracking -->|analysis_ds| arm_radar_comm" in out.splitlines()
 
 
 def test_a_wrong_option_of_a_module_is_refused_as_the_run_would(graph):
-    code, _, err = graph(modules=RADAR, params={"radar_command": {"radar": {"scan_patern": "x"}}})
+    code, _, err = graph(modules=RADAR, params={"arm_radar_comm": {"radar": {"scan_patern": "x"}}})
 
     assert code == 2
     assert "scan_patern" in err
@@ -121,14 +124,14 @@ def test_a_plain_run_reads_nothing_from_the_store(graph):
 def test_over_a_stored_run_unlisted_modules_outputs_come_from_the_store(graph):
     run = {"source": "stored_run", "radar": "KTST", "mode": "historical"}
 
-    code, out, _ = graph(run=run, modules=["target_selection", "radar_command"])
+    code, out, _ = graph(run=run, modules=["target_selection", "arm_radar_comm"])
 
     assert code == 0
     lines = out.splitlines()
-    assert _listed(out) == ["target_selection", "radar_command"]
+    assert _listed(out) == ["target_selection", "arm_radar_comm"]
     assert "  store -->|cell_identity, cells_so_far, tracks_so_far| target_selection" in lines
-    assert "  store -->|analysis_ds, cell_volume_stats_rows| radar_command" in lines
-    assert "  target_selection -->|selection| radar_command" in lines
+    assert "  store -->|analysis_ds, cell_volume_stats_rows| arm_radar_comm" in lines
+    assert "  target_selection -->|selection| arm_radar_comm" in lines
 
 
 def test_the_whole_graph_is_printed_in_a_fixed_order(graph):
@@ -168,8 +171,8 @@ def test_a_module_listed_without_its_producer_fails_by_name(graph):
     assert "nexrad.yaml" in err
 
 
-def test_radar_command_without_target_selection_fails_by_name(graph):
-    code, _, err = graph(modules=[*MODULES, "radar_command"])
+def test_arm_radar_comm_without_target_selection_fails_by_name(graph):
+    code, _, err = graph(modules=[*MODULES, "arm_radar_comm"])
 
     assert code == 2
     assert "list 'target_selection' too" in err

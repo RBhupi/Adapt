@@ -69,7 +69,7 @@ first time that module stores rows there.
 | `cell_tracks` | `tracking` | track | `run_id`, `cell_uid` |
 | `cell_volume_stats` | `cell_volume_stats` | cell of a scan | `run_id`, `scan_id`, `cell_label` |
 | `target_selection` | `target_selection` | scan and rule | `run_id`, `scan_id`, `config_hash` |
-| `radar_commands` | `radar_command` | scan and command setup | `run_id`, `scan_id`, `config_hash` |
+| `radar_commands` | `arm_radar_comm` | scan and command setup | `run_id`, `scan_id`, `config_hash` |
 | `xlma_stat_minutes` | `xlma_stat` | cell and minute with lightning (`cell_uid` = `UNATTRIBUTED` for flashes no cell was near) | `run_id`, `time`, `cell_uid` |
 | `xlma_stat_scan` | `xlma_stat` | cell of a scan with lightning | `run_id`, `scan_id`, `cell_label` |
 
@@ -326,7 +326,7 @@ sqlite3 registry.db \
 
 The last table has one row per module and set of options: a module added later
 by a run over the stored run is there too. For `target_selection` and
-`radar_command`, `options_hash` is the `config_hash` in their rows, so a row's
+`arm_radar_comm`, `options_hash` is the `config_hash` in their rows, so a row's
 hash leads to the rules that made it.
 
 On the first scan of a run the second query of modules shows, for example:

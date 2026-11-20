@@ -31,7 +31,7 @@ from adapt.persistence.store import init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.provenance import module_provenance
 from adapt.utils.identity import options_hash
-from tests.helpers.pipeline_files import API, export_api
+from tests.helpers.pipeline_files import API, export_api, with_radar_command
 from tests.helpers.run_configs import record_run
 
 pytestmark = pytest.mark.unit
@@ -55,6 +55,7 @@ def _pipeline(**overrides) -> PipelineFile:
         "params": {},
     }
     data.update(overrides)
+    data["params"] = with_radar_command(data["modules"], data["params"])
     return PipelineFile.model_validate(data)
 
 
@@ -222,7 +223,7 @@ class TestChecks:
         assert str(path) in message
         assert "Module 'detection' reads output 'projected_ds' of earlier scans" in message
         assert "list 'projection' under modules:" in message
-        assert "(adapt config --show detection)" in message
+        assert "(adapt config --params detection)" in message
 
     def test_a_module_option_of_the_wrong_type_is_refused(self, path):
         params = {"cell_volume_stats": {"gap_tolerance_m": "wide"}}
@@ -240,30 +241,35 @@ class TestChecks:
         assert str(path) in str(exc.value)
         assert "input_dir" in str(exc.value)
 
-    def test_radar_command_needs_target_selection(self, path):
+    def test_arm_radar_comm_needs_target_selection(self, path):
         with pytest.raises(ConfigError, match="list 'target_selection' too"):
-            run_config(_pipeline(modules=(*_MODULES, "radar_command")), path)
+            run_config(_pipeline(modules=(*_MODULES, "arm_radar_comm")), path)
 
-    def test_radar_command_needs_the_cells_measured_extent_or_a_fixed_band(self, path):
-        radar = ("target_selection", "radar_command")
+    def test_arm_radar_comm_needs_the_cells_measured_extent_or_a_fixed_band(self, path):
+        radar = ("target_selection", "arm_radar_comm")
         without_volume_stats = (*_CORE, *radar)
 
         with pytest.raises(ConfigError, match="list 'cell_volume_stats' too"):
             run_config(_pipeline(modules=without_volume_stats), path)
 
-        band = {"extent": {"vertical_band": {"altitude_min_m": 500.0, "altitude_max_m": 12000.0}}}
+        band = {
+            "extent": {
+                "horizontal_buffer_km": 1.0,
+                "vertical_band": {"altitude_min_m": 500.0, "altitude_max_m": 12000.0},
+            }
+        }
         config = run_config(
-            _pipeline(modules=without_volume_stats, params={"radar_command": band}), path
+            _pipeline(modules=without_volume_stats, params={"arm_radar_comm": band}), path
         )
         assert config.modules == list(without_volume_stats)
 
     @pytest.mark.parametrize("variable", ["ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"])
-    def test_a_radar_command_that_sends_needs_its_api_settings_now(
+    def test_a_arm_radar_comm_that_sends_needs_its_api_settings_now(
         self, path, monkeypatch, variable
     ):
         pipeline = _pipeline(
-            modules=(*_MODULES, "target_selection", "radar_command"),
-            params={"radar_command": {"api": API}},
+            modules=(*_MODULES, "target_selection", "arm_radar_comm"),
+            params={"arm_radar_comm": {"api": API}},
         )
         export_api(monkeypatch)
         monkeypatch.delenv(variable)
@@ -272,7 +278,7 @@ class TestChecks:
             run_config(pipeline, path)
 
         export_api(monkeypatch)
-        recorded = run_config(pipeline, path).module_params["radar_command"]["api"]
+        recorded = run_config(pipeline, path).module_params["arm_radar_comm"]["api"]
         assert recorded == API  # the names of the variables, never what they hold
 
     def test_the_target_selection_rule_is_its_packaged_one_with_the_files_parts_laid_over(
@@ -667,54 +673,54 @@ class TestStoredRun:
             run_config(later, path, run_id=_RUN_ID)
 
     def test_a_module_may_read_what_an_unlisted_module_stored(self, path):
-        """Over a live source radar_command needs target_selection listed; over a
+        """Over a live source arm_radar_comm needs target_selection listed; over a
         stored run it reads the stored selection."""
         self._stored(path)
 
         config = run_config(
-            _pipeline(run=self._STORED, modules=("radar_command",)), path, run_id=_RUN_ID
+            _pipeline(run=self._STORED, modules=("arm_radar_comm",)), path, run_id=_RUN_ID
         )
 
-        assert config.modules == ["radar_command"]
+        assert config.modules == ["arm_radar_comm"]
 
-    def test_radar_command_never_sends_over_a_stored_run(self, path, monkeypatch):
+    def test_arm_radar_comm_never_sends_over_a_stored_run(self, path, monkeypatch):
         self._stored(path)
         for variable in ("ADAPT_TEST_URL", "ADAPT_TEST_KEY", "ADAPT_TEST_CA"):
             monkeypatch.delenv(variable, raising=False)  # not needed: nothing is sent
         later = _pipeline(
             run=self._STORED,
-            modules=("target_selection", "radar_command"),
-            params={"radar_command": {"api": API}},
+            modules=("target_selection", "arm_radar_comm"),
+            params={"arm_radar_comm": {"api": API}},
         )
 
         config = run_config(later, path, run_id=_RUN_ID)
 
-        configs = resolve_module_configs(config, ["radar_command"])
-        assert configs["radar_command_config"].api is None
+        configs = resolve_module_configs(config, ["arm_radar_comm"])
+        assert configs["arm_radar_comm_config"].options.api is None
 
     def test_a_listed_modules_options_are_its_defaults_then_the_files_not_the_stored_runs(
         self, path, store_root, monkeypatch
     ):
         """What the stored run recorded for a module the pass lists is replaced whole."""
         export_api(monkeypatch)
-        sending = {"api": API, "planning": {"horizon_minutes": 6}}
+        sending = {"api": API, "planning": {"horizon_minutes": 6, "interval_seconds": 60}}
         recorded = run_config(
             _pipeline(
-                modules=(*_MODULES, "target_selection", "radar_command"),
-                params={"radar_command": sending},
+                modules=(*_MODULES, "target_selection", "arm_radar_comm"),
+                params={"arm_radar_comm": sending},
             ),
             path,
             run_id=_RUN_ID,
         )
         _record(store_root, recorded)
         StoreRegistry.get_instance(store_root).finalize_run(_RUN_ID, "completed", scans_processed=0)
-        later = _pipeline(run=self._STORED, modules=("radar_command",))
+        later = _pipeline(run=self._STORED, modules=("arm_radar_comm",))
 
         config = run_config(later, path, run_id=_RUN_ID)
 
-        assert recorded.module_params["radar_command"]["api"] == API
-        assert config.module_params["radar_command"]["api"] is None
-        assert config.module_params["radar_command"]["planning"]["horizon_minutes"] == 12
+        assert recorded.module_params["arm_radar_comm"]["api"] == API
+        assert config.module_params["arm_radar_comm"]["api"] is None
+        assert config.module_params["arm_radar_comm"]["planning"]["horizon_minutes"] == 12
         assert (
             config.module_params["target_selection"] == recorded.module_params["target_selection"]
         )
@@ -906,6 +912,6 @@ class TestStoredRun:
         assert [line.split(" — ")[0] for line in told] == [
             "  • params.xlma_stat.no_such_option",
             "  • params.target_selection.no_such_part",
-            "The options of xlma_stat: adapt config --show xlma_stat",
-            "The options of target_selection: adapt config --show target_selection",
+            "The options of xlma_stat: adapt config --params xlma_stat",
+            "The options of target_selection: adapt config --params target_selection",
         ]

@@ -142,9 +142,11 @@ class TestRefusals:
         with pytest.raises(ConfigError, match=r"--set params.ingest.fields=\[a"):
             load_pipeline_file(_file(root), ("params.ingest.fields=[a",))
 
-    def test_options_of_a_module_the_file_does_not_run_are_refused_as_in_the_file(self, root):
-        with pytest.raises(ConfigError, match="params.xlma_stat sets the options of xlma_stat"):
-            load_pipeline_file(_file(root), ("params.xlma_stat.search_radius_m=900",))
+    def test_options_of_a_module_the_file_does_not_run_are_kept_as_in_the_file(self, root):
+        pipeline = load_pipeline_file(_file(root), ("params.xlma_stat.search_radius_m=900",))
+
+        assert "xlma_stat" not in pipeline.modules
+        assert pipeline.params["xlma_stat"] == {"search_radius_m": 900}
 
     def test_a_params_key_that_is_no_module_or_section_is_refused_as_in_the_file(self, root):
         with pytest.raises(ConfigError, match="unknown params key 'traking'"):

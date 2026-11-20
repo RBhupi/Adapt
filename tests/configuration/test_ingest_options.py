@@ -323,7 +323,7 @@ class TestRefusals:
         message = _refusal(path, ingest={option: 1})
 
         assert f"  • params.ingest.{option} — unrecognized option" in message
-        assert message.splitlines()[-1] == "The options of ingest: adapt config --show ingest"
+        assert message.splitlines()[-1] == "The options of ingest: adapt config --params ingest"
 
     @pytest.mark.parametrize("section", list(OLD_SECTIONS))
     def test_a_section_that_held_these_options_is_an_unknown_key(self, section):
@@ -340,10 +340,6 @@ class TestRefusals:
         sections, modules = str(exc.value).split("the sections ")[1].split("; the modules ")
         assert section not in sections.split(", ")
         assert "ingest" in modules.split(", ")
-
-    def test_options_of_ingest_are_refused_when_the_file_does_not_list_it(self):
-        with pytest.raises(ValueError, match="params.ingest sets the options of ingest"):
-            _pipeline({"ingest": {"min_radius": 2000.0}}, modules=["xlma_stat"])
 
 
 class TestRunRecord:

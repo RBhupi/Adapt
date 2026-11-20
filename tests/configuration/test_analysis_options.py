@@ -292,7 +292,7 @@ class TestRefusals:
         message = _refusal(path, analysis={option: 1})
 
         assert f"  • params.analysis.{option} — unrecognized option" in message
-        assert message.splitlines()[-1] == "The options of analysis: adapt config --show analysis"
+        assert message.splitlines()[-1] == "The options of analysis: adapt config --params analysis"
 
     def test_the_section_that_held_these_options_is_an_unknown_key(self):
         with pytest.raises(ValueError, match="unknown params key 'analyzer'"):
@@ -305,10 +305,6 @@ class TestRefusals:
         sections, modules = str(exc.value).split("the sections ")[1].split("; the modules ")
         assert "analyzer" not in sections.split(", ")
         assert "analysis" in modules.split(", ")
-
-    def test_options_of_analysis_are_refused_when_the_file_does_not_list_it(self):
-        with pytest.raises(ValueError, match="params.analysis sets the options of analysis"):
-            _pipeline({"analysis": {"exclude_fields": ["velocity"]}}, modules=["ingest"])
 
 
 class TestRunRecord:

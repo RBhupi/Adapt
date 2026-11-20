@@ -5,9 +5,9 @@
 
 Pure planning (footprints -> a box per minute -> the wire payload) plus the one
 piece of network I/O in the modules: the transport that sends a command to the
-radar API. The pipeline's ``radar_command`` module runs it every scan.
+radar API. The pipeline's ``arm_radar_comm`` module runs it every scan.
 """
 
-from adapt.modules.radar_command.config import RadarCommandConfig, config_hash
+from adapt.modules.arm_radar_comm.config import RadarCommandConfig, RadarCommandRun, config_hash
 
-__all__ = ["RadarCommandConfig", "config_hash"]
+__all__ = ["RadarCommandConfig", "RadarCommandRun", "config_hash"]
