@@ -2,10 +2,12 @@
 # See LICENSE for terms and disclaimer.
 
 from adapt.contracts import (
+    SCAN_CELL_COUNT,
     ProductTableWrite,
     SharedConfig,
     check_cell_adjacency,
     check_cell_stats,
+    check_scan_cell_count,
 )
 from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisConfig, AnalysisOptions
 from adapt.modules.analysis.module import RadarCellAnalyzer
@@ -34,16 +36,19 @@ class AnalysisModule(BaseModule):
         Per-cell statistics DataFrame.
     cell_adjacency : pd.DataFrame
         Touching-cell pairs DataFrame.
+    scan_cell_count : int
+        The number of cells measured (the rows of ``cell_stats``).
     """
 
     name = "analysis"
     summary = "2D per-cell statistics"
     options_class = AnalysisOptions
     inputs = ["projected_ds", "analysis_config", "scan_time"]
-    outputs = ["cell_stats", "cell_adjacency"]
+    outputs = ["cell_stats", "cell_adjacency", SCAN_CELL_COUNT]
     output_contracts = {
         "cell_stats": check_cell_stats,
         "cell_adjacency": check_cell_adjacency,
+        SCAN_CELL_COUNT: check_scan_cell_count,
     }
     persistence = (
         ProductTableWrite(
@@ -99,4 +104,8 @@ class AnalysisModule(BaseModule):
         df_cells = self._analyzer.extract(ds_2d, z_level=config.z_level)
         df_adjacency = self._analyzer.extract_adjacency(ds_2d)
 
-        return {"cell_stats": df_cells, "cell_adjacency": df_adjacency}
+        return {
+            "cell_stats": df_cells,
+            "cell_adjacency": df_adjacency,
+            SCAN_CELL_COUNT: len(df_cells),
+        }

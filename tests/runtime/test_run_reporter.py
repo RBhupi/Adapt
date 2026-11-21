@@ -165,6 +165,22 @@ def test_format_scan_shows_each_stage_with_timing_cells_and_total():
     assert "2.4s" in line  # total of the stage durations
 
 
+def test_the_scan_line_without_a_cell_count_leaves_it_out():
+    from adapt.runtime.run_reporter import format_scan
+
+    line = format_scan("KOHX_180851", [_span("ingest", 1.2)], n_cells=None)
+
+    assert line == "scan KOHX_180851  │  ingest 1.2s  │  1.2s"
+
+
+def test_the_scan_line_with_a_cell_count_reads_as_before():
+    from adapt.runtime.run_reporter import format_scan
+
+    line = format_scan("KOHX_180851", [_span("ingest", 1.2)], n_cells=5)
+
+    assert line == "scan KOHX_180851  │  ingest 1.2s  │  5 cells  1.2s"
+
+
 def test_reporter_scan_emits_one_console_tagged_line():
     from adapt.runtime.run_reporter import RunReporter
 

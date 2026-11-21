@@ -121,7 +121,8 @@ How to read it:
 - The first line gives the **run id**. Note it: you need it to resume the run
   or to run more modules over it later.
 - There is one line per scan, with the time each module took and the number of
-  cells that `analysis` measured.
+  cells that `analysis` measured. A pipeline or pass that does not list
+  `analysis` shows no cell count.
 - **The first scan has 0 cells, and that is correct.** Motion needs two scans,
   so `projection`, and `analysis` and `tracking` which read from it, start with
   the second scan. The same happens after a gap between two scans longer than

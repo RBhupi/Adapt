@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from adapt.contracts import check_grid_ds_2d
+from adapt.contracts import RadarLocation, check_grid_ds_2d
 from adapt.modules.ingest import node as ingest_node
 from adapt.modules.ingest.node import LoadModule
 from tests.helpers.fake_grid import make_fake_grid_ds
@@ -94,8 +94,15 @@ def test_2d_slice_takes_nearest_z_level(load_module, ingest_module_config):
 def test_outputs_are_in_memory_datasets_only(load_module, ingest_module_config):
     result = load_module.run(_context(ingest_module_config))
 
-    assert set(result) == {"grid_ds", "grid_ds_2d"}
+    assert set(result) == {"grid_ds", "grid_ds_2d", "radar_location"}
     assert result["grid_ds"] is load_module._loader.result
+
+
+def test_the_radar_location_is_reported_as_the_volume_carries_it(load_module, ingest_module_config):
+    # The synthetic volume says the radar stands at 40.0 N, 100.0 W.
+    result = load_module.run(_context(ingest_module_config))
+
+    assert result["radar_location"] == RadarLocation(latitude=40.0, longitude=-100.0)
 
 
 def test_declares_gridded3d_netcdf_artifact():

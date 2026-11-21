@@ -384,6 +384,24 @@ def test_module_outputs_carry_contracts() -> None:
     )
 
 
+def test_the_processor_names_no_module_output() -> None:
+    """What the processor reads of a scan's results it reads under the keys of
+    ``adapt.contracts`` (``scan_report``), never under a catalog module's own
+    output name: a module is replaced with zero edits in ``runtime/``."""
+    outputs = {key for module in _registered_default_modules() for key in module.outputs}
+    tree = ast.parse((_SRC_ADAPT / "runtime" / "processor.py").read_text(encoding="utf-8"))
+    named = sorted(
+        {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        & outputs
+    )
+
+    assert not named, f"runtime/processor.py names module outputs: {named}"
+
+
 # ── import-linter config and source tree stay in sync ────────────────────────
 # .importlinter is the single authoritative layer stack; src/adapt is reality.
 

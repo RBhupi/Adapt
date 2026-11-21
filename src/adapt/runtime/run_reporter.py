@@ -135,15 +135,17 @@ def format_summary(summary: RunSummary) -> str:
     )
 
 
-def format_scan(scan_id: str, spans: list[SpanRecord], n_cells: int) -> str:
+def format_scan(scan_id: str, spans: list[SpanRecord], n_cells: int | None) -> str:
     """One compact per-scan line, built from the scan's drained module spans.
 
     Reads ``stage duration`` straight off the captured telemetry — so the console
     reports what ran and how long without any module emitting its own progress.
+    ``n_cells`` is None when no listed module counts cells: the line then has no count.
     """
     stages = "  ".join(f"{s.name} {format_seconds(s.duration_s)}" for s in spans)
     total = sum(s.duration_s for s in spans)
-    return f"scan {scan_id}  │  {stages}  │  {n_cells} cells  {format_seconds(total)}"
+    cells = "" if n_cells is None else f"{n_cells} cells  "
+    return f"scan {scan_id}  │  {stages}  │  {cells}{format_seconds(total)}"
 
 
 class RunReporter:
@@ -163,7 +165,7 @@ class RunReporter:
     def progress(self, text: str) -> None:
         self._log.info(text, extra={"console": True})
 
-    def scan(self, scan_id: str, spans: list[SpanRecord], n_cells: int) -> None:
+    def scan(self, scan_id: str, spans: list[SpanRecord], n_cells: int | None) -> None:
         self._log.info(format_scan(scan_id, spans, n_cells), extra={"console": True})
 
     def summary(self, summary: RunSummary) -> None:

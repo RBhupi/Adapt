@@ -68,6 +68,13 @@ from adapt.contracts.pipeline import (
 )
 from adapt.contracts.projection import assert_projected, check_projected_ds
 from adapt.contracts.radar_command import check_radar_commands
+from adapt.contracts.scan_report import (
+    RADAR_LOCATION,
+    SCAN_CELL_COUNT,
+    RadarLocation,
+    check_radar_location,
+    check_scan_cell_count,
+)
 from adapt.contracts.segmentation import assert_segmented, check_seed_carry, check_segmented_ds
 from adapt.contracts.selection import check_selection
 from adapt.contracts.state import check_module_state
@@ -102,6 +109,10 @@ __all__ = [
     "Z_COORD",
     "TIME_COORD",
     "stat_column",
+    # what the runtime reads of a scan's results
+    "RADAR_LOCATION",
+    "SCAN_CELL_COUNT",
+    "RadarLocation",
     # persistence specs — modules declare these in their ``persistence`` ClassVar
     "ProductTableWrite",
     "NetcdfArtifact",
@@ -154,4 +165,6 @@ __all__ = [
     "check_xlma_stat_scan",
     "check_tracking_decisions",
     "check_segmentation_decisions",
+    "check_radar_location",
+    "check_scan_cell_count",
 ]

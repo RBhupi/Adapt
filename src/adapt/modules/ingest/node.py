@@ -4,7 +4,16 @@
 import numpy as np
 import xarray as _xr
 
-from adapt.contracts import TIME_COORD, Z_COORD, NetcdfArtifact, SharedConfig, check_grid_ds_2d
+from adapt.contracts import (
+    RADAR_LOCATION,
+    TIME_COORD,
+    Z_COORD,
+    NetcdfArtifact,
+    RadarLocation,
+    SharedConfig,
+    check_grid_ds_2d,
+    check_radar_location,
+)
 from adapt.modules.base import BaseModule
 from adapt.modules.ingest.config import IngestConfig, IngestOptions
 from adapt.modules.ingest.module import RadarDataLoader
@@ -35,6 +44,8 @@ class LoadModule(BaseModule):
         Full 3D Cartesian xarray Dataset.
     grid_ds_2d : xr.Dataset
         2D slice at configured z-level.
+    radar_location : RadarLocation
+        Where the radar of the scan is, as the volume carries it.
     """
 
     name = "ingest"
@@ -42,8 +53,8 @@ class LoadModule(BaseModule):
     options_class = IngestOptions
     required_history = 1
     inputs = ["nexrad_file", "ingest_config", "scan_time"]
-    outputs = ["grid_ds", "grid_ds_2d"]
-    output_contracts = {"grid_ds_2d": check_grid_ds_2d}
+    outputs = ["grid_ds", "grid_ds_2d", RADAR_LOCATION]
+    output_contracts = {"grid_ds_2d": check_grid_ds_2d, RADAR_LOCATION: check_radar_location}
     persistence = (
         NetcdfArtifact(
             key="grid_ds",
@@ -110,4 +121,8 @@ class LoadModule(BaseModule):
                 ds_2d = ds_2d.assign_coords({coord: ds[coord]})
         ds_2d.attrs.update(ds.attrs)
 
-        return {"grid_ds": ds, "grid_ds_2d": ds_2d}
+        location = RadarLocation(
+            latitude=float(ds.attrs["radar_latitude"]),
+            longitude=float(ds.attrs["radar_longitude"]),
+        )
+        return {"grid_ds": ds, "grid_ds_2d": ds_2d, RADAR_LOCATION: location}

@@ -39,7 +39,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
-from adapt.contracts import ContractViolation, PersistenceMeta, config_key
+from adapt.contracts import (
+    RADAR_LOCATION,
+    SCAN_CELL_COUNT,
+    ContractViolation,
+    PersistenceMeta,
+    config_key,
+)
 from adapt.contracts.observability import Observability
 from adapt.execution.graph.executor import GraphExecutor, GraphRun
 from adapt.execution.module_registry import registry as module_registry
@@ -159,6 +165,16 @@ class RadarProcessor(threading.Thread):
         self._module_configs = resolve_module_configs(config, [m.name for m in modules])
         nodes = scan_graph(modules, self._module_configs, stored_run=self._stored_run)
         self._modules = [n.module for n in nodes]
+        # What the runtime itself reads of a scan's results: facts a listed module
+        # reports under a key adapt.contracts defines, never a module's dataset.
+        reported = {key for module in self._modules for key in module.outputs}
+        self._counts_cells = SCAN_CELL_COUNT in reported
+        if not self._stored_run and RADAR_LOCATION not in reported:
+            logger.warning(
+                "No listed module reports the radar's location (output '%s'): "
+                "this run records none for its collection",
+                RADAR_LOCATION,
+            )
         self._executor = GraphExecutor(nodes, observability=self._obs)
         self._router = StoreOutputRouter(collection, product_views())
 
@@ -342,7 +358,7 @@ class RadarProcessor(threading.Thread):
                 if self._reporter is not None and modules:
                     scan_rec = next((s for s in all_spans if s.name == "scan"), None)
                     n_cells = int(scan_rec.metadata.get("n_cells", 0)) if scan_rec else 0
-                    self._reporter.scan(file_id, modules, n_cells)
+                    self._reporter.scan(file_id, modules, n_cells if self._counts_cells else None)
                 return ok
         finally:
             self._current_scan_id = None
@@ -413,14 +429,11 @@ class RadarProcessor(threading.Thread):
             result = {k: v for k, v in run.context.items() if k != _PRIOR_SCANS}
 
             # Record the collection location from the first scan (kept after that)
-            grid_ds = result.get("grid_ds") or result.get("grid_ds_2d")
-            if grid_ds is not None:
-                lat = grid_ds.attrs.get("radar_latitude")
-                lon = grid_ds.attrs.get("radar_longitude")
-                if lat is not None and lon is not None:
-                    self.registry.ensure_collection_location(
-                        self.config.downloader.radar, lat=float(lat), lon=float(lon)
-                    )
+            location = result.get(RADAR_LOCATION)
+            if location is not None:
+                self.registry.ensure_collection_location(
+                    self.config.downloader.radar, lat=location.latitude, lon=location.longitude
+                )
 
             # ── The scan is complete: it joins the history and the modules'
             # state moves on — once both are checkpointed with its completion.
@@ -431,23 +444,25 @@ class RadarProcessor(threading.Thread):
             self._complete_scan(scan_id, statuses, history, carried)
             self._scan_history, self._carried = history, carried
 
-            cell_stats = result.get("cell_stats")
-            n_cells = len(cell_stats) if cell_stats is not None else 0
+            # The scan's cell count: what the counting module reported, 0 when it
+            # sat this scan out, None when no listed module counts cells.
+            n_cells = result.get(SCAN_CELL_COUNT, 0) if self._counts_cells else None
             logger.info(
-                "Processed: %d cells | %.1fs%s",
-                n_cells,
+                "Processed: %s%.1fs%s",
+                f"{n_cells} cells | " if n_cells is not None else "",
                 elapsed_s,
                 f" queue={queue_wait_s:.1f}s" if queue_wait_s is not None else "",
             )
 
             radar = self.config.downloader.radar
             self._obs.metrics.incr("files_processed_total", dataset_id=radar)
-            self._obs.metrics.incr("cells_detected_total", value=float(n_cells))
             self._obs.metrics.observe("scan_processing_time", elapsed_s)
             self._obs.metrics.gauge("queue_depth", self.input_queue.qsize())
             if queue_wait_s is not None:
                 self._obs.metrics.observe("download_latency", queue_wait_s)
-            scan_span.set(n_cells=n_cells)
+            if n_cells is not None:
+                self._obs.metrics.incr("cells_detected_total", value=float(n_cells))
+                scan_span.set(n_cells=n_cells)
             return True
 
         except ContractViolation as e:

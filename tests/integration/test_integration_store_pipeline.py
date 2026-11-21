@@ -156,6 +156,10 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
 
     client = StoreClient(root)
     try:
+        # ── the radar's location, as ingest reports it, is recorded ─────────
+        (located,) = client.collections()
+        assert located.location_lat is not None and located.location_lon is not None
+
         expected_ids = [hashlib.sha256(v.read_bytes()).hexdigest()[:16] for v in volumes]
 
         # ── every object accounted for: the artifacts, with checksum, and the
