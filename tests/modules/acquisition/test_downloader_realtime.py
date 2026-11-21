@@ -1,10 +1,10 @@
 # tests/test_downloader_realtime.py
 from datetime import UTC, datetime
-from queue import Queue
 
 import pytest
 
 from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.runtime.scan_queue import BackpressureQueue
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +29,7 @@ def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_c
         fake_scan("scan2", now),
     ]
 
-    q = Queue()
+    q = BackpressureQueue(100, 0.1)
     conn = fake_aws_conn(scans)
     download_calls: list = []
     _count_downloads(conn, download_calls)

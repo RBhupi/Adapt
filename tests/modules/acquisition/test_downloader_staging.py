@@ -4,11 +4,11 @@
 """The downloader's staging folder lives only as long as the downloader runs."""
 
 import tempfile
-from queue import Queue
 
 import pytest
 
 from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.runtime.scan_queue import BackpressureQueue
 
 pytestmark = pytest.mark.unit
 
@@ -19,7 +19,7 @@ def test_the_staging_folder_is_removed_when_the_downloader_stops(
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     downloader = AwsNexradDownloader(
         make_config(run={"radar": "KDIX"}),
-        result_queue=Queue(),
+        result_queue=BackpressureQueue(100, 0.1),
         acquire=fake_gateway,
         conn=fake_aws_conn([]),
         sleeper=lambda _: None,

@@ -81,6 +81,24 @@ def test_historical_complete_returns_true_and_stops_downloader(pipeline_config):
     assert orch.processor.stop_called is False
 
 
+def test_backpressure_is_logged_at_completion_for_a_source_that_never_asked_for_room(
+    pipeline_config, caplog
+):
+    pipeline_config = pipeline_config.model_copy(update={"mode": "historical"})
+    orch = PipelineOrchestrator(pipeline_config)
+    orch.downloader = _FakeDownloader(complete=True, alive=False, processed=5, expected=5)
+    orch.processor = _FakeProcessor()
+
+    with caplog.at_level("INFO"):
+        orch._check_historical_complete()
+
+    assert any(
+        r.getMessage().startswith("Downloader backpressure: paused 0 time(s)")
+        and "(high 100 / low 10)" in r.getMessage()
+        for r in caplog.records
+    )
+
+
 def test_historical_not_complete_returns_false_when_downloader_dead(pipeline_config):
     pipeline_config = pipeline_config.model_copy(update={"mode": "historical"})
     orch = PipelineOrchestrator(pipeline_config)

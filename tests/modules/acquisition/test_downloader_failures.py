@@ -1,10 +1,10 @@
 # tests/test_downloader_failures.py
 from datetime import UTC, datetime
-from queue import Queue
 
 import pytest
 
 from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.runtime.scan_queue import BackpressureQueue
 
 pytestmark = pytest.mark.unit
 
@@ -21,7 +21,7 @@ def test_download_failure_does_not_queue(fake_scan, fake_gateway, make_config):
 
             return R()
 
-    q = Queue()
+    q = BackpressureQueue(100, 0.1)
     config = make_config()
     d = AwsNexradDownloader(config, result_queue=q, acquire=fake_gateway, conn=FailingConn())
 

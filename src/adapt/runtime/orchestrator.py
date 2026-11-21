@@ -34,6 +34,7 @@ from adapt.runtime.observability import build_observability, obs_settings
 from adapt.runtime.processor import RadarProcessor
 from adapt.runtime.provenance import capture_provenance, config_hash, module_provenance
 from adapt.runtime.run_reporter import RunReporter
+from adapt.runtime.scan_queue import BackpressureQueue
 from adapt.runtime.sources import source_registry
 
 if TYPE_CHECKING:
@@ -146,12 +147,13 @@ class PipelineOrchestrator:
             max_queue_size if max_queue_size is not None else config.downloader.max_queue_size
         )
 
-        # Queue for downloader -> processor communication. Bounded as a hard
-        # backstop only: the downloader pauses itself at this level and resumes
-        # at queue_resume_fraction of it (see AwsNexradDownloader._wait_for_queue_room),
-        # so in normal operation a put() never blocks and the processor is
-        # never starved.
-        self.downloader_queue: queue.Queue[object] = queue.Queue(maxsize=self.max_queue_size)
+        # Queue for source -> processor communication. A source that fetches
+        # ahead is held at this level and resumes at queue_resume_fraction of it
+        # (BackpressureQueue.wait_for_room), so in normal operation a put() never
+        # blocks and the processor is never starved.
+        self.downloader_queue = BackpressureQueue(
+            self.max_queue_size, config.downloader.queue_resume_fraction
+        )
 
         # Fail fast: the pipeline never runs against an uninitialized root.
         self.store = Store.open(config.base_dir)
@@ -549,15 +551,14 @@ class PipelineOrchestrator:
 
         processed, expected = self.downloader.get_historical_progress()
         logger.info("Downloader complete: %d/%d files queued", processed, expected)
-        if hasattr(self.downloader, "queue_backpressure_stats"):
-            bp = self.downloader.queue_backpressure_stats()
-            logger.info(
-                "Downloader backpressure: paused %d time(s), %.0f s total (high %d / low %d)",
-                bp["pauses"],
-                bp["paused_seconds"],
-                bp["queue_high"],
-                bp["queue_low"],
-            )
+        bp = self.downloader_queue.backpressure_stats()
+        logger.info(
+            "Downloader backpressure: paused %d time(s), %.0f s total (high %d / low %d)",
+            bp["pauses"],
+            bp["paused_seconds"],
+            bp["queue_high"],
+            bp["queue_low"],
+        )
 
         # Stop the downloader (ends ingestion) so the queue can only shrink.
         self.downloader.stop()

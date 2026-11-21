@@ -1,16 +1,16 @@
 # tests/test_downloader_queue.py
-from queue import Queue
 
 import pytest
 
 from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.runtime.scan_queue import BackpressureQueue
 
 pytestmark = pytest.mark.unit
 
 
 def test_process_scans_queues_gateway_message(fake_scan, fake_aws_conn, fake_gateway, make_config):
     """Each new scan puts the gateway's acquired-scan message on the queue."""
-    q = Queue()
+    q = BackpressureQueue(100, 0.1)
     scan = fake_scan("scan1")
     d = AwsNexradDownloader(
         make_config(),
@@ -33,7 +33,7 @@ def test_process_scans_does_not_requeue_known_uri(
     fake_scan, fake_aws_conn, fake_gateway, make_config
 ):
     """A source URI already queued this run is skipped on later passes."""
-    q = Queue()
+    q = BackpressureQueue(100, 0.1)
     scan = fake_scan("scan1")
     d = AwsNexradDownloader(
         make_config(),

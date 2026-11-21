@@ -101,6 +101,12 @@ def test_orchestrator_queue_wiring(pipeline_config):
     assert orch.downloader_queue.maxsize == 7
 
 
+def test_orchestrator_queue_has_the_configured_levels(pipeline_config):
+    """By default the source is held at 100 queued scans and resumes at 10."""
+    stats = PipelineOrchestrator(pipeline_config).downloader_queue.backpressure_stats()
+    assert (stats["queue_high"], stats["queue_low"]) == (100, 10)
+
+
 def test_orchestrator_stop_is_idempotent(pipeline_config):
     """Calling stop() multiple times is safe."""
     orch = PipelineOrchestrator(pipeline_config)
