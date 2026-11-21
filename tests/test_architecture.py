@@ -26,11 +26,11 @@ adapt_modules = pytest.importorskip(
 )
 
 
-def _discover_module_packages() -> list[str]:
-    """Return all immediate subpackage names under adapt.modules."""
+def _subpackages(package) -> list[str]:
+    """Return all immediate subpackage names under ``package``."""
     return [
-        f"adapt.modules.{info.name}"
-        for info in pkgutil.iter_modules(adapt_modules.__path__)
+        f"{package.__name__}.{info.name}"
+        for info in pkgutil.iter_modules(package.__path__)
         if info.ispkg
     ]
 
@@ -65,8 +65,19 @@ def _imported_adapt_modules(py_file: Path) -> set[str]:
     return imports
 
 
+def _imported_names(py_file: Path) -> list[str]:
+    """Every module name a .py file imports (``import X``, ``from X import``)."""
+    names: list[str] = []
+    for node in ast.walk(ast.parse(py_file.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.extend(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.append(node.module)
+    return names
+
+
 # Build the test matrix at collection time — works for any future module.
-_PACKAGES = _discover_module_packages()
+_PACKAGES = _subpackages(adapt_modules)
 _SKIP = {"adapt.modules.base"}  # base.py is shared infrastructure, not a science module
 _MODULE_INTERFACE = "adapt.modules.base"
 
@@ -94,30 +105,41 @@ def test_module_does_not_import_other_modules(pkg: str) -> None:
     )
 
 
+_SOURCE_PACKAGES = _subpackages(importlib.import_module("adapt.sources"))
+
+
+@pytest.mark.parametrize("pkg", _SOURCE_PACKAGES)
+def test_source_does_not_import_other_sources(pkg: str) -> None:
+    """A source package imports no other source package, nor ``adapt.sources``
+    itself. Parameterised over every subpackage discovered under adapt.sources."""
+    violations = [
+        f"  {py_file.name}: imports {name!r}"
+        for py_file in _source_files(pkg)
+        for name in _imported_names(py_file)
+        if name.startswith("adapt.sources") and not (name == pkg or name.startswith(f"{pkg}."))
+    ]
+
+    assert not violations, f"\n{pkg} imports from other sources:\n" + "\n".join(violations)
+
+
 @pytest.mark.parametrize("pkg", [p for p in _PACKAGES if p not in _SKIP])
 def test_module_does_not_import_execution_or_runtime(pkg: str) -> None:
     """Scientific module must not import from adapt.execution or adapt.runtime."""
-    forbidden_prefixes = ("adapt.execution", "adapt.runtime", "adapt.persistence")
-    files = _source_files(pkg)
-    violations: list[str] = []
-
-    for py_file in files:
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            names: list[str] = []
-            if isinstance(node, ast.Import):
-                names = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                names = [node.module]
-            for name in names:
-                if any(name.startswith(p) for p in forbidden_prefixes):
-                    violations.append(f"  {py_file.name}: imports {name!r}")
+    forbidden_prefixes = (
+        "adapt.execution",
+        "adapt.runtime",
+        "adapt.persistence",
+        "adapt.downloaders",
+    )
+    violations = [
+        f"  {py_file.name}: imports {name!r}"
+        for py_file in _source_files(pkg)
+        for name in _imported_names(py_file)
+        if name.startswith(forbidden_prefixes)
+    ]
 
     assert not violations, (
-        f"\n{pkg} imports from layers above it — "
+        f"\n{pkg} imports a package no module may import — "
         "modules must only depend on contracts/ and utils/:\n" + "\n".join(violations)
     )
 
@@ -176,11 +198,7 @@ def test_adapt_name_is_never_all_caps() -> None:
 
 # ── Determinism: no wall clock or global RNG in scientific modules ─────────────
 # Identical inputs + config must produce identical outputs. A module that reads
-# the wall clock or numpy's global RNG breaks that silently. The acquisition
-# module is the single allowed exception: it injects its clock (testable) and
-# stamps queue telemetry, which never enters scientific outputs.
-
-_WALL_CLOCK_ALLOWED = {"acquisition/module.py"}
+# the wall clock or numpy's global RNG breaks that silently.
 
 
 def _nondeterminism_calls(py_file: Path) -> list[str]:
@@ -214,13 +232,11 @@ def test_module_does_not_read_wall_clock_or_global_rng(pkg: str) -> None:
 
     for py_file in _source_files(pkg):
         rel = _rel(py_file, modules_dir)
-        if rel in _WALL_CLOCK_ALLOWED:
-            continue
         violations.extend(f"  {rel}: {hit}" for hit in _nondeterminism_calls(py_file))
 
     assert not violations, (
         f"\n{pkg} reads the wall clock or global RNG — identical inputs must give "
-        "identical outputs. Inject a clock (see acquisition/module.py) or seed an "
+        "identical outputs. Inject a clock or seed an "
         "explicit np.random.default_rng from config:\n" + "\n".join(violations)
     )
 

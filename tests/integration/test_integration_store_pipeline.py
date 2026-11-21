@@ -40,7 +40,7 @@ from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.processor import RadarProcessor
-from adapt.runtime.sources import LocalDirectorySource
+from adapt.sources.local_directory.source import LocalDirectorySource
 from adapt.utils.time import to_scan_iso
 from tests.helpers.run_configs import new_run_config
 

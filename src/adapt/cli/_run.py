@@ -41,7 +41,7 @@ from adapt.configuration.pipeline_template import pipeline_template_names
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.persistence.store import Store
 from adapt.runtime.orchestrator import PipelineOrchestrator
-from adapt.runtime.sources import source_registry
+from adapt.runtime.sources import check_source, source_registry
 
 __all__ = ["RunFlags", "pipeline_path", "run"]
 
@@ -87,7 +87,7 @@ def run(name: str, run_id: str | None, overrides: Sequence[str], flags: RunFlags
             f"Pipeline file {path}: run.source '{config.source}' is not a "
             f"registered source. Registered sources: {', '.join(source_registry.names())}"
         )
-    source_registry.get(config.source).check(config)  # e.g. the folder a local run reads
+    check_source(config)  # e.g. the folder a local run reads
     if flags.verbose:
         logging_ = config.logging.model_copy(update={"level": "DEBUG", "console_level": "DEBUG"})
         config = config.model_copy(update={"logging": logging_})

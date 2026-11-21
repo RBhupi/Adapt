@@ -1,60 +1,14 @@
 # tests/conftest.py
 import shutil
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pytest
 import xarray as xr
 
-from adapt.configuration.schemas.internal import InternalConfig
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.modules.ingest.node import LoadModule
-from tests.helpers.run_configs import new_run_config
-
-
-# ---- AwsNexradDownloader fixtures ----
-class FakeScan:
-    def __init__(self, key, scan_time=None):
-        self.key = key
-        self.scan_time = scan_time or datetime.now(UTC)
-
-
-class FakeAwsConn:
-    def __init__(self, scans):
-        self.scans = scans
-
-    def get_avail_scans_in_range(self, start, end, radar_id):
-        return self.scans
-
-    def download(self, scans, target_dir, keep_aws_folders=False):
-        class Result:
-            def __init__(self, path):
-                self.filepath = path
-
-        results = []
-        for scan in scans:
-            path = target_dir / scan.key
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"x" * 2048)
-            results.append(Result(path))
-
-        class DownloadResults:
-            def iter_success(self):
-                return results
-
-        return DownloadResults()
-
-
-@pytest.fixture
-def fake_scan():
-    return FakeScan
-
-
-@pytest.fixture
-def fake_aws_conn():
-    return FakeAwsConn
 
 
 # ---- RadarCellSegmenter fixtures ----
@@ -271,12 +225,6 @@ def temp_dir():
     d = tempfile.mkdtemp()
     yield Path(d)
     shutil.rmtree(d)
-
-
-@pytest.fixture
-def radar_config(store_root) -> InternalConfig:
-    """The config of a new run of radar TEST_RADAR, for radar module tests."""
-    return new_run_config(store_root)
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 class TestOrchestratorSourceResolution:
     def test_default_source_is_aws_nexrad(self, pipeline_config):
-        from adapt.modules.acquisition.module import AwsNexradDownloader
+        from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
         orch = PipelineOrchestrator(pipeline_config)
         orch.collection = orch.store.collection("TEST_RADAR")
@@ -21,7 +21,7 @@ class TestOrchestratorSourceResolution:
         orch.store.close()
 
     def test_local_directory_source_selected_by_config(self, pipeline_config, tmp_path):
-        from adapt.runtime.sources import LocalDirectorySource
+        from adapt.sources.local_directory.source import LocalDirectorySource
 
         src_dir = tmp_path / "in"
         src_dir.mkdir()

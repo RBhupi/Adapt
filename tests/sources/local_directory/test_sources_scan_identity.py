@@ -17,8 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from adapt.configuration.schemas.errors import ConfigError
-from adapt.runtime.sources import LocalDirectorySource
+from adapt.sources.local_directory.source import LocalDirectorySource
 from adapt.utils.identity import scan_id_from_bytes
 
 pytestmark = pytest.mark.unit
@@ -71,7 +70,7 @@ def test_local_source_without_filename_stamp_fails_loudly(tmp_path, store_env):
     src_dir.mkdir()
     _write_volume(src_dir, "opaque_volume.raw", b"stampless-volume-bytes")
 
-    with pytest.raises(ConfigError, match="opaque_volume.raw"):
+    with pytest.raises(ValueError, match="opaque_volume.raw"):
         _local_source(src_dir, store_env.acquirer)
 
 

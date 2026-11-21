@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 
 @pytest.mark.integration

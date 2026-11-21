@@ -9,9 +9,11 @@ Provides the shared configuration fixtures. A run config is built the way
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from adapt.configuration.schemas.internal import InternalConfig
 from adapt.execution.pipeline_builder import _ensure_modules_registered
 from adapt.modules.analysis.config import AnalysisOptions
 from adapt.modules.analysis.node import AnalysisModule
@@ -23,8 +25,10 @@ from adapt.modules.projection.config import ProjectionOptions
 from adapt.modules.projection.node import ProjectionModule
 from adapt.modules.tracking.config import TrackingOptions
 from adapt.modules.tracking.node import TrackingModule
-from adapt.persistence.store import init_store
-from adapt.persistence.store_registry import StoreRegistry
+from adapt.persistence.execution_history import StoreExecutionHistory
+from adapt.persistence.store import Store, init_store
+from adapt.persistence.store_registry import RunStart, StoreRegistry
+from adapt.runtime.acquire import StoreAcquirer
 from tests.helpers.pipeline_files import export_user
 from tests.helpers.run_configs import new_run_config
 from tests.helpers.shared_config import SHARED
@@ -88,6 +92,37 @@ def store_root(temp_dir):
     StoreRegistry.close_all()
 
 
+@pytest.fixture
+def store_env(store_root):
+    """Initialized store with one collection and one running run."""
+    store = Store.open(store_root)
+    collection = store.collection("TEST_RADAR")
+    registry = StoreRegistry.get_instance(store_root)
+    registry.register_collection("TEST_RADAR", source_kind="nexrad")
+    run_id = "test-run"
+    registry.begin_run(
+        RunStart(
+            run_id=run_id,
+            collection_id="TEST_RADAR",
+            config_hash="test-hash",
+            config_json="{}",
+            pipeline_version="0",
+            environment_json="{}",
+        )
+    )
+    env = SimpleNamespace(
+        root=store_root,
+        store=store,
+        collection=collection,
+        registry=registry,
+        run_id=run_id,
+        history=StoreExecutionHistory(registry),
+        acquirer=StoreAcquirer(collection, run_id),
+    )
+    yield env
+    store.close()
+
+
 # =============================================================================
 # Run Config Fixtures
 # =============================================================================
@@ -101,6 +136,12 @@ def internal_config(store_root):
     needs the config a run has: a realtime ``TEST_RADAR`` run of the six
     modules of a plain NEXRAD run, in this test's store.
     """
+    return new_run_config(store_root)
+
+
+@pytest.fixture
+def radar_config(store_root) -> InternalConfig:
+    """The config of a new run of radar TEST_RADAR, for radar module tests."""
     return new_run_config(store_root)
 
 

@@ -7,8 +7,8 @@ import tempfile
 
 import pytest
 
-from adapt.modules.acquisition.module import AwsNexradDownloader
 from adapt.runtime.scan_queue import BackpressureQueue
+from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
 

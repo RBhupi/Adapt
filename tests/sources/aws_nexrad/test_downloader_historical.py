@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from adapt.modules.acquisition.module import AwsNexradDownloader
+from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
 

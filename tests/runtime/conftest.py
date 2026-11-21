@@ -3,15 +3,10 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from adapt.configuration.schemas.internal import InternalConfig
-from adapt.persistence.execution_history import StoreExecutionHistory
-from adapt.persistence.store import Store
-from adapt.persistence.store_registry import RunStart, StoreRegistry
-from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.processor import RadarProcessor
 from tests.helpers.run_configs import new_run_config
 
@@ -21,37 +16,6 @@ def temp_dir():
     d = tempfile.mkdtemp()
     yield Path(d)
     shutil.rmtree(d)
-
-
-@pytest.fixture
-def store_env(store_root):
-    """Initialized store with one collection and one running run."""
-    store = Store.open(store_root)
-    collection = store.collection("TEST_RADAR")
-    registry = StoreRegistry.get_instance(store_root)
-    registry.register_collection("TEST_RADAR", source_kind="nexrad")
-    run_id = "test-run"
-    registry.begin_run(
-        RunStart(
-            run_id=run_id,
-            collection_id="TEST_RADAR",
-            config_hash="test-hash",
-            config_json="{}",
-            pipeline_version="0",
-            environment_json="{}",
-        )
-    )
-    env = SimpleNamespace(
-        root=store_root,
-        store=store,
-        collection=collection,
-        registry=registry,
-        run_id=run_id,
-        history=StoreExecutionHistory(registry),
-        acquirer=StoreAcquirer(collection, run_id),
-    )
-    yield env
-    store.close()
 
 
 @pytest.fixture

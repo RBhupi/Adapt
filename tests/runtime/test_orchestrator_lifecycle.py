@@ -24,7 +24,7 @@ from adapt.persistence.errors import StoreError
 from adapt.persistence.store_registry import StoreRegistry
 from adapt.runtime.orchestrator import PipelineOrchestrator
 from adapt.runtime.run_reporter import RunReporter
-from adapt.runtime.sources import LocalDirectorySource
+from adapt.sources.local_directory.source import LocalDirectorySource
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
