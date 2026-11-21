@@ -13,12 +13,15 @@ from datetime import UTC, datetime
 
 import pytest
 
+from adapt.sources.aws_nexrad.config import AwsNexradOptions
 from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
 
 
-def test_download_scan_suppresses_conn_stdout(fake_scan, fake_gateway, make_config, capsys):
+def test_download_scan_suppresses_conn_stdout(
+    fake_scan, fake_gateway, source_run, scan_queue, capsys
+):
     class PrintingConn:
         def download(self, files, basepath, keep_aws_folders=False):
             print("Downloaded KOHX_TEST")  # backend chatter
@@ -30,7 +33,9 @@ def test_download_scan_suppresses_conn_stdout(fake_scan, fake_gateway, make_conf
 
             return _Results()
 
-    d = AwsNexradDownloader(make_config(), acquire=fake_gateway, conn=PrintingConn())
+    d = AwsNexradDownloader(
+        source_run(), AwsNexradOptions(), scan_queue, fake_gateway, conn=PrintingConn()
+    )
 
     d._download_scan(fake_scan("KOHX_TEST", datetime.now(UTC)))
 

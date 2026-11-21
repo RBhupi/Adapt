@@ -986,6 +986,19 @@ def test_a_module_without_a_preset_has_a_default_for_every_option() -> None:
     )
 
 
+def test_every_source_option_has_a_default() -> None:
+    """So ``params.<source>`` may be left out of a pipeline file."""
+    from adapt.execution.source_registry import catalog_source_names, source_registry
+
+    offenders = {
+        name: missing
+        for name in catalog_source_names()
+        if (options := source_registry.options_class(name)) is not None
+        and (missing := _options_without_default(options))
+    }
+    assert not offenders, f"source options without a default: {offenders}"
+
+
 # ── configuration code names no module ───────────────────────────────────────
 # Which modules exist is the catalog's (defaults.yaml); which of them a new
 # pipeline lists is a template's (configuration/templates/*.yaml). Both are

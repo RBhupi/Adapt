@@ -3,19 +3,21 @@
 import pytest
 
 from adapt.runtime.scan_queue import BackpressureQueue
+from adapt.sources.aws_nexrad.config import AwsNexradOptions
 from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
 
 
-def test_process_scans_queues_gateway_message(fake_scan, fake_aws_conn, fake_gateway, make_config):
+def test_process_scans_queues_gateway_message(fake_scan, fake_aws_conn, fake_gateway, source_run):
     """Each new scan puts the gateway's acquired-scan message on the queue."""
     q = BackpressureQueue(100, 0.1)
     scan = fake_scan("scan1")
     d = AwsNexradDownloader(
-        make_config(),
-        result_queue=q,
-        acquire=fake_gateway,
+        source_run(),
+        AwsNexradOptions(),
+        q,
+        fake_gateway,
         conn=fake_aws_conn([scan]),
     )
 
@@ -30,15 +32,16 @@ def test_process_scans_queues_gateway_message(fake_scan, fake_aws_conn, fake_gat
 
 
 def test_process_scans_does_not_requeue_known_uri(
-    fake_scan, fake_aws_conn, fake_gateway, make_config
+    fake_scan, fake_aws_conn, fake_gateway, source_run
 ):
     """A source URI already queued this run is skipped on later passes."""
     q = BackpressureQueue(100, 0.1)
     scan = fake_scan("scan1")
     d = AwsNexradDownloader(
-        make_config(),
-        result_queue=q,
-        acquire=fake_gateway,
+        source_run(),
+        AwsNexradOptions(),
+        q,
+        fake_gateway,
         conn=fake_aws_conn([scan]),
     )
 

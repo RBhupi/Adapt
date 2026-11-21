@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_queues_the_runs_stored_scans_in_time_order_and_reports_complete(
-    tmp_path, store_env, internal_config
+    tmp_path, store_env, source_run
 ):
     later = datetime(2024, 5, 18, 12, 5, tzinfo=UTC)
     earlier = datetime(2024, 5, 18, 12, 0, tzinfo=UTC)
@@ -25,7 +25,7 @@ def test_queues_the_runs_stored_scans_in_time_order_and_reports_complete(
         store_env.acquirer.acquire_file(path, source_uri=str(path), scan_time=scan_time)
     q: queue.Queue = queue.Queue()
 
-    source = StoredRunSource(config=internal_config, result_queue=q, acquire=store_env.acquirer)
+    source = StoredRunSource(source_run(mode="historical"), None, q, store_env.acquirer)
     source.run()
 
     assert [q.get_nowait()["scan_time"] for _ in range(q.qsize())] == [earlier, later]

@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
+from adapt.contracts.source import ScanQueue, SourceRun
 from adapt.downloaders.nexrad import parse_scan_time
+from adapt.sources.local_directory.config import LocalDirectoryOptions
 from adapt.utils.time import to_scan_iso
 
 logger = logging.getLogger(__name__)
@@ -17,25 +19,30 @@ logger = logging.getLogger(__name__)
 __all__ = ["LocalDirectorySource", "local_directory_files"]
 
 
-def local_directory_files(config) -> list[Path]:
-    """The scans of ``config.source_dir`` the run processes, in time order.
+def local_directory_files(run: SourceRun) -> list[Path]:
+    """The scans of ``run.source_dir`` the run processes, in time order.
 
     Hidden files (``.DS_Store`` and the like) are ignored. Every other file must
-    be a Level-II volume of ``config.downloader.radar`` named
+    be a Level-II volume of ``run.radar`` named
     ``RADARYYYYMMDD_HHMMSS...``; only those whose scan time lies within
     ``run.start_time .. run.end_time`` (inclusive) are processed.
 
     Raises
     ------
     ValueError
-        The folder is missing, holds a file not named for the radar with a
+        No folder is named, the folder is missing, holds a file not named for the radar with a
         scan time, or holds no scan within the window; the message says which.
     """
-    folder = Path(config.source_dir)
+    if not run.source_dir:
+        raise ValueError(
+            "source_dir is required for the 'local_directory' source. "
+            "Set source_dir in your config to the directory of files to process."
+        )
+    folder = Path(run.source_dir)
     if not folder.is_dir():
         raise ValueError(f"run.source_dir {folder} is not a folder")
-    window = tuple(_window_edge(config.downloader, key) for key in ("start_time", "end_time"))
-    radar = config.downloader.radar.upper()
+    window = tuple(_window_edge(run, key) for key in ("start_time", "end_time"))
+    radar = run.radar.upper()
     wrong: list[str] = []
     timed: list[tuple[datetime, Path]] = []
     for path in sorted(p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")):
@@ -60,7 +67,7 @@ def local_directory_files(config) -> list[Path]:
         )
         raise ValueError(
             f"no scan in run.source_dir {folder} lies within run.start_time "
-            f"{config.downloader.start_time} .. run.end_time {config.downloader.end_time}; {span}"
+            f"{run.start_time} .. run.end_time {run.end_time}; {span}"
         )
     if len(inside) < len(timed):
         logger.info(
@@ -72,8 +79,8 @@ def local_directory_files(config) -> list[Path]:
     return inside
 
 
-def _window_edge(downloader, key: str) -> datetime:
-    value = getattr(downloader, key)
+def _window_edge(run: SourceRun, key: str) -> datetime:
+    value = getattr(run, key)
     if value is None:
         raise ValueError(
             f"run.{key} is required for source: local_directory — the window of scans to process"
@@ -83,7 +90,7 @@ def _window_edge(downloader, key: str) -> datetime:
 
 
 class LocalDirectorySource(threading.Thread):
-    """Acquire the scans of ``config.source_dir`` within the run window, in time order.
+    """Acquire the scans of ``run.source_dir`` within the run window, in time order.
 
     A finite source: once every file is acquired into the store and queued it
     reports complete. Use when the files were downloaded by an external process
@@ -93,29 +100,25 @@ class LocalDirectorySource(threading.Thread):
 
     source_name: ClassVar[str] = "local_directory"
     summary: ClassVar[str] = "The Level-II files of run.source_dir, in time order"
+    options_class: ClassVar[type[LocalDirectoryOptions]] = LocalDirectoryOptions
 
-    def __init__(self, config, result_queue=None, acquire=None) -> None:
+    def __init__(
+        self, run: SourceRun, options: LocalDirectoryOptions, queue: ScanQueue, acquire
+    ) -> None:
         super().__init__(daemon=True, name="LocalDirectorySource")
-        if not config.source_dir:
-            raise ValueError(
-                "source_dir is required for the 'local_directory' source. "
-                "Set source_dir in your config to the directory of files to process."
-            )
-        if acquire is None:
-            raise ValueError("LocalDirectorySource requires the acquisition gateway")
-        self._files = local_directory_files(config)
-        self._result_queue = result_queue
+        self._files = local_directory_files(run)
+        self._queue = queue
         self._acquire = acquire
         self._stop_event = threading.Event()
-        self._min_file_size = config.downloader.min_file_size
+        self._min_file_size = options.min_file_size
         self._total = 0
         self._queued = 0
         self._complete = threading.Event()
 
     @classmethod
-    def check(cls, config) -> None:
+    def check(cls, run: SourceRun, options: LocalDirectoryOptions) -> None:
         """Refuse a folder the run cannot process (see ``local_directory_files``)."""
-        local_directory_files(config)
+        local_directory_files(run)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -146,14 +149,11 @@ class LocalDirectorySource(threading.Thread):
         for path in files:
             if self.stopped():
                 break
-            if self._result_queue is not None:
-                # Loud failure on an unparseable stamp: the store cannot register
-                # a scan without its observation time (no wall-clock substitute).
-                scan_time = parse_scan_time(path.name)
-                message = self._acquire.acquire_file(
-                    path, source_uri=str(path), scan_time=scan_time
-                )
-                self._result_queue.put(message)
+            # Loud failure on an unparseable stamp: the store cannot register
+            # a scan without its observation time (no wall-clock substitute).
+            scan_time = parse_scan_time(path.name)
+            message = self._acquire.acquire_file(path, source_uri=str(path), scan_time=scan_time)
+            self._queue.put(message)
             self._queued += 1
         self._complete.set()
         logger.info("LocalDirectorySource queued %d/%d files", self._queued, self._total)

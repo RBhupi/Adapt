@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import pytest
 
 from adapt.runtime.scan_queue import BackpressureQueue
+from adapt.sources.aws_nexrad.config import AwsNexradOptions
 from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
@@ -20,7 +21,7 @@ def _count_downloads(conn, calls):
     conn.download = counting_download
 
 
-def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_config):
+def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, source_run):
     """Scans already in the store are acquired without downloading; new ones download."""
     now = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -36,14 +37,11 @@ def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_c
 
     fake_gateway.acquired.add("scan1")  # already committed by a previous run
 
-    config = make_config(
-        run={"radar": "KDIX"}, params={"downloader": {"latest_files": 2, "latest_minutes": 30}}
-    )
-
     d = AwsNexradDownloader(
-        config,
-        result_queue=q,
-        acquire=fake_gateway,
+        source_run(radar="KDIX"),
+        AwsNexradOptions(latest_files=2, latest_minutes=30),
+        q,
+        fake_gateway,
         conn=conn,
         clock=lambda: now,
         sleeper=lambda _: None,
@@ -58,17 +56,18 @@ def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, make_c
     assert q.qsize() == 2  # both scans are queued for the processor
 
 
-def test_realtime_idempotent(fake_scan, fake_aws_conn, fake_gateway, make_config):
+def test_realtime_idempotent(fake_scan, fake_aws_conn, fake_gateway, source_run, scan_queue):
     scans = [fake_scan("same")]
 
     conn = fake_aws_conn(scans)
     download_calls: list = []
     _count_downloads(conn, download_calls)
 
-    config = make_config()
     d = AwsNexradDownloader(
-        config,
-        acquire=fake_gateway,
+        source_run(),
+        AwsNexradOptions(),
+        scan_queue,
+        fake_gateway,
         conn=conn,
         sleeper=lambda _: None,
     )

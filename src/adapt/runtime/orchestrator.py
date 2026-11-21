@@ -35,7 +35,7 @@ from adapt.runtime.processor import RadarProcessor
 from adapt.runtime.provenance import capture_provenance, config_hash, module_provenance
 from adapt.runtime.run_reporter import RunReporter
 from adapt.runtime.scan_queue import BackpressureQueue
-from adapt.runtime.sources import source_class
+from adapt.runtime.sources import build_source
 
 if TYPE_CHECKING:
     from adapt.configuration.schemas.internal import InternalConfig
@@ -344,18 +344,15 @@ class PipelineOrchestrator:
         )
 
     def _create_source(self):
-        """Resolve and construct the ingress source named by ``config.source``.
+        """Build the ingress source named by ``config.source`` (``build_source``).
 
         Sources are swappable plugins (download, local directory, …) registered by
-        their catalog line. All are constructed with the same signature and
-        acquire raw scans through the injected store gateway.
+        their catalog line. Each is handed the run's values, its own options, the
+        queue and the store gateway it acquires raw scans through.
         """
         assert self.collection is not None
-        source_cls = source_class(self.config.source)
-        return source_cls(
-            config=self.config,
-            result_queue=self.downloader_queue,
-            acquire=StoreAcquirer(self.collection, self.run_id),
+        return build_source(
+            self.config, self.downloader_queue, StoreAcquirer(self.collection, self.run_id)
         )
 
     def start(self, max_runtime: int | None = None) -> str:

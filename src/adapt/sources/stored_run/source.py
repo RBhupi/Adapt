@@ -7,6 +7,8 @@ import logging
 import threading
 from typing import ClassVar
 
+from adapt.contracts.source import ScanQueue, SourceRun
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["StoredRunSource"]
@@ -22,12 +24,11 @@ class StoredRunSource(threading.Thread):
 
     source_name: ClassVar[str] = "stored_run"
     summary: ClassVar[str] = "The scans of a run the store already has (--run-id)"
+    options_class: ClassVar[None] = None
 
-    def __init__(self, config, result_queue=None, acquire=None) -> None:
+    def __init__(self, run: SourceRun, options: None, queue: ScanQueue, acquire) -> None:
         super().__init__(daemon=True, name="StoredRunSource")
-        if acquire is None:
-            raise ValueError("StoredRunSource requires the acquisition gateway")
-        self._result_queue = result_queue
+        self._queue = queue
         self._acquire = acquire
         self._stop_event = threading.Event()
         self._total = 0
@@ -35,7 +36,7 @@ class StoredRunSource(threading.Thread):
         self._complete = threading.Event()
 
     @classmethod
-    def check(cls, config) -> None:
+    def check(cls, run: SourceRun, options: None) -> None:
         """Nothing to check before the run is opened: its scans are in the store."""
 
     def stop(self) -> None:
@@ -56,8 +57,7 @@ class StoredRunSource(threading.Thread):
         for message in messages:
             if self.stopped():
                 break
-            if self._result_queue is not None:
-                self._result_queue.put(message)
+            self._queue.put(message)
             self._queued += 1
         self._complete.set()
         logger.info("StoredRunSource queued %d/%d scans", self._queued, self._total)

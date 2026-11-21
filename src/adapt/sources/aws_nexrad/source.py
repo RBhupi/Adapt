@@ -20,7 +20,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
+from adapt.contracts.source import ScanQueue, SourceRun
 from adapt.downloaders import NexradS3
+from adapt.sources.aws_nexrad.config import AwsNexradOptions
 
 __all__ = ["AwsNexradDownloader"]
 
@@ -46,24 +48,20 @@ class AwsNexradDownloader(threading.Thread):
     Safe to restart mid-execution.
 
     **Queue Communication:** Puts one acquired-scan message per new file on
-    result_queue — ``{artifact_id, scan_id, scan_time, queued_at}`` — built by
+    the queue — ``{artifact_id, scan_id, scan_time, queued_at}`` — built by
     the injected acquisition gateway, which commits the raw bytes into the
     store at the source boundary. Downstream processor can begin work
     immediately (streaming architecture).
 
-    **File Size Filtering:** Ignores files < 1 KB (corrupted downloads or
-    metadata-only files).
+    **File Size Filtering:** Ignores files under ``options.min_file_size``
+    (corrupted downloads or metadata-only files).
 
     **Thread Safety:** Safe to call status methods while run() is executing.
     Uses locks for shared state (_known_files, historical tracking).
 
     Example usage (typically called by orchestrator)::
 
-        downloader = AwsNexradDownloader(
-            config,  # the run config; its downloader settings are read
-            result_queue=processor_queue,
-            acquire=gateway,
-        )
+        downloader = AwsNexradDownloader(run, options, processor_queue, gateway)
         downloader.start()
         ...
         downloader.stop()
@@ -72,12 +70,15 @@ class AwsNexradDownloader(threading.Thread):
 
     source_name: ClassVar[str] = "aws_nexrad"
     summary: ClassVar[str] = "NEXRAD Level-II scans downloaded from the AWS archive"
+    options_class: ClassVar[type[AwsNexradOptions]] = AwsNexradOptions
 
     def __init__(
         self,
-        config,
-        result_queue=None,
-        acquire=None,
+        run: SourceRun,
+        options: AwsNexradOptions,
+        queue: ScanQueue,
+        acquire,
+        *,
         conn=None,
         clock=None,
         sleeper=None,
@@ -86,18 +87,20 @@ class AwsNexradDownloader(threading.Thread):
 
         Parameters
         ----------
-        config : InternalConfig
-            Fully validated runtime configuration.
+        run : SourceRun
+            The run's radar, mode and window.
 
-        result_queue : adapt.runtime.scan_queue.BackpressureQueue, optional
+        options : AwsNexradOptions
+            This source's validated options.
+
+        queue : ScanQueue
             Queue for acquired-scan messages. Processor reads from this queue;
             it holds the downloader while it is full (``wait_for_room``).
-            If None, scans are acquired into the store without notification.
 
         acquire : acquisition gateway
             Injected by the runtime; commits raw scans into the store and
-            registers them for the run. Required — the module never touches
-            persistence itself.
+            registers them for the run. The source never touches persistence
+            itself.
 
         conn : adapt.downloaders.NexradS3, optional
             AWS S3 connection object. If None, creates new connection.
@@ -119,19 +122,16 @@ class AwsNexradDownloader(threading.Thread):
 
         super().__init__(daemon=True)
 
-        if acquire is None:
-            raise ValueError("AwsNexradDownloader requires the acquisition gateway")
+        self.radar = run.radar
+        self.mode = run.mode
+        self.start_time = run.start_time
+        self.end_time = run.end_time
+        self.poll_interval_sec = options.poll_interval_sec
+        self.max_fetch_retries = options.max_fetch_retries
+        self.latest_files = options.latest_files
+        self.latest_minutes = options.latest_minutes
 
-        self.config = config
-        self.radar = config.downloader.radar
-        self.poll_interval_sec = config.downloader.poll_interval_sec
-        self.max_fetch_retries = config.downloader.max_fetch_retries
-        self.latest_files = config.downloader.latest_files
-        self.latest_minutes = config.downloader.latest_minutes
-        self.start_time = config.downloader.start_time
-        self.end_time = config.downloader.end_time
-
-        self.result_queue = result_queue
+        self.result_queue = queue
         self._acquire = acquire
         self.conn = conn or NexradS3()
         # injectable time helpers for testing
@@ -142,7 +142,7 @@ class AwsNexradDownloader(threading.Thread):
         # Sources already handed to the processor this run (by source URI).
         self._known_files: set[str] = set()
         self._known_files_lock = threading.Lock()
-        self._min_file_size = config.downloader.min_file_size
+        self._min_file_size = options.min_file_size
         # Store-external scratch space for in-flight S3 downloads; every file is
         # moved into the store (or deleted) immediately after download.
         self._staging_dir = Path(tempfile.mkdtemp(prefix="adapt_download_"))
@@ -160,7 +160,7 @@ class AwsNexradDownloader(threading.Thread):
     # ========================================================================
 
     @classmethod
-    def check(cls, config) -> None:
+    def check(cls, run: SourceRun, options: AwsNexradOptions) -> None:
         """Nothing to refuse offline: the archive is reached only when the run starts."""
 
     def stop(self):
@@ -174,7 +174,7 @@ class AwsNexradDownloader(threading.Thread):
 
         Examples
         --------
-        >>> downloader = AwsNexradDownloader(config, queue)
+        >>> downloader = AwsNexradDownloader(run, options, queue, gateway)
         >>> downloader.start()
         >>> time.sleep(60)
         >>> downloader.stop()  # Signal thread to exit
@@ -278,11 +278,11 @@ class AwsNexradDownloader(threading.Thread):
 
         Examples
         --------
-        >>> downloader = AwsNexradDownloader(config, queue)
+        >>> downloader = AwsNexradDownloader(run, options, queue, gateway)
         >>> downloader.start()  # Calls run() in background thread
         >>> downloader.join()   # Wait for thread to finish
         """
-        logger.info("Starting %s in %s mode", self.name, self.config.downloader.mode)
+        logger.info("Starting %s in %s mode", self.name, self.mode)
 
         try:
             while not self.stopped():
@@ -292,7 +292,7 @@ class AwsNexradDownloader(threading.Thread):
                     logger.exception("Download task failed")
 
                 # Historical: exit after completion
-                if self.config.downloader.mode == "historical" and self.is_historical_complete():
+                if self.mode == "historical" and self.is_historical_complete():
                     logger.info("Historical download complete")
                     break
 
@@ -311,7 +311,7 @@ class AwsNexradDownloader(threading.Thread):
         for _ in range(seconds // 2):
             if self.stopped():
                 break
-            if self.config.downloader.mode == "historical" and self.is_historical_complete():
+            if self.mode == "historical" and self.is_historical_complete():
                 break
             self._sleep(2)
 
@@ -340,11 +340,11 @@ class AwsNexradDownloader(threading.Thread):
         - Files are downloaded to a temporary directory, then moved to
           the final location to ensure atomic writes
         - Only files >= 1 KB are considered valid
-        - All queued files (new or existing) are put in result_queue
+        - All queued files (new or existing) are put on the queue
         - In historical mode: after one complete iteration, completion
           is marked (but loop continues to allow processing time)
         """
-        if self.config.downloader.mode == "historical":
+        if self.mode == "historical":
             return self._download_historical()
         else:
             return self._download_realtime()
@@ -406,6 +406,8 @@ class AwsNexradDownloader(threading.Thread):
 
     def _parse_time_range(self) -> tuple:
         """Parse ISO timestamps to datetime objects."""
+        if self.start_time is None or self.end_time is None:
+            raise ValueError("a historical aws_nexrad run needs run.start_time and run.end_time")
         start = datetime.fromisoformat(self.start_time.replace("Z", "+00:00"))
         end = datetime.fromisoformat(self.end_time.replace("Z", "+00:00"))
         return start, end
@@ -515,8 +517,7 @@ class AwsNexradDownloader(threading.Thread):
 
             # Hold here (not after the download) so the queue depth is exactly
             # how far downloads run ahead of processing.
-            if self.result_queue is not None:
-                self.result_queue.wait_for_room(self.stopped)
+            self.result_queue.wait_for_room(self.stopped)
             if self.stopped():
                 break
 
@@ -535,7 +536,7 @@ class AwsNexradDownloader(threading.Thread):
                     local.unlink(missing_ok=True)
                 acquired.append(source_uri)
 
-            if self.result_queue is not None and not self._put_until_stopped(message):
+            if not self._put_until_stopped(message):
                 break
             with self._known_files_lock:
                 self._known_files.add(source_uri)
@@ -545,7 +546,7 @@ class AwsNexradDownloader(threading.Thread):
             logger.info("Queued %d files (%d new downloads)", queued, len(acquired))
 
         # Mark historical complete when all scans have been attempted
-        if self.config.downloader.mode == "historical":
+        if self.mode == "historical":
             self._processed_scans = queued
             if processed >= len(scans):
                 self._historical_complete.set()

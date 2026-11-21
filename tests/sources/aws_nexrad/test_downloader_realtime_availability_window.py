@@ -9,21 +9,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from adapt.sources.aws_nexrad.config import AwsNexradOptions
 from adapt.sources.aws_nexrad.source import AwsNexradDownloader
 
 pytestmark = pytest.mark.unit
 
 
-def test_realtime_availability_check_uses_start_and_end_dates(fake_gateway):
-    config = MagicMock()
-    config.downloader.mode = "realtime"
-    config.downloader.radar = "KPOE"
-    config.downloader.poll_interval_sec = 1
-    config.downloader.latest_files = 5
-    config.downloader.latest_minutes = 60
-    config.downloader.start_time = None
-    config.downloader.end_time = None
-    config.downloader.min_file_size = 1024
+def test_realtime_availability_check_uses_start_and_end_dates(fake_gateway, source_run, scan_queue):
 
     fake_conn = MagicMock()
     fake_conn.get_avail_scans_in_range.return_value = []
@@ -33,8 +25,10 @@ def test_realtime_availability_check_uses_start_and_end_dates(fake_gateway):
     now = datetime(2026, 4, 5, 0, 10, 0, tzinfo=UTC)
 
     downloader = AwsNexradDownloader(
-        config=config,
-        acquire=fake_gateway,
+        source_run(radar="KPOE"),
+        AwsNexradOptions(),
+        scan_queue,
+        fake_gateway,
         conn=fake_conn,
         clock=lambda: now,
     )

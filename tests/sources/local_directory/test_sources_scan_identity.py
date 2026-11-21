@@ -13,10 +13,11 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Queue
-from types import SimpleNamespace
 
 import pytest
 
+from adapt.contracts.source import SourceRun
+from adapt.sources.local_directory.config import LocalDirectoryOptions
 from adapt.sources.local_directory.source import LocalDirectorySource
 from adapt.utils.identity import scan_id_from_bytes
 
@@ -29,17 +30,15 @@ def _write_volume(directory: Path, name: str, payload: bytes) -> Path:
     return path
 
 
-def _local_source(source_dir: Path, acquire) -> LocalDirectorySource:
-    config = SimpleNamespace(
+def _local_source(source_dir: Path, queue: Queue, acquire) -> LocalDirectorySource:
+    run = SourceRun(
+        radar="KLOT",
+        mode="historical",
+        start_time="2024-05-18T12:00:00Z",
+        end_time="2024-05-18T13:00:00Z",
         source_dir=str(source_dir),
-        downloader=SimpleNamespace(
-            min_file_size=1,
-            radar="KLOT",
-            start_time="2024-05-18T12:00:00Z",
-            end_time="2024-05-18T13:00:00Z",
-        ),
     )
-    return LocalDirectorySource(config, result_queue=Queue(), acquire=acquire)
+    return LocalDirectorySource(run, LocalDirectoryOptions(min_file_size=1), queue, acquire)
 
 
 def test_local_source_acquires_and_queues_identity(tmp_path, store_env):
@@ -48,10 +47,10 @@ def test_local_source_acquires_and_queues_identity(tmp_path, store_env):
     src_dir.mkdir()
     path = _write_volume(src_dir, "KLOT20240518_123456_V06", payload)
 
-    source = _local_source(src_dir, store_env.acquirer)
-    source.run()
+    queue: Queue = Queue()
+    _local_source(src_dir, queue, store_env.acquirer).run()
 
-    msg = source._result_queue.get_nowait()
+    msg = queue.get_nowait()
     assert msg["scan_id"] == scan_id_from_bytes(payload)
     assert msg["scan_time"] == datetime(2024, 5, 18, 12, 34, 56, tzinfo=UTC)
     assert msg["queued_at"] <= time.time()
@@ -71,11 +70,4 @@ def test_local_source_without_filename_stamp_fails_loudly(tmp_path, store_env):
     _write_volume(src_dir, "opaque_volume.raw", b"stampless-volume-bytes")
 
     with pytest.raises(ValueError, match="opaque_volume.raw"):
-        _local_source(src_dir, store_env.acquirer)
-
-
-def test_local_source_requires_gateway(tmp_path):
-    config = SimpleNamespace(source_dir=str(tmp_path), downloader=SimpleNamespace(min_file_size=1))
-
-    with pytest.raises(ValueError, match="gateway"):
-        LocalDirectorySource(config, result_queue=Queue())
+        _local_source(src_dir, Queue(), store_env.acquirer)

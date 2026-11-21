@@ -16,12 +16,13 @@ class _StandInSource:
 
     source_name = "stand_in"
     summary = "a source of no scans"
+    options_class = None
 
-    def __init__(self, config, result_queue, acquire) -> None:
-        self.built_with = (config, result_queue, acquire)
+    def __init__(self, run, options, queue, acquire) -> None:
+        self.built_with = (run, options, queue, acquire)
 
     @classmethod
-    def check(cls, config) -> None:
+    def check(cls, run, options) -> None:
         pass
 
     def start(self) -> None:
@@ -61,9 +62,10 @@ class TestOrchestratorSourceResolution:
         source = orch._create_source()
 
         assert isinstance(source, stand_in_source)
-        config, result_queue, acquire = source.built_with
-        assert config is cfg
-        assert result_queue is orch.downloader_queue
+        run, options, queue, acquire = source.built_with
+        assert run.radar == "TEST_RADAR"
+        assert options is None
+        assert queue is orch.downloader_queue
         assert acquire is not None
         orch.store.close()
 

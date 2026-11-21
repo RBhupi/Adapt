@@ -27,6 +27,7 @@ class _StandIn:
 
     source_name = "stand_in"
     summary = "a source of no scans"
+    options_class = None
 
     @classmethod
     def check(cls, config) -> None:
@@ -134,6 +135,36 @@ def test_a_class_with_an_empty_name_or_summary_is_refused(monkeypatch, tmp_path,
 
     assert repr(line) in str(refusal.value)
     assert attribute in str(refusal.value)
+
+
+def test_the_registry_gives_each_source_its_options_model():
+    from adapt.sources.aws_nexrad.config import AwsNexradOptions
+    from adapt.sources.local_directory.config import LocalDirectoryOptions
+
+    catalog_source_names()
+
+    assert registry.options_class("aws_nexrad") is AwsNexradOptions
+    assert registry.options_class("local_directory") is LocalDirectoryOptions
+    assert registry.options_class("stored_run") is None
+
+
+@pytest.mark.parametrize("value", [dict, "AwsNexradOptions", 3])
+def test_an_options_class_that_is_no_pydantic_model_is_refused(monkeypatch, tmp_path, value):
+    line = _stand_in(monkeypatch, options_class=value)
+    _catalog(monkeypatch, tmp_path, line)
+
+    with pytest.raises(RuntimeError) as refusal:
+        catalog_source_names()
+
+    assert repr(line) in str(refusal.value)
+    assert "options_class" in str(refusal.value)
+
+
+def test_a_class_without_an_options_class_is_refused():
+    bare = type("_Bare", (), {k: v for k, v in vars(_StandIn).items() if k != "options_class"})
+
+    with pytest.raises(ValueError, match="options_class"):
+        SourceRegistry().register(bare)
 
 
 def test_two_lines_giving_one_name_are_refused(monkeypatch, tmp_path):

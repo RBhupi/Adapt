@@ -40,7 +40,7 @@ from adapt.persistence.store import Store, init_store
 from adapt.persistence.store_registry import RunStart, StoreRegistry
 from adapt.runtime.acquire import StoreAcquirer
 from adapt.runtime.processor import RadarProcessor
-from adapt.sources.local_directory.source import LocalDirectorySource
+from adapt.runtime.sources import build_source
 from adapt.utils.time import to_scan_iso
 from tests.helpers.run_configs import new_run_config
 
@@ -125,7 +125,8 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
     history = StoreExecutionHistory(registry)
     acquirer = StoreAcquirer(collection, run_id)
 
-    source = LocalDirectorySource(config, result_queue=queue.Queue(), acquire=acquirer)
+    scans: queue.Queue = queue.Queue()
+    source = build_source(config, scans, acquirer)
     source.run()
 
     proc = RadarProcessor(
@@ -137,8 +138,8 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         history=history,
     )
     processed = 0
-    while processed < _N_VOLUMES and not source._result_queue.empty():
-        assert proc.process_file(source._result_queue.get_nowait()) is True
+    while processed < _N_VOLUMES and not scans.empty():
+        assert proc.process_file(scans.get_nowait()) is True
         processed += 1
     assert processed == _N_VOLUMES
     registry.finalize_run(run_id, "completed", scans_processed=processed)
