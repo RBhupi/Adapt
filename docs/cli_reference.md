@@ -490,6 +490,9 @@ declared inputs and outputs and the file's options:
 - `store`: what is read from the store: the cells and tracks so far (for
   `target_selection`) and, over a stored run, each stored output that no
   listed module produces.
+- Dotted arrows (`-.->`): a module that reads stored rows back runs after
+  every listed module that writes them; the label is the table or view read,
+  e.g. `cell_volume_stats -.->|cells_by_scan| target_selection`.
 
 An option can change what a module reads: with
 `arm_radar_comm.extent.vertical_band` set, `arm_radar_comm` no longer reads

@@ -23,7 +23,6 @@ import yaml
 
 from adapt.contracts import (
     SCAN_SEEDS,
-    STORE_VIEWS,
     NetcdfArtifact,
     ProductTableWrite,
     ProductView,
@@ -156,6 +155,61 @@ def product_views() -> tuple[ProductView, ...]:
     )
 
 
+def store_read_tables(source: str) -> list[ProductTableWrite]:
+    """The product tables the rows of ``source`` are made of, as the registered
+    modules declare them; the table that names its rows comes first.
+
+    ``source`` is a table, or a view: then its row table (``rows_from``), the
+    tables its computed columns read, and every table with the row table's
+    primary key — the tables the store joins into the view, whichever module
+    writes them. A table declared by two modules counts once.
+
+    Raises
+    ------
+    ValueError
+        No registered module declares ``source`` as a table or as a view.
+    """
+    declared: dict[str, ProductTableWrite] = {}
+    for name in registry.list_modules():
+        for spec in registry.get(name).persistence:
+            if isinstance(spec, ProductTableWrite):
+                declared.setdefault(spec.table, spec)
+    if source in declared:
+        return [declared[source]]
+    view = next((v for v in product_views() if v.name == source), None)
+    if view is None or view.rows_from not in declared:
+        raise ValueError(f"'{source}' is not a table or a view that a registered module declares")
+    rows = declared[view.rows_from]
+    key = set(rows.primary_key)
+    joined = (
+        table
+        for table in declared.values()
+        if table is not rows and (table.table in view.reads or set(table.primary_key) == key)
+    )
+    return [rows, *joined]
+
+
+def store_read_edges(modules: list) -> list[tuple[str, str, str]]:
+    """``(writer, reader, source)`` for every listed module that writes a table a
+    listed module's store read is made of: the reader runs once the writer has
+    stored the scan. Ordered by reader, then by its reads, then by writer."""
+    return [
+        (writer.name, reader.name, read.source)
+        for reader in modules
+        for read in reader.store_reads
+        for writer in modules
+        if writer is not reader
+        and _writes_one_of(writer, {table.table for table in store_read_tables(read.source)})
+    ]
+
+
+def _writes_one_of(module: Any, tables: set[str]) -> bool:
+    """Whether ``module`` (a module or its class) declares a write to one of ``tables``."""
+    return any(
+        isinstance(spec, ProductTableWrite) and spec.table in tables for spec in module.persistence
+    )
+
+
 def carried_keys(modules: list) -> frozenset[str]:
     """The keys the modules carry from one scan to the next: each both read and
     written by one module, whose last value the runtime hands back to it."""
@@ -199,9 +253,10 @@ def scan_graph(
 ) -> list[Node]:
     """The one per-scan graph of ``modules``, as the processor runs it.
 
-    The runtime provides ``SCAN_SEEDS``, one config per module, the
-    ``STORE_VIEWS`` and each module's own carried state (``carried_keys``); every
-    other input must be another listed module's output.
+    The runtime provides ``SCAN_SEEDS``, one config per module, each module's
+    own carried state (``carried_keys``) and the rows each module declares it
+    reads from the store (``store_reads``); every other input must be another
+    listed module's output.
     Over a stored run (``stored_run``) an input may also be any output a
     registered module stores: the runtime reads it back, scan by scan. A module
     with a config in ``configs`` (each module's built config, by ``config_key``)
@@ -212,18 +267,26 @@ def scan_graph(
     listed module, itself included: the runtime keeps it from scan to scan and
     never reads it back from the store, stored run or not.
 
+    A store read (``adapt.contracts.StoreRead``) is made just before its module
+    runs, so the module runs after every listed module that writes a table the
+    read's source is made of (``store_read_edges``): an order edge, without data.
+
     Raises
     ------
     ValueError
         Two modules declare one output key, or an input (of this scan or of
         earlier scans) has no source — naming the module that produces it, when
-        one is registered but not listed.
+        one is registered but not listed. A store read whose source no
+        registered module declares; one up to the scan of rows that are not per
+        scan; one, in a run that makes new scans, of rows no listed module
+        writes — naming the module that writes them.
     """
     for module in modules:
         key = config_key(module.name)
         if key in configs:
             module.inputs = type(module).inputs_for(configs[key])
-    provided = SCAN_SEEDS | STORE_VIEWS | {config_key(m.name) for m in modules}
+    provided = SCAN_SEEDS | {config_key(m.name) for m in modules}
+    provided |= {read.key for module in modules for read in module.store_reads}
     provided |= carried_keys(modules)
     if stored_run:
         provided |= stored_output_keys()
@@ -254,4 +317,32 @@ def scan_graph(
                 f"'{elsewhere[key]}' under modules:, or change {module.name}'s options so "
                 f"it does not read it (adapt config --params {module.name})"
             )
-    return GraphBuilder(modules, provided=provided).build()
+    _check_store_reads(modules, stored_run)
+    return GraphBuilder(modules, provided=provided, order_edges=store_read_edges(modules)).build()
+
+
+def _check_store_reads(modules: list, stored_run: bool) -> None:
+    """Refuse a store read that cannot be made (``ValueError``)."""
+    for module in modules:
+        for read in module.store_reads:
+            reads = f"Module '{module.name}' reads '{read.source}' from the store"
+            try:
+                rows = store_read_tables(read.source)[0]
+            except ValueError as exc:
+                raise ValueError(f"{reads}: {exc}") from exc
+            if read.up_to_scan and "scan_id" not in rows.primary_key:
+                raise ValueError(
+                    f"{reads} up to the scan, but its rows are not per scan (key: "
+                    f"{', '.join(rows.primary_key)}) — declare the read with up_to_scan=False"
+                )
+            if stored_run or any(_writes_one_of(m, {rows.table}) for m in modules):
+                continue
+            writer = next(
+                name
+                for name in registry.list_modules()
+                if _writes_one_of(registry.get(name), {rows.table})
+            )
+            raise ValueError(
+                f"{reads}, whose rows module '{writer}' writes (table '{rows.table}') — "
+                f"list '{writer}' too, or remove '{module.name}'"
+            )

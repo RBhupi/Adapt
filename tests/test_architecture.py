@@ -301,8 +301,9 @@ def test_heavy_dependency_stays_in_its_component(dep: str) -> None:
 # is a typo that only fails at runtime. These tests make both fail at CI time.
 
 # The keys the runtime provides (legitimate module inputs that no module
-# produces) are named once, in ``adapt.contracts``: ``SCAN_SEEDS`` and
-# ``STORE_VIEWS``, plus one ``<name>_config`` per module.
+# produces) are ``adapt.contracts.SCAN_SEEDS`` and one ``<name>_config`` per
+# module; a module may also list the keys of its own declared store reads
+# (``store_reads``), which the runtime fills from the store.
 
 
 def _registered_default_modules():
@@ -333,24 +334,57 @@ def test_module_output_keys_are_unique() -> None:
 
 
 def test_module_inputs_are_produced_or_seeded() -> None:
-    """Every declared input is another module's output or a runtime-seeded key."""
-    from adapt.contracts import SCAN_SEEDS, STORE_VIEWS, config_key
+    """Every declared input is another module's output, a runtime-seeded key, or
+    one of that module's own store reads."""
+    from adapt.contracts import SCAN_SEEDS, config_key
 
     modules = _registered_default_modules()
     produced = {key for m in modules for key in m.outputs}
-    provided = SCAN_SEEDS | STORE_VIEWS | {config_key(m.name) for m in modules}
+    provided = SCAN_SEEDS | {config_key(m.name) for m in modules}
     orphans: list[str] = []
 
     for module in modules:
+        own_reads = {read.key for read in module.store_reads}
         for key in module.inputs:
-            if key not in produced and key not in provided:
+            if key not in produced and key not in provided and key not in own_reads:
                 orphans.append(f"  {module.name} needs '{key}'")
 
     assert not orphans, (
-        "\nInput key is neither produced by any module nor seeded by the runtime — "
-        "either a typo in the declaration or adapt.contracts.SCAN_SEEDS / STORE_VIEWS "
+        "\nInput key is neither produced by any module, seeded by the runtime, nor "
+        "read from the store by the module itself — either a typo in the declaration, "
+        "a missing StoreRead in the module's store_reads, or adapt.contracts.SCAN_SEEDS "
         "needs the new runtime-provided key:\n" + "\n".join(orphans)
     )
+
+
+def test_a_store_read_is_an_input_of_its_module_from_a_declared_source() -> None:
+    """A module lists what it reads from the store in ``inputs``, from a table or
+    a view a catalog module declares."""
+    from adapt.execution.pipeline_builder import store_read_tables
+
+    for module in _registered_default_modules():
+        for read in module.store_reads:
+            assert read.key in type(module).inputs, (
+                f"{module.name} reads '{read.key}' from the store without listing it in inputs"
+            )
+            store_read_tables(read.source)  # raises for a source no module declares
+
+
+def test_the_runtime_store_reader_names_no_table_or_view() -> None:
+    """The runtime reads what the modules declare; it names none of their tables
+    or views, so a module's rows change with zero edits in ``runtime/``."""
+    from adapt.contracts import ProductTableWrite, ProductView
+
+    declared = {
+        spec.table if isinstance(spec, ProductTableWrite) else spec.name
+        for module in _registered_default_modules()
+        for spec in module.persistence
+        if isinstance(spec, ProductTableWrite | ProductView)
+    }
+    text = (_SRC_ADAPT / "runtime" / "store_inputs.py").read_text(encoding="utf-8")
+    named = sorted(name for name in declared if re.search(rf"\b{re.escape(name)}\b", text))
+
+    assert not named, f"runtime/store_inputs.py names module tables or views: {named}"
 
 
 # Outputs knowingly shipped without a contract validator. This list may only
@@ -640,6 +674,8 @@ _REPLACED_NAMES = (
     "CONSUMERS",
     "current_selection",
     "grid_ds_3d",
+    "STORE_VIEWS",
+    "register_store_view",
 )
 _REPLACED_SECTIONS = re.compile(r"^\s*(core|extended|consumers|postprocessing):", re.MULTILINE)
 

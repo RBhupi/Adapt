@@ -4,16 +4,23 @@
 """target_selection — after every tracked scan, choose the cell the radar should watch.
 
 The rule (entry gates, score, hold gates, switching, duration cap) decides from
-the run's cells up to this scan: the runtime hands them over as
-``cells_so_far`` and ``tracks_so_far``, read back from the store once tracking
-has written this scan. The decision is the ``selection`` output, one row per
-scan and rule in the ``target_selection`` table; ``arm_radar_comm`` acts on it.
+the run's cells up to this scan and the run's tracks: the module's two declared
+store reads, ``cells_so_far`` and ``tracks_so_far``, made once the listed
+modules that write those rows have stored this scan. The decision is the
+``selection`` output, one row per scan and rule in the ``target_selection``
+table; ``arm_radar_comm`` acts on it.
 """
 
 from dataclasses import dataclass
 from importlib.resources import files
 
-from adapt.contracts import ProductTableWrite, SharedConfig, check_module_state, check_selection
+from adapt.contracts import (
+    ProductTableWrite,
+    SharedConfig,
+    StoreRead,
+    check_module_state,
+    check_selection,
+)
 from adapt.modules.base import BaseModule
 from adapt.modules.target_selection import (
     CurrentTarget,
@@ -47,7 +54,9 @@ class TargetSelectionModule(BaseModule):
 
     name = "target_selection"
     summary = "choose the cell the radar should watch"
-    # cell_identity: the scan's cells are tracked and stored before the rule reads them.
+    # cells_so_far, tracks_so_far: the declared store reads below. cell_identity:
+    # the module runs after tracking; over a stored run, a scan without stored
+    # cells skips it.
     inputs = [
         "target_selection_config",
         "cell_identity",
@@ -57,6 +66,10 @@ class TargetSelectionModule(BaseModule):
         "target_selection_state",
     ]
     outputs = ["selection", "target_selection_state"]
+    store_reads = (
+        StoreRead(key="cells_so_far", source="cells_by_scan", up_to_scan=True),
+        StoreRead(key="tracks_so_far", source="cell_tracks", up_to_scan=False),
+    )
     options_class = TSEConfig
     rows_keyed_by_options = True  # config_hash is in the table's key
     output_contracts = {

@@ -18,10 +18,6 @@ SCAN_SEEDS = frozenset(
     {"nexrad_file", "run_id", "scan_id", "scan_time", "wall_time", "prior_scans"}
 )
 
-# Inputs the runtime builds from the run's tables up to the scan, for a module
-# that reads the run's history; no module produces them.
-STORE_VIEWS = frozenset({"cells_so_far", "tracks_so_far"})
-
 
 def config_key(module: str) -> str:
     """The context key under which the runtime provides ``module``'s config."""

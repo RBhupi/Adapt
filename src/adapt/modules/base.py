@@ -17,7 +17,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
-from adapt.contracts import PersistenceSpec, SharedConfig
+from adapt.contracts import PersistenceSpec, SharedConfig, StoreRead
 
 
 class BaseModule(ABC):
@@ -100,6 +100,11 @@ class BaseModule(ABC):
     # OutputRouter writes declared outputs mechanically; modules never touch
     # storage. Empty tuple = this module persists nothing directly.
     persistence: ClassVar[tuple[PersistenceSpec, ...]] = ()
+    # The rows of the run this module reads back from the store (see
+    # adapt.contracts.StoreRead). The module lists each key in ``inputs``; the
+    # runtime fills it once the listed modules that write those rows have
+    # stored this scan. Empty tuple = this module reads no stored rows.
+    store_reads: ClassVar[tuple[StoreRead, ...]] = ()
 
     @classmethod
     def module_summary(cls) -> str:

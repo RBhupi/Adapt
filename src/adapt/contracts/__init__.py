@@ -57,10 +57,10 @@ from adapt.contracts.persistence import (
     ProductTableWrite,
     ProductView,
     ScanRecord,
+    StoreRead,
 )
 from adapt.contracts.pipeline import (
     SCAN_SEEDS,
-    STORE_VIEWS,
     ContractViolation,
     SharedConfig,
     config_key,
@@ -99,7 +99,6 @@ __all__ = [
     "ContractViolation",
     "require",
     "SCAN_SEEDS",
-    "STORE_VIEWS",
     "config_key",
     "SharedConfig",
     # canonical naming
@@ -121,6 +120,8 @@ __all__ = [
     "PersistenceSpec",
     "PersistenceMeta",
     "ScanRecord",
+    # rows of the run a module reads back — declared in its ``store_reads`` ClassVar
+    "StoreRead",
     # decision records — analysis-only, written to decisions.db
     "TrackingScan",
     "TrackingCell",

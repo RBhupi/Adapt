@@ -16,9 +16,13 @@ from pathlib import Path
 from adapt.cli._run import pipeline_path
 from adapt.configuration.pipeline_file import PipelineFile, load_pipeline_file
 from adapt.configuration.pipeline_run import configured_modules
-from adapt.contracts import SCAN_SEEDS, STORE_VIEWS
+from adapt.contracts import SCAN_SEEDS
 from adapt.execution.graph.builder import data_edges
-from adapt.execution.pipeline_builder import catalog_module_names, stored_output_keys
+from adapt.execution.pipeline_builder import (
+    catalog_module_names,
+    store_read_edges,
+    stored_output_keys,
+)
 
 __all__ = ["graph"]
 
@@ -59,13 +63,18 @@ def _lines(pipeline: PipelineFile, modules: list, stored_run: bool) -> list[str]
     if _STORE in sources:
         lines.append(f'  {_STORE}[("{_STORE}")]')
     lines += ["  subgraph modules", *(f"    {name}" for name in pipeline.modules), "  end"]
-    return lines + _edge_lines([*provided, *data_edges(modules)])
+    return (
+        lines
+        + _edge_lines([*provided, *data_edges(modules)], "-->")
+        + _edge_lines(store_read_edges(modules), "-.->")
+    )
 
 
 def _provided_edges(modules: list, stored_run: bool) -> list[Edge]:
     """Edges from what the runtime provides to the modules that read it."""
     produced = {key for module in modules for key in module.outputs}
-    from_store = STORE_VIEWS | (stored_output_keys() - produced if stored_run else frozenset())
+    read_back = {read.key for module in modules for read in module.store_reads}
+    from_store = read_back | (stored_output_keys() - produced if stored_run else frozenset())
     edges: list[Edge] = []
     for module in modules:
         for key in module.inputs:
@@ -78,14 +87,19 @@ def _provided_edges(modules: list, stored_run: bool) -> list[Edge]:
     return edges
 
 
-def _edge_lines(edges: list[Edge]) -> list[str]:
-    """One line per (source, target) pair, labelled with every key it carries."""
+def _edge_lines(edges: list[Edge], arrow: str) -> list[str]:
+    """One line per (source, target) pair, labelled with every key it carries.
+
+    ``-->`` carries data; ``-.->`` (dotted) says the target reads from the store
+    rows the source writes, labelled with the table or view read, so it runs
+    after it.
+    """
     keys: dict[tuple[str, str], list[str]] = {}
     for source, target, key in edges:
         keys.setdefault((source, target), []).append(key)
     return [
-        f"  {source} --> {target}"
+        f"  {source} {arrow} {target}"
         if carried == [source]  # the node is the key: a label would repeat it
-        else f"  {source} -->|{', '.join(carried)}| {target}"
+        else f"  {source} {arrow}|{', '.join(carried)}| {target}"
         for (source, target), carried in keys.items()
     ]

@@ -134,6 +134,26 @@ def test_over_a_stored_run_unlisted_modules_outputs_come_from_the_store(graph):
     assert "  target_selection -->|selection| arm_radar_comm" in lines
 
 
+def test_a_module_whose_rows_another_reads_from_the_store_is_joined_by_a_dotted_arrow(graph):
+    """Target selection reads the cells and tracks back from the store: it runs
+    after every listed module that writes them."""
+    lines = graph(modules=RADAR)[1].splitlines()
+
+    assert lines[-3:] == [
+        "  analysis -.->|cells_by_scan| target_selection",
+        "  tracking -.->|cells_by_scan, cell_tracks| target_selection",
+        "  cell_volume_stats -.->|cells_by_scan| target_selection",
+    ]
+
+
+def test_over_a_stored_run_with_the_reader_alone_no_dotted_arrow_is_drawn(graph):
+    run = {"source": "stored_run", "radar": "KTST", "mode": "historical"}
+
+    _, out, _ = graph(run=run, modules=["target_selection"])
+
+    assert "-.->" not in out
+
+
 def test_the_whole_graph_is_printed_in_a_fixed_order(graph):
     _, out, _ = graph(modules=["ingest", "detection", "cell_volume_stats"], params=NO_CARRY)
 

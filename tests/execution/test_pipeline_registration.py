@@ -52,16 +52,6 @@ def test_the_class_each_line_names_is_registered_under_its_name():
         assert f"{cls.__module__}:{cls.__name__}" == line
 
 
-def test_the_catalog_keeps_the_order_target_selection_relies_on():
-    """Modules that do not read from each other run in the catalog's order.
-    ``target_selection`` reads this scan's cells from the store, volume columns
-    included, so ``cell_volume_stats`` must have stored them before it runs:
-    an order no declared input gives."""
-    names = catalog_module_names()
-
-    assert names.index("cell_volume_stats") < names.index("target_selection")
-
-
 def test_loading_the_catalog_again_changes_nothing():
     _ensure_modules_registered()
     before = [(name, registry.get(name)) for name in registry.list_modules()]

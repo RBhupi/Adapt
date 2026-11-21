@@ -67,7 +67,7 @@ from adapt.persistence.errors import StoreError
 from adapt.persistence.output_router import StoreOutputRouter
 from adapt.runtime.diagnostics import silence_hdf5_errors
 from adapt.runtime.observability import disabled_observability
-from adapt.runtime.store_inputs import NOT_STORED, ScanAt, read_store_input
+from adapt.runtime.store_inputs import NOT_STORED, ScanAt, read_rows, read_store_input
 from adapt.utils.time import from_scan_iso
 
 if TYPE_CHECKING:
@@ -622,14 +622,18 @@ def _provide(node, context: dict, scan: ScanAt) -> str | None:
 
 def _read_from_store(node, context: dict, scan: ScanAt) -> str | None:
     """Add to ``context`` the inputs of ``node`` that no module of this pass
-    produced; say which one the store does not hold for the scan, if any."""
+    produced, then the rows it declares it reads from the store; say which
+    input the store does not hold for the scan, if any."""
+    reads = {read.key: read for read in node.module.store_reads}
     for key in node.inputs:
-        if key in context:
+        if key in reads or key in context:
             continue
         value = read_store_input(key, scan)
         if value is NOT_STORED:
             return f"input '{key}' is not stored for this scan"
         context[key] = value
+    for key, read in reads.items():
+        context[key] = read_rows(read, scan)
     return None
 
 

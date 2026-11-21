@@ -88,3 +88,28 @@ def test_a_key_a_module_both_reads_and_writes_is_its_own_state_not_an_edge():
         GraphBuilder(modules, provided=frozenset()).build()
     (_, node) = GraphBuilder(modules, provided=frozenset({"tracking_state"})).build()
     assert [dep.name for dep in node.dependencies] == ["detection"]
+
+
+def test_an_order_edge_makes_a_module_wait_for_one_it_takes_no_data_from():
+    reader = _module("reader", [], ["seen"])
+    writer = _module("writer", [], ["rows"])
+
+    nodes = GraphBuilder(
+        [reader, writer], provided=frozenset(), order_edges=[("writer", "reader", "rows")]
+    ).build()
+
+    (reader_node, writer_node) = nodes
+    assert reader_node.dependencies == [writer_node]
+    assert writer_node.dependents == [reader_node]
+
+
+def test_modules_that_wait_for_each_other_are_refused_when_the_graph_is_built():
+    reader = _module("reader", ["fed"], ["seen"])
+    feeder = _module("feeder", ["seen"], ["fed"])
+
+    with pytest.raises(ValueError) as excinfo:
+        GraphBuilder([reader, feeder], provided=frozenset()).build()
+
+    message = str(excinfo.value)
+    assert "Modules reader, feeder wait for each other" in message
+    assert "directly or through the store" in message

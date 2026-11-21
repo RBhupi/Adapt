@@ -9,6 +9,7 @@ graph's wiring. ``GraphBuilder`` turns those edges into connected nodes and
 refuses any input that has no source.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from adapt.execution.graph.node import Node
@@ -58,6 +59,9 @@ class GraphBuilder:
     provided : frozenset[str]
         Context keys the caller seeds before the graph runs. Every module
         input must be one of these or another module's output.
+    order_edges : Sequence[tuple[str, str, str]]
+        ``(first, then, why)``: ``then`` runs after ``first`` although it takes
+        no data from it — a dependency like a data edge.
 
     Example::
 
@@ -65,9 +69,15 @@ class GraphBuilder:
         nodes = builder.build()
     """
 
-    def __init__(self, modules: list["BaseModule"], provided: frozenset[str]) -> None:
+    def __init__(
+        self,
+        modules: list["BaseModule"],
+        provided: frozenset[str],
+        order_edges: Sequence[tuple[str, str, str]] = (),
+    ) -> None:
         self.modules = modules
         self.provided = provided
+        self.order_edges = order_edges
 
     def build(self) -> list[Node]:
         """Build and return the list of connected nodes.
@@ -82,10 +92,11 @@ class GraphBuilder:
         Raises
         ------
         ValueError
-            If two modules declare the same output key, or a module declares
-            an input that no module produces and the caller does not provide.
+            If two modules declare the same output key, a module declares an
+            input that no module produces and the caller does not provide, or
+            modules wait for each other (a cycle).
         """
-        edges = data_edges(self.modules)
+        edges = [*data_edges(self.modules), *self.order_edges]
 
         # What a module itself writes is no source for it: its carried state
         # comes from the caller.
@@ -108,4 +119,20 @@ class GraphBuilder:
             if parent not in node.dependencies:
                 node.dependencies.append(parent)
                 parent.dependents.append(node)
+        _refuse_cycles(list(nodes.values()))
         return list(nodes.values())
+
+
+def _refuse_cycles(nodes: list[Node]) -> None:
+    """Settle the nodes whose dependencies are settled until none is left; the
+    ones that never settle wait for each other (``ValueError``)."""
+    settled: set[str] = set()
+    pending = list(nodes)
+    while ready := [n for n in pending if all(dep.name in settled for dep in n.dependencies)]:
+        settled.update(node.name for node in ready)
+        pending = [node for node in pending if node not in ready]
+    if pending:
+        raise ValueError(
+            f"Modules {', '.join(node.name for node in pending)} wait for each other: a module "
+            "runs after the modules it reads from, directly or through the store"
+        )

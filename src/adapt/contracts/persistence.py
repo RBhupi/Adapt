@@ -85,6 +85,38 @@ class DecisionTableWrite:
     key: str
 
 
+@dataclass(frozen=True)
+class StoreRead:
+    """Rows of the run, read from products.db into a module input.
+
+    ``source`` is a product table or a view that a module declares
+    (``ProductTableWrite.table``, ``ProductView.name``). Just before the module
+    runs, the runtime puts the run's rows under ``key`` as a DataFrame with the
+    stored columns:
+
+    - ``up_to_scan=True``: the rows of every scan up to and including this one,
+      oldest scan first. The source must have a row per scan (``scan_id`` in
+      its key). A pass over a stored run sees no later scan.
+    - ``up_to_scan=False``: every row of the run as it stands. In a pass over a
+      stored run these are the rows the finished run left.
+
+    Within that, rows come in the order of the key of the source's rows.
+
+    The module lists ``key`` in ``inputs``. It runs after every listed module
+    that writes a table the source is made of: the table itself; for a view,
+    its row table, the tables its computed columns read, and every table with
+    the row table's key. A run that makes new scans must list a module that
+    writes the source's rows.
+
+    Before any scan has written the source in the collection, the run has no
+    rows: the frame is empty and has no columns.
+    """
+
+    key: str
+    source: str
+    up_to_scan: bool
+
+
 PersistenceSpec = NetcdfArtifact | ProductTableWrite | ProductView | DecisionTableWrite
 
 

@@ -31,6 +31,18 @@ def test_a_view_names_its_row_table_and_needs_nothing_else():
     assert view.reads == ()
 
 
+def test_a_store_read_names_its_key_its_source_and_how_far_it_reads():
+    from adapt.contracts import StoreRead
+
+    read = StoreRead(key="cells_so_far", source="cells_by_scan", up_to_scan=True)
+
+    assert (read.key, read.source, read.up_to_scan) == ("cells_so_far", "cells_by_scan", True)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        read.source = "other"  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        StoreRead(key="cells_so_far", source="cells_by_scan")  # type: ignore[call-arg]
+
+
 def test_all_spec_types_exported():
     from adapt import contracts
 
@@ -41,6 +53,7 @@ def test_all_spec_types_exported():
         "DecisionTableWrite",
         "PersistenceSpec",
         "PersistenceMeta",
+        "StoreRead",
     ):
         assert hasattr(contracts, name), f"adapt.contracts missing {name}"
 

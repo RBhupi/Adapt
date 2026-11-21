@@ -124,3 +124,60 @@ def test_decisions_under_different_rules_are_stored_side_by_side():
 
     assert spec.table == "target_selection"
     assert spec.primary_key == ("run_id", "scan_id", "config_hash")
+
+
+def test_it_declares_the_two_reads_it_takes_from_the_store():
+    reads = {read.key: read for read in TargetSelectionModule.store_reads}
+
+    assert set(reads) <= set(TargetSelectionModule.inputs)
+    assert (reads["cells_so_far"].source, reads["cells_so_far"].up_to_scan) == (
+        "cells_by_scan",
+        True,
+    )
+    assert (reads["tracks_so_far"].source, reads["tracks_so_far"].up_to_scan) == (
+        "cell_tracks",
+        False,
+    )
+
+
+def _selection(cells: pd.DataFrame, tracks: pd.DataFrame, scan: int) -> pd.DataFrame:
+    """The ``selection`` of one scan, with nothing held from earlier scans."""
+    return TargetSelectionModule().run(
+        {
+            "target_selection_config": _CONFIG,
+            "cell_identity": pd.DataFrame(),
+            "cells_so_far": cells,
+            "tracks_so_far": tracks,
+            "scan_time": from_scan_iso(_T[scan]),
+            "target_selection_state": None,
+        }
+    )["selection"]
+
+
+def test_the_decision_does_not_depend_on_the_order_of_the_rows_it_is_handed():
+    cells = _cells(
+        (0, "a", 50.0, 10.0),
+        (0, "b", 52.0, 12.0),
+        (0, "c", 40.0, 9.0),
+        (1, "a", 51.0, 14.0),
+        (1, "b", 52.0, 13.0),
+        (1, "c", 46.0, 20.0),
+    )
+    tracks = pd.DataFrame({"cell_uid": ["a", "b", "c"], "track_note": [1.0, 2.0, 3.0]})
+
+    ordered = _selection(cells, tracks, 1)
+    shuffled = _selection(
+        cells.sample(frac=1, random_state=7).reset_index(drop=True),
+        tracks.sample(frac=1, random_state=7).reset_index(drop=True),
+        1,
+    )
+
+    assert ordered.iloc[0]["cell_uid"] is not None
+    pd.testing.assert_frame_equal(ordered, shuffled)
+
+
+def test_a_run_without_any_stored_cell_selects_none():
+    row = _selection(pd.DataFrame(), pd.DataFrame(), 0).iloc[0]
+
+    assert row["cell_uid"] is None
+    assert json.loads(row["candidates_json"]) == []
