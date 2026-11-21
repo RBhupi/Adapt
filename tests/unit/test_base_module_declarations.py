@@ -3,7 +3,8 @@
 
 """Tests for BaseModule class-level declarations.
 
-required_history declares how many scans of history a module needs;
+required_history declares how many earlier scans a module waits for (prior_inputs,
+what it reads of them);
 options_class, options_preset and configure are how a module owns its options;
 rows_keyed_by_options says whether rows made with other options stand beside its own.
 """

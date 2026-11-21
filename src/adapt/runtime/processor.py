@@ -46,6 +46,7 @@ from adapt.execution.module_registry import registry as module_registry
 from adapt.execution.pipeline_builder import (
     _ensure_modules_registered,
     carried_keys,
+    prior_depth,
     prior_keys,
     product_views,
     resolve_enabled_modules,
@@ -172,13 +173,13 @@ class RadarProcessor(threading.Thread):
         self._skip_failed = skip_failed
         # The scan time of the checkpoint this run goes on from, if it has one.
         self._resumed_after: datetime | None = None
-        # Prior scans the most demanding module needs (none without modules).
+        # Prior scans the most demanding module waits for (none without modules).
         self._prior_needed = max((m.required_history for m in modules), default=1) - 1
         # How many scans the history keeps, hence how far ``prior_scans`` reaches
-        # back: at least one, since detection's seed carry reads the last one.
-        self._history_depth = max(1, self._prior_needed)
-        # One bound for every stage that pairs frames (see global_.max_scan_gap_minutes):
-        # beyond it no seed is carried, no projection runs and tracking resets.
+        # back: what the modules, as configured, declare (``prior_depth``).
+        self._history_depth = prior_depth(modules, self._module_configs)
+        # One bound for every module that reads earlier scans (see
+        # global_.max_scan_gap_minutes): beyond it ``prior_scans`` is empty.
         self._max_time_gap_minutes = config.global_.max_scan_gap_minutes
         self._last_skipped = False
         if not self._stored_run:
@@ -424,8 +425,8 @@ class RadarProcessor(threading.Thread):
             # ── The scan is complete: it joins the history and the modules'
             # state moves on — once both are checkpointed with its completion.
             entry = {key: result[key] for key in self._prior_keys if key in result}
-            history = [*self._scan_history, {**entry, "scan_id": scan_id, "scan_time": scan_time}]
-            history = history[-self._history_depth :]
+            kept = [*self._scan_history, {**entry, "scan_id": scan_id, "scan_time": scan_time}]
+            history = kept[max(0, len(kept) - self._history_depth) :]
             carried = {key: result[key] for key in self._carried_keys}
             self._complete_scan(scan_id, statuses, history, carried)
             self._scan_history, self._carried = history, carried
@@ -509,6 +510,14 @@ class RadarProcessor(threading.Thread):
             raise StoreError(
                 f"Run '{self.run_id}' cannot go on from its checkpoint: it holds no state "
                 f"for {', '.join(missing)} — the run's modules have changed since"
+            )
+        kept = len(saved["history"])
+        if kept > self._history_depth:
+            raise StoreError(
+                f"Run '{self.run_id}' cannot go on from its checkpoint: it holds {kept} earlier "
+                f"scan(s) and the run's modules read back at most {self._history_depth} — the "
+                "checkpoint was written by another Adapt version, or the run's modules have "
+                "changed since; start a new run"
             )
         self._scan_history = list(saved["history"])
         self._carried = {key: saved["carried"][key] for key in self._carried_keys}

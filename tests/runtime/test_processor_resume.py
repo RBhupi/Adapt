@@ -8,6 +8,7 @@ has seen (its carried state) and reads its own previous output back, and one
 that fails on demand.
 """
 
+import pickle
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
@@ -291,3 +292,55 @@ def test_a_checkpoint_naming_a_class_that_no_longer_exists_is_refused(processor,
     assert first.run_id in message
     assert "adapt.execution.nodes" in message
     assert "start a new run" in message
+
+
+def _write_history(store_env, run_id: str, scans: list[dict]) -> None:
+    """Make the run's checkpoint hold ``scans`` (their identity) as earlier scans."""
+    row = store_env.collection.catalog.run_checkpoint(run_id)
+    history = [{"scan_id": m["scan_id"], "scan_time": m["scan_time"]} for m in scans]
+    path = store_env.collection.objects_dir / row["object_name"]
+    path.write_bytes(pickle.dumps({"history": history, "carried": {}}))
+
+
+def test_a_checkpoint_holding_more_earlier_scans_than_the_modules_read_is_refused(
+    processor, scans, store_env
+):
+    first = processor(modules=[FLAKY])
+    assert first.process_file(scans[0]) is True
+    _write_history(store_env, first.run_id, scans[:2])
+
+    with pytest.raises(StoreError) as refusal:
+        processor(modules=[FLAKY])
+
+    message = str(refusal.value)
+    assert first.run_id in message
+    assert "earlier scan" in message
+    assert "start a new run" in message
+
+
+def test_a_checkpoint_of_an_adapt_that_kept_one_scan_for_every_pipeline_is_refused(
+    processor, scans, store_env
+):
+    """Its modules read no earlier scan; an older Adapt still kept the last one."""
+    first = processor(modules=[FLAKY])
+    assert first.process_file(scans[0]) is True
+    _write_history(store_env, first.run_id, scans[:1])
+
+    with pytest.raises(StoreError, match="start a new run"):
+        processor(modules=[FLAKY])
+
+
+def test_a_run_whose_modules_read_no_earlier_scan_resumes(processor, scans, store_env):
+    first = processor(modules=[UNSAVED])
+    for m in scans[:2]:
+        assert first.process_file(m) is True
+
+    resumed = processor(modules=[UNSAVED])
+    assert [resumed.process_file(m) for m in scans] == [True] * 5
+
+    conn = sqlite3.connect(str(store_env.collection.products_path))
+    try:
+        counts = conn.execute("SELECT count FROM probe_unsaved ORDER BY scan_time").fetchall()
+    finally:
+        conn.close()
+    assert counts == [(1,), (2,), (3,), (4,), (5,)]

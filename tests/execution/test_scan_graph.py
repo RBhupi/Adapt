@@ -12,6 +12,7 @@ from adapt.execution.graph.executor import GraphExecutor
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import (
     _ensure_modules_registered,
+    prior_depth,
     product_views,
     scan_graph,
 )
@@ -202,3 +203,60 @@ def test_an_earlier_scan_output_no_module_produces_is_refused():
     message = str(excinfo.value)
     assert "Module 'probe' reads output 'no_such_output' of earlier scans" in message
     assert "no registered module produces" in message
+
+
+class _ReadsNothingBack(BaseModule):
+    name = "plain"
+    inputs = ["scan_time"]
+    outputs = ["plain_out"]
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+class _WaitsForThree(BaseModule):
+    name = "waits"
+    inputs = ["prior_scans"]
+    outputs = ["waits_out"]
+    required_history = 4
+
+    def run(self, context: dict) -> dict:
+        return {}
+
+
+def test_no_earlier_scan_is_kept_when_no_module_reads_one():
+    assert prior_depth([_ReadsNothingBack()], {}) == 0
+    assert prior_depth([], {}) == 0
+
+
+def test_a_module_that_reads_earlier_outputs_without_waiting_is_kept_the_last_scan():
+    assert prior_depth([_ReadsBackWhenTold()], {"probe_config": {"reads_back": True}}) == 1
+    assert prior_depth([_ReadsBackWhenTold()], {"probe_config": {"reads_back": False}}) == 0
+
+
+def test_a_module_is_kept_as_many_scans_as_it_waits_for():
+    assert prior_depth([_WaitsForThree()], {}) == 3
+
+
+def test_the_depth_is_the_largest_need_of_the_listed_modules():
+    modules = [_ReadsBackWhenTold(), _WaitsForThree()]
+
+    assert prior_depth(modules, {"probe_config": {"reads_back": True}}) == 3
+
+
+@pytest.mark.parametrize("seed_carry_frames", [1, 0])
+def test_the_plain_nexrad_pipeline_keeps_one_earlier_scan_with_the_seed_carry_on_or_off(
+    seed_carry_frames, make_detection_config, make_projection_config
+):
+    configs = {
+        "detection_config": make_detection_config(seed_carry_frames=seed_carry_frames),
+        "projection_config": make_projection_config(),
+    }
+
+    assert prior_depth(_real(*LIVE), configs) == 1
+
+
+def test_without_projection_and_the_seed_carry_no_earlier_scan_is_kept(make_detection_config):
+    configs = {"detection_config": make_detection_config(seed_carry_frames=0)}
+
+    assert prior_depth(_real("ingest", "detection", "cell_volume_stats"), configs) == 0

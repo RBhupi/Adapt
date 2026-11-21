@@ -19,6 +19,7 @@ from adapt.modules.base import BaseModule
 from adapt.persistence.errors import StoreError
 from adapt.runtime.processor import RadarProcessor
 from tests.helpers.fake_graph import NEEDS_PRIOR_SCAN
+from tests.helpers.pipeline_files import MODULES
 from tests.helpers.queue_msg import msg as _msg
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
@@ -148,12 +149,11 @@ def test_history_reaches_back_as_far_as_the_most_demanding_module_needs(
     assert [p["scan_time"] for p in fifth["context"]["prior_scans"]] == times[1:4]
 
 
-def test_single_scan_modules_still_get_the_previous_scan(
+def test_a_pipeline_whose_modules_read_no_earlier_scan_is_given_none(
     tmp_path, monkeypatch, make_processor, pipeline_config, store_env, caplog
 ):
-    """When no enabled module needs history, the previous scan is still provided
-    (a single-scan module may read it, as detection's seed carry does), and
-    nothing waits for history or is skipped for a gap."""
+    """No enabled module waits for or reads earlier scans: none is kept, scan
+    after scan, and nothing waits for history or is skipped for a gap."""
     config = pipeline_config.model_copy(update={"modules": ["ingest"]})
     proc = make_processor(config=config)
     core = _Recorder({"grid_ds": _fake_ds(), "grid_ds_2d": _fake_ds()})
@@ -165,11 +165,26 @@ def test_single_scan_modules_still_get_the_previous_scan(
         for name, scan_time in (("f1", T1), ("f2", T2), ("f3", t3), ("f4", too_late)):
             proc.process_file(_msg(store_env, tmp_path, name, scan_time=scan_time))
 
-    assert [p["scan_time"] for p in core.calls[1]["context"]["prior_scans"]] == [T1]
-    assert [p["scan_time"] for p in core.calls[2]["context"]["prior_scans"]] == [T2]
-    assert core.calls[3]["context"]["prior_scans"] == []
+    assert [call["context"]["prior_scans"] for call in core.calls] == [[]] * 4
+    assert [call["history"] for call in core.calls] == [0] * 4
     messages = [r.getMessage() for r in caplog.records]
     assert not any(m.startswith(("Waiting for history", "Time gap")) for m in messages)
+
+
+def test_a_pass_listing_only_target_selection_is_given_no_earlier_scan(
+    tmp_path, monkeypatch, make_processor, make_config, store_env
+):
+    config = make_config(modules=[*MODULES, "target_selection"]).model_copy(
+        update={"source": "stored_run", "modules": ["target_selection"]}
+    )
+    proc = make_processor(config=config)
+    core = _Recorder({})
+    monkeypatch.setattr(proc._executor, "run", core)
+
+    for name, scan_time in (("f1", T1), ("f2", T2)):
+        assert proc.process_file(_msg(store_env, tmp_path, name, scan_time=scan_time)) is True
+
+    assert [call["context"]["prior_scans"] for call in core.calls] == [[], []]
 
 
 def test_a_processor_with_no_modules_starts(make_processor, pipeline_config):

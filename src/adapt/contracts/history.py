@@ -4,10 +4,13 @@
 """Prior-scans contract.
 
 ``prior_scans`` is the one history key the processor provides to per-scan
-modules: the previous scans, oldest first, each a dict of that scan's time and
-identity and the outputs modules read back with their options
-(``prior_inputs_for``). It never holds the current scan, and is empty on the
-first scan or when the time gap to the last scan is too large.
+modules: the previous scans, oldest first, as many as the listed modules need
+(``required_history``, ``prior_inputs_for``), each a dict of that scan's time
+and identity and the outputs modules read back with their options. It can hold
+more scans than one module needs (another module's need), so a module reads
+from its end. It never holds the current scan, is empty on the first scan or
+when the time gap to the last scan is too large, and is always empty when no
+listed module reads earlier scans.
 """
 
 from adapt.contracts.pipeline import require

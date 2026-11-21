@@ -38,7 +38,8 @@ class BaseModule(ABC):
     back next time (``None`` before the module has run) and saves it with the
     run's checkpoint. What it needs of earlier scans' ordinary outputs it names
     in ``prior_inputs`` (``prior_inputs_for`` when an option decides) and reads
-    from ``prior_scans``.
+    from ``prior_scans``. The runtime keeps as many earlier scans as the listed
+    modules need, and none when no module declares a need.
 
     A module owns its options: ``options_class`` is their model, the pipeline
     file sets them under ``params: {<name>: ...}``, and ``configure`` turns the
@@ -76,10 +77,15 @@ class BaseModule(ABC):
     outputs: ClassVar[list[str]] = []
     input_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
     output_contracts: ClassVar[dict[str, Callable[[Any], None]]] = {}
+    # The module cannot run until ``required_history - 1`` earlier scans are
+    # usable: it is skipped until then, with every module that reads from it,
+    # and the runtime keeps at least that many. Scans it reads only when they
+    # exist are not counted here (see ``prior_inputs``).
     required_history: ClassVar[int] = 1
     # The outputs of earlier scans this module reads from ``prior_scans``: the
     # runtime keeps exactly these (of every module, as ``prior_inputs_for`` its
     # options) for the scans that follow. A listed module must produce each one.
+    # A module that names any is kept at least the last scan, when there is one.
     prior_inputs: ClassVar[tuple[str, ...]] = ()
     # The module's options: a frozen model that refuses unknown keys and gives
     # each option its default, bounds and description. None = no options.

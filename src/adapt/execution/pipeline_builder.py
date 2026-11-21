@@ -177,6 +177,23 @@ def prior_keys(modules: list, configs: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(key for module in modules for key in _prior_inputs(module, configs))
 
 
+def prior_depth(modules: list, configs: Mapping[str, Any]) -> int:
+    """How many earlier scans the runtime keeps for ``prior_scans``: the most any
+    listed module needs (``configs`` as for ``scan_graph``).
+
+    A module needs the ``required_history - 1`` scans it waits for. One that
+    waits for none but reads outputs of earlier scans (``prior_inputs_for``)
+    needs the last one. None when no module does either.
+    """
+    return max(
+        (
+            max(module.required_history - 1, 1 if _prior_inputs(module, configs) else 0)
+            for module in modules
+        ),
+        default=0,
+    )
+
+
 def scan_graph(
     modules: list, configs: Mapping[str, Any], *, stored_run: bool = False
 ) -> list[Node]:
