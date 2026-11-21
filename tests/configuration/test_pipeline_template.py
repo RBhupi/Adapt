@@ -16,7 +16,11 @@ import pytest
 
 from adapt.configuration.pipeline_file import PipelineFile, RunSection, load_pipeline_file
 from adapt.configuration.pipeline_run import run_config
-from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, write_pipeline_template
+from adapt.configuration.pipeline_template import (
+    pipeline_template,
+    pipeline_template_names,
+    write_pipeline_template,
+)
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.module_registry import registry
@@ -61,8 +65,8 @@ def _summaries() -> dict[str, str]:
     return {name: registry.get(name).module_summary() for name in registry.list_modules()}
 
 
-def test_nexrad_is_the_one_registered_template():
-    assert list(PIPELINE_TEMPLATES) == ["nexrad"]
+def test_nexrad_is_the_one_packaged_template():
+    assert pipeline_template_names() == ("nexrad",)
 
 
 def test_nexrad_template_writes_the_short_commented_file(tmp_path):
@@ -91,8 +95,15 @@ def test_written_file_loads_with_the_templates_modules_on_and_the_rest_offered(t
 
     pipeline = load_pipeline_file(path)
 
-    assert pipeline.run == PIPELINE_TEMPLATES["nexrad"].run
-    assert pipeline.modules == PIPELINE_TEMPLATES["nexrad"].modules
+    assert pipeline.run == RunSection(source="aws_nexrad", radar="KLOT", mode="realtime")
+    assert pipeline.modules == (
+        "ingest",
+        "detection",
+        "projection",
+        "analysis",
+        "tracking",
+        "cell_volume_stats",
+    )
     assert pipeline.params == {}
     offered = [line for line in path.read_text(encoding="utf-8").splitlines() if "# - " in line]
     assert [line.split()[2] for line in offered] == [
@@ -234,3 +245,83 @@ def test_invalid_run_values_are_refused_and_nothing_is_written(tmp_path, values,
         write_pipeline_template("nexrad", path, **values)
 
     assert not path.exists()
+
+
+# ── A template is a pipeline file in the packaged templates folder ───────────
+
+
+def _templates_folder(tmp_path, monkeypatch, files: dict[str, str]):
+    """Point the templates folder at a new temporary one holding ``files``."""
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    for name, text in files.items():
+        (folder / name).write_text(textwrap.dedent(text), encoding="utf-8")
+    monkeypatch.setattr("adapt.configuration.pipeline_template._TEMPLATES", folder)
+    return folder
+
+
+_OTHER = """\
+    run:
+      source: aws_nexrad
+      radar: KXYZ
+      mode: realtime
+    modules:
+      - ingest
+      - detection
+    params:
+    """
+
+
+def test_a_file_in_the_templates_folder_is_a_template(tmp_path, monkeypatch):
+    _templates_folder(tmp_path, monkeypatch, {"other.yaml": _OTHER})
+    path = tmp_path / "other.yaml"
+
+    assert pipeline_template_names() == ("other",)
+    write_pipeline_template("other", path)
+
+    text = path.read_text(encoding="utf-8")
+    assert "\n  radar: KXYZ " in text
+    assert "\n  - ingest " in text
+    assert "\n  - detection " in text
+    assert "\n  # - projection " in text
+    pipeline = load_pipeline_file(path)
+    assert pipeline.run.radar == "KXYZ"
+    assert pipeline.modules == ("ingest", "detection")
+
+
+def test_templates_are_listed_in_name_order(tmp_path, monkeypatch):
+    _templates_folder(tmp_path, monkeypatch, {"b.yaml": _OTHER, "a.yaml": _OTHER})
+
+    assert pipeline_template_names() == ("a", "b")
+
+
+def test_a_template_that_lists_an_unknown_module_is_refused_naming_its_file(tmp_path, monkeypatch):
+    _templates_folder(
+        tmp_path, monkeypatch, {"other.yaml": _OTHER.replace("- detection", "- no_such_module")}
+    )
+
+    with pytest.raises(ConfigError, match="no_such_module") as refused:
+        pipeline_template("other")
+
+    assert "other.yaml" in str(refused.value)
+
+
+def test_a_template_that_sets_params_is_refused(tmp_path, monkeypatch):
+    text = _OTHER.replace(
+        "    params:\n", "    params:\n      tracking:\n        max_speed_ms: 35\n"
+    )
+    _templates_folder(tmp_path, monkeypatch, {"other.yaml": text})
+
+    with pytest.raises(ConfigError, match="params") as refused:
+        pipeline_template("other")
+
+    assert "other.yaml" in str(refused.value)
+
+
+def test_a_templates_folder_without_a_template_is_refused(tmp_path, monkeypatch):
+    folder = _templates_folder(tmp_path, monkeypatch, {})
+
+    with pytest.raises(RuntimeError, match="No pipeline template") as refused:
+        pipeline_template_names()
+
+    assert str(folder) in str(refused.value)

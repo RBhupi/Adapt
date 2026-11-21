@@ -917,3 +917,26 @@ def test_a_module_without_a_preset_has_a_default_for_every_option() -> None:
         "options without a default: give each one, or package a preset "
         f"(BaseModule.options_preset): {offenders}"
     )
+
+
+# ── configuration code names no module ───────────────────────────────────────
+# Which modules exist is the catalog's (defaults.yaml); which of them a new
+# pipeline lists is a template's (configuration/templates/*.yaml). Both are
+# data. A module's name written as a string of its own in configuration's
+# Python means the code knows that module again.
+
+
+def test_configuration_code_names_no_module() -> None:
+    from adapt.execution.pipeline_builder import catalog_module_names
+
+    names = set(catalog_module_names())
+    offenders = [
+        f"{_rel(py_file, _SRC_ADAPT)}:{node.lineno}: {node.value!r}"
+        for py_file in sorted((_SRC_ADAPT / "configuration").rglob("*.py"))
+        for node in ast.walk(ast.parse(py_file.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names
+    ]
+    assert not offenders, (
+        "configuration code names a module; a template's module list belongs in "
+        "configuration/templates/<name>.yaml:\n" + "\n".join(offenders)
+    )

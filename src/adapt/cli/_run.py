@@ -37,7 +37,7 @@ from typing import Any
 from adapt.cli._pid import check_single_instance, remove_pid, write_pid
 from adapt.configuration.pipeline_file import load_pipeline_file
 from adapt.configuration.pipeline_run import run_config
-from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES
+from adapt.configuration.pipeline_template import pipeline_template_names
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.persistence.store import Store
 from adapt.runtime.orchestrator import PipelineOrchestrator
@@ -115,14 +115,15 @@ def pipeline_path(root: Path, name: str, command: str) -> Path:
     path = root / f"{name}.yaml"
     if path.is_file():
         return path
-    if name in PIPELINE_TEMPLATES:
+    templates = pipeline_template_names()
+    if name in templates:
         hint = f"Write it from its template with:  adapt config --{name}"
     else:
-        template = next(iter(PIPELINE_TEMPLATES))
+        template = templates[0]
         hint = (
             f"Start it from a template's file, e.g.:  cp {template}.yaml {name}.yaml  "
             f"(adapt config --{template} writes {template}.yaml; templates: "
-            f"{', '.join(PIPELINE_TEMPLATES)})"
+            f"{', '.join(templates)})"
         )
     raise ConfigError(f"No pipeline file {path}. {hint}")
 

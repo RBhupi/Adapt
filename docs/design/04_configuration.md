@@ -141,7 +141,7 @@ The options are recorded with the run as JSON and the run is configured from tha
 
 ### Templates and the module catalog (`pipeline_template.py`, `defaults.yaml`)
 
-`pipeline_template.py` writes the short, commented pipeline file a new pipeline starts from (`adapt init`, `adapt config --NAME`). `defaults.yaml` is the module catalog: the node modules a pipeline file may list. It holds no option values.
+A template is the packaged file `configuration/templates/<name>.yaml`, read and checked as a pipeline file: its `run:` gives the run values, its `modules:` the modules that are on, and it sets no `params`. `pipeline_template.py` writes it out as the short, commented pipeline file a new pipeline starts from (`adapt init`, `adapt config --NAME`), with the catalog's other modules offered commented out. `defaults.yaml` is the module catalog: the node modules a pipeline file may list. It holds no option values.
 
 ---
 

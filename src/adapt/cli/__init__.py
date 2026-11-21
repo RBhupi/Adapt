@@ -44,14 +44,17 @@ def _init_cmd(args: argparse.Namespace) -> None:
     The store comes first: on a folder that already is one, ``init_store`` fails
     before any file is touched.
     """
-    from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, write_pipeline_template
+    from adapt.configuration.pipeline_template import (
+        pipeline_template_names,
+        write_pipeline_template,
+    )
     from adapt.persistence.store import init_store
     from adapt.runtime.run_reporter import format_banner
 
     root = init_store(args.directory)
     print(format_banner(__version__) + "\n")
     print(f"Initialized empty Adapt store at {root}")
-    for name in PIPELINE_TEMPLATES:
+    for name in pipeline_template_names():
         path = root / f"{name}.yaml"
         if path.exists():
             print(f"Kept the existing pipeline file {path}")
@@ -100,9 +103,9 @@ def _config_cmd(args: argparse.Namespace) -> None:
 
 
 def _templates() -> tuple[str, ...]:
-    from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES
+    from adapt.configuration.pipeline_template import pipeline_template_names
 
-    return tuple(PIPELINE_TEMPLATES)
+    return pipeline_template_names()
 
 
 def _write_template(name: str, *, with_params: bool) -> None:

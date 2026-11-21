@@ -10,9 +10,10 @@ defaults under ``params:``. ``adapt config`` needs a template or ``--params``.
 """
 
 import pytest
+from tests.helpers.pipeline_files import MODULES
 
 from adapt.configuration.pipeline_file import load_pipeline_file
-from adapt.configuration.pipeline_template import PIPELINE_TEMPLATES, pipeline_template
+from adapt.configuration.pipeline_template import pipeline_template
 from adapt.execution.pipeline_builder import catalog_module_names
 
 pytestmark = pytest.mark.unit
@@ -40,7 +41,7 @@ def test_with_params_every_catalog_module_gets_its_options_under_its_heading(cwd
     assert text.startswith(pipeline_template("nexrad"))
     pipeline = load_pipeline_file(cwd / "nexrad.yaml")
     assert list(pipeline.params) == catalog_module_names()
-    assert pipeline.modules == PIPELINE_TEMPLATES["nexrad"].modules  # the others stay off
+    assert pipeline.modules == tuple(MODULES)  # the others stay off
     for name in catalog_module_names():
         assert f"\n  # {name}: " in text
     assert "\n\n\n  # detection: " in text  # two empty lines between modules
@@ -90,3 +91,19 @@ def test_outside_a_store_the_next_step_is_adapt_init(cwd, adapt, capsys):
     out = capsys.readouterr().out
     assert "adapt init" in out
     assert "this folder (an Adapt store)" not in out
+
+
+def test_a_template_file_gets_its_own_flag(cwd, adapt, tmp_path_factory, monkeypatch):
+    folder = tmp_path_factory.mktemp("templates")  # not the folder the command runs in
+    (folder / "other.yaml").write_text(
+        "run:\n  source: aws_nexrad\n  radar: KXYZ\n  mode: realtime\n"
+        "modules:\n  - ingest\n  - detection\nparams:\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("adapt.configuration.pipeline_template._TEMPLATES", folder)
+
+    assert adapt("config", "--other") == 0
+
+    pipeline = load_pipeline_file(cwd / "other.yaml")
+    assert pipeline.run.radar == "KXYZ"
+    assert pipeline.modules == ("ingest", "detection")

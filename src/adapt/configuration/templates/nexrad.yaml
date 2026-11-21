@@ -1,0 +1,21 @@
+# Pipeline template "nexrad": what  adapt config --nexrad  and  adapt init  start a
+# new pipeline file from. The file's name is the template's name.
+# It is a pipeline file and is checked as one: run: gives the written file's run
+# values, modules: the modules that are on in it. Every other module of the
+# catalog (defaults.yaml) is offered commented out, and params: is written empty,
+# so a template sets no params.
+
+run:
+  source: aws_nexrad
+  radar: KLOT
+  mode: realtime
+
+modules:
+  - ingest
+  - detection
+  - projection
+  - analysis
+  - tracking
+  - cell_volume_stats
+
+params:
