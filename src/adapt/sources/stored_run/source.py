@@ -5,6 +5,7 @@
 
 import logging
 import threading
+from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,9 @@ class StoredRunSource(threading.Thread):
     The run's modules then run over each scan again, reading from the store
     what the modules not listed this time stored before.
     """
+
+    source_name: ClassVar[str] = "stored_run"
+    summary: ClassVar[str] = "The scans of a run the store already has (--run-id)"
 
     def __init__(self, config, result_queue=None, acquire=None) -> None:
         super().__init__(daemon=True, name="StoredRunSource")

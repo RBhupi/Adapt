@@ -1,8 +1,10 @@
-# The module catalog: every per-scan module a pipeline file may list.
-# Each line names a module's class as package.file:Class (a BaseModule
+# The catalog: every class a pipeline can plug in, one package.file:Class per line.
+# modules: every per-scan module a pipeline file may list (a BaseModule
 # subclass); loading the catalog registers it.
 # A module runs after the modules it reads from; modules that do not read from
 # each other run in the order of this list.
+# sources: every source run.source may name (a class with the methods of
+# contracts.source.ScanSource), registered under its source_name.
 
 pipeline:
   modules:
@@ -15,3 +17,7 @@ pipeline:
     - adapt.modules.target_selection.node:TargetSelectionModule
     - adapt.modules.arm_radar_comm.node:ArmRadarCommModule
     - adapt.modules.xlma_stat.node:XlmaStatModule
+  sources:
+    - adapt.sources.aws_nexrad.source:AwsNexradDownloader
+    - adapt.sources.local_directory.source:LocalDirectorySource
+    - adapt.sources.stored_run.source:StoredRunSource

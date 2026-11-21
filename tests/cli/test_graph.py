@@ -182,6 +182,15 @@ def test_an_unknown_module_fails(graph):
     assert "unknown module 'segmentation'" in err
 
 
+def test_a_source_not_in_the_catalog_fails(graph):
+    code, out, err = graph(run={"source": "aws_nexard", "radar": "KTST", "mode": "realtime"})
+
+    assert code == 2
+    assert out == ""
+    assert "run.source 'aws_nexard'" in err
+    assert "aws_nexrad" in err
+
+
 def test_a_module_listed_without_its_producer_fails_by_name(graph):
     code, _, err = graph(modules=["detection"], params=NO_CARRY)
 

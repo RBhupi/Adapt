@@ -3,8 +3,8 @@
 
 """Module discovery (the module catalog) and selection for pipeline assembly.
 
-The catalog is one file, ``configuration/defaults.yaml``, with one line per
-module naming its class as ``package.file:Class``. Loading the catalog
+The catalog (``execution/catalog.py``) names each module's class under
+``pipeline.modules``, one ``package.file:Class`` per line. Loading it
 registers each class.
 
 ``resolve_enabled_modules`` filters the registered set down to a run's list,
@@ -13,13 +13,9 @@ Everything fails loudly: an unreadable or empty module list, or a
 module that cannot be imported, aborts startup — there is no fallback pipeline.
 """
 
-import importlib
 import logging
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
-
-import yaml
 
 from adapt.contracts import (
     SCAN_SEEDS,
@@ -28,6 +24,7 @@ from adapt.contracts import (
     ProductView,
     config_key,
 )
+from adapt.execution.catalog import CATALOG, catalog_lines, named_class
 from adapt.execution.graph.builder import GraphBuilder
 from adapt.execution.graph.node import Node
 from adapt.execution.module_registry import registry
@@ -35,44 +32,17 @@ from adapt.modules.base import BaseModule
 
 logger = logging.getLogger(__name__)
 
-_DEFAULTS_YAML = Path(__file__).parent.parent / "configuration" / "defaults.yaml"
-
-
-def _catalog_lines() -> list[object]:
-    """The lines of the catalog, ``pipeline.modules`` of ``configuration/defaults.yaml``."""
-    try:
-        with open(_DEFAULTS_YAML, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-    except OSError as e:
-        raise RuntimeError(f"Cannot read pipeline module list '{_DEFAULTS_YAML}': {e}") from e
-
-    lines = (cfg or {}).get("pipeline", {}).get("modules", [])
-    if not lines:
-        raise RuntimeError(
-            f"No pipeline modules declared under 'pipeline.modules' in '{_DEFAULTS_YAML}'"
-        )
-    return list(lines)
-
 
 def _module_class(line: object) -> type[BaseModule]:
     """The module class a catalog line names as ``package.file:Class``."""
-    path, _, class_name = line.partition(":") if isinstance(line, str) else ("", "", "")
-    if not path or not class_name:
+    named = named_class(line)
+    if not issubclass(named, BaseModule) or named is BaseModule:
         raise RuntimeError(
-            f"Catalog line {line!r} in '{_DEFAULTS_YAML}' is not of the form package.file:Class"
-        )
-    try:
-        named = getattr(importlib.import_module(path), class_name, None)
-    except Exception as e:
-        raise ImportError(f"Failed to import pipeline module '{line}': {e}") from e
-    if not isinstance(named, type) or not issubclass(named, BaseModule) or named is BaseModule:
-        raise RuntimeError(
-            f"Catalog line {line!r} in '{_DEFAULTS_YAML}' names no module class "
-            "(a BaseModule subclass)"
+            f"Catalog line {line!r} in '{CATALOG}' names no module class (a BaseModule subclass)"
         )
     if not named.name:
         raise RuntimeError(
-            f"Catalog line {line!r} in '{_DEFAULTS_YAML}': class {named.__name__} has no name "
+            f"Catalog line {line!r} in '{CATALOG}': class {named.__name__} has no name "
             "(the name a pipeline file lists it by)"
         )
     return named
@@ -95,7 +65,7 @@ def catalog_module_names() -> list[str]:
         If a line's file cannot be imported.
     """
     names: list[str] = []
-    for line in _catalog_lines():
+    for line in catalog_lines("modules"):
         module_class = _module_class(line)
         name = module_class.name
         if name not in registry or registry.get(name) is not module_class:

@@ -18,6 +18,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 from adapt.downloaders import NexradS3
 
@@ -68,6 +69,9 @@ class AwsNexradDownloader(threading.Thread):
         downloader.stop()
         downloader.join(timeout=10)
     """
+
+    source_name: ClassVar[str] = "aws_nexrad"
+    summary: ClassVar[str] = "NEXRAD Level-II scans downloaded from the AWS archive"
 
     def __init__(
         self,

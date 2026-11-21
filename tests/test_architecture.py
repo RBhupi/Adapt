@@ -889,6 +889,36 @@ def test_a_module_is_one_package_named_by_one_catalog_line() -> None:
     assert sorted(homes) == [f"adapt.modules.{f.parent.name}.node" for f in _node_files()]
 
 
+def test_a_source_is_one_package_named_by_one_catalog_line() -> None:
+    """A source's class lives in ``sources/<name>/source.py``, ``<name>`` being its
+    ``source_name`` (the name under ``run.source``), and one line of the catalog
+    names it."""
+    from adapt.execution.source_registry import catalog_source_names, source_registry
+
+    names = catalog_source_names()
+    homes = [source_registry.get(name).__module__ for name in names]
+
+    assert homes == [f"adapt.sources.{name}.source" for name in names]
+    assert sorted(homes) == [
+        f"adapt.sources.{f.parent.name}.source"
+        for f in sorted((_SRC_ADAPT / "sources").glob("*/source.py"))
+    ]
+
+
+def test_only_the_catalog_names_a_source_class() -> None:
+    """Outside ``sources/`` no file imports a source: the catalog line is the one
+    place a source class is named, and ``execution`` loads it by that text."""
+    offenders = [
+        f"{_rel(py_file, _SRC_ADAPT)}: imports {name!r}"
+        for py_file in sorted(_SRC_ADAPT.rglob("*.py"))
+        if py_file.relative_to(_SRC_ADAPT).parts[0] != "sources"
+        for name in _imported_names(py_file)
+        if name == "adapt.sources" or name.startswith("adapt.sources.")
+    ]
+
+    assert not offenders, "a source is named by its catalog line only:\n" + "\n".join(offenders)
+
+
 def test_the_execution_layer_holds_no_module() -> None:
     """``execution/`` wires modules into a graph; it defines none."""
     defined = [

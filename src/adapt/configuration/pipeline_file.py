@@ -46,6 +46,7 @@ from adapt.configuration.schemas.internal import (
 )
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
+from adapt.execution.source_registry import catalog_source_names
 
 __all__ = [
     "RUN_OWNED_DOWNLOADER_KEYS",
@@ -174,6 +175,16 @@ class PipelineFile(AdaptBaseModel):
         if isinstance(value, dict):
             return {key: {} if options is None else options for key, options in value.items()}
         return value
+
+    @field_validator("run")
+    @classmethod
+    def _source_is_in_the_catalog(cls, run: RunSection) -> RunSection:
+        known = catalog_source_names()  # registers every catalog source
+        if run.source not in known:
+            raise ValueError(
+                f"run.source '{run.source}' is not in the catalog. Sources: {', '.join(known)}"
+            )
+        return run
 
     @field_validator("modules")
     @classmethod

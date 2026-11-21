@@ -7,6 +7,7 @@ import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from adapt.downloaders.nexrad import parse_scan_time
 from adapt.utils.time import to_scan_iso
@@ -89,6 +90,9 @@ class LocalDirectorySource(threading.Thread):
     and only need processing. Building it checks the folder (``check``), so a
     folder the run cannot process is refused before the run is recorded.
     """
+
+    source_name: ClassVar[str] = "local_directory"
+    summary: ClassVar[str] = "The Level-II files of run.source_dir, in time order"
 
     def __init__(self, config, result_queue=None, acquire=None) -> None:
         super().__init__(daemon=True, name="LocalDirectorySource")

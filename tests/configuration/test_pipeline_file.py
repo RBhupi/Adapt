@@ -423,6 +423,17 @@ class TestRunSection:
         assert "run.source_dir applies to source: local_directory only" in message
         assert "fetches" not in message
 
+    def test_a_source_not_in_the_catalog_is_refused_listing_the_sources(self, tmp_path):
+        from adapt.execution.source_registry import catalog_source_names
+
+        with pytest.raises(ConfigError) as exc:
+            _load(tmp_path, _file(run=self._run(source="aws_nexard")))
+
+        message = str(exc.value)
+        assert "run.source 'aws_nexard'" in message
+        for name in catalog_source_names():
+            assert name in message
+
     def test_unknown_run_key_is_rejected(self, tmp_path):
         with pytest.raises(ConfigError, match="radr"):
             _load(tmp_path, _file(run=self._run(radr="KLOT")))

@@ -13,20 +13,17 @@ startup.
 import pytest
 import yaml
 
-from adapt.execution import pipeline_builder
+from adapt.execution import catalog, pipeline_builder
+from adapt.execution.catalog import CATALOG
 from adapt.execution.module_registry import registry
-from adapt.execution.pipeline_builder import (
-    _DEFAULTS_YAML,
-    _ensure_modules_registered,
-    catalog_module_names,
-)
+from adapt.execution.pipeline_builder import _ensure_modules_registered, catalog_module_names
 from adapt.modules.base import BaseModule
 
 pytestmark = pytest.mark.unit
 
 
 def _catalog_lines() -> list[str]:
-    with open(_DEFAULTS_YAML, encoding="utf-8") as f:
+    with open(CATALOG, encoding="utf-8") as f:
         return yaml.safe_load(f)["pipeline"]["modules"]
 
 
@@ -34,7 +31,7 @@ def _catalog(monkeypatch, tmp_path, *lines: str) -> None:
     """Make ``lines`` the catalog for this test."""
     path = tmp_path / "defaults.yaml"
     path.write_text(yaml.safe_dump({"pipeline": {"modules": list(lines)}}), encoding="utf-8")
-    monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", path)
+    monkeypatch.setattr(catalog, "CATALOG", path)
 
 
 def test_every_line_names_its_class_as_file_and_class():
@@ -63,9 +60,9 @@ def test_loading_the_catalog_again_changes_nothing():
 
 def test_unreadable_defaults_yaml_raises(monkeypatch, tmp_path):
     """A missing module list aborts startup — there is no fallback pipeline."""
-    monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", tmp_path / "missing.yaml")
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path / "missing.yaml")
 
-    with pytest.raises(RuntimeError, match="Cannot read pipeline module list"):
+    with pytest.raises(RuntimeError, match="Cannot read the catalog"):
         _ensure_modules_registered()
 
 
@@ -91,7 +88,7 @@ def test_a_line_that_is_not_text_is_refused(monkeypatch, tmp_path):
     """``- package.file: Class`` (a space after the colon) is a mapping to YAML."""
     path = tmp_path / "defaults.yaml"
     path.write_text("pipeline:\n  modules:\n    - adapt.modules.ingest.node: LoadModule\n")
-    monkeypatch.setattr(pipeline_builder, "_DEFAULTS_YAML", path)
+    monkeypatch.setattr(catalog, "CATALOG", path)
 
     with pytest.raises(RuntimeError) as refusal:
         catalog_module_names()
@@ -131,6 +128,21 @@ def test_a_line_whose_file_cannot_be_imported_is_refused(monkeypatch, tmp_path):
     [
         "adapt.modules.base:NoSuchClass",  # nothing of that name
         "adapt.modules.base:abstractmethod",  # not a class
+    ],
+)
+def test_a_line_that_names_no_class_is_refused(monkeypatch, tmp_path, line):
+    _catalog(monkeypatch, tmp_path, line)
+
+    with pytest.raises(RuntimeError) as refusal:
+        catalog_module_names()
+
+    assert repr(line) in str(refusal.value)
+    assert "names no class" in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
         "adapt.contracts:ProductView",  # a class, but no module
         "adapt.modules.base:BaseModule",  # the interface itself
     ],
