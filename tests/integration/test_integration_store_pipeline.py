@@ -24,6 +24,7 @@ Excluded from default CI (integration marker); run locally:
 import hashlib
 import os
 import queue
+import sqlite3
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -153,6 +154,24 @@ def test_integration_store_pipeline_end_to_end(tmp_path):
         "decisions.db",
         "objects",
     }
+
+    # ── the decision log: a row per scan where its module ran, every table registered ──
+    decisions = sqlite3.connect(
+        f"file:{root / 'collections' / radar / 'decisions.db'}?mode=ro", uri=True
+    )
+    try:
+        frames = decisions.execute("SELECT count(*) FROM segmentation_frames").fetchone()
+        scans = decisions.execute("SELECT count(*) FROM tracking_scans").fetchone()
+        tables = {
+            name
+            for (name,) in decisions.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        registered = {name for (name,) in decisions.execute("SELECT table_name FROM table_schemas")}
+    finally:
+        decisions.close()
+    assert frames == (_N_VOLUMES,)
+    assert scans == (_N_VOLUMES - 1,)  # the first scan has no scan before it
+    assert tables - {"table_schemas"} == registered
 
     client = StoreClient(root)
     try:

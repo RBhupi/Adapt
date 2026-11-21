@@ -411,6 +411,26 @@ def test_a_read_of_a_source_no_module_declares_is_refused_at_start():
     assert "is not a table or a view that a registered module declares" in message
 
 
+def test_a_read_of_a_decision_table_is_refused_at_start():
+    class _ReadsTheDecisionLog(BaseModule):
+        name = "probe"
+        inputs = ["probe_decisions"]
+        outputs = ["probe_out"]
+        store_reads = (StoreRead(key="probe_decisions", source="tracking_cells", up_to_scan=False),)
+
+        def run(self, context: dict) -> dict:
+            return {}
+
+    _ensure_modules_registered()
+
+    with pytest.raises(ValueError) as excinfo:
+        scan_graph([_ReadsTheDecisionLog()], {}, stored_run=True)
+
+    message = str(excinfo.value)
+    assert "Module 'probe' reads 'tracking_cells' from the store" in message
+    assert "is not a table or a view that a registered module declares" in message
+
+
 def test_a_read_up_to_the_scan_of_rows_that_are_not_per_scan_is_refused():
     class _ReadsTracksUpToTheScan(BaseModule):
         name = "probe"

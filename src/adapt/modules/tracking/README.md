@@ -43,7 +43,7 @@ enters only through the excess `e = polarity·(f − cell_threshold)₊`.
 | `lineage.py` | split/merge partner choice, identity score and rule |
 | `latent.py` | `LatentTrack`, footprint carry by the flow |
 | `events.py` | `cell_events` rows |
-| `decision_log.py` | `ScanLog` → `TrackingDecisions` (decisions.db) |
+| `decision_log.py` | `ScanLog` → `TrackingDecisions`; `DECISION_TABLES`, its six tables of decisions.db |
 | `identity.py`, `lut.py` | cell uids; label → uid lookup tables |
 | `config.py` | `TrackingOptions` (the options a pipeline file sets) and the frozen `TrackingConfig` |
 
@@ -54,7 +54,8 @@ enters only through the excess `e = polarity·(f − cell_threshold)₊`.
   for resumption) and **RESUMED**. `match_method` is ASSIGNED, IDENTITY_MERGE or
   IDENTITY_SPLIT (identity transferred by the score rule) or RESUMED;
   `source_scan_id` is the scan the source was last observed in.
-- `tracking_decisions` → decisions.db: `tracking_scans`, `tracking_cells`,
+- `tracking_decisions` → decisions.db, through the six tables declared in
+  `decision_log.py` (`DECISION_TABLES`): `tracking_scans`, `tracking_cells`,
   `tracking_pairs` (every pair, every number, first failed gate, component, rank,
   margin, crossing), `tracking_lineage` (every hypothesis), `tracking_identity`,
   `tracking_latent`.

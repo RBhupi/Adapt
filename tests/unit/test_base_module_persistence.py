@@ -84,3 +84,101 @@ class TestBaseModulePersistence:
             "is_merge_source_here",
             "is_terminated_after_here",
         ]
+
+
+def _record_type(bundle_type: type, part: str) -> type:
+    """The record type of a bundle part: the field's type, or the item type of a tuple."""
+    import typing
+
+    hint = typing.get_type_hints(bundle_type)[part]
+    return typing.get_args(hint)[0] if typing.get_origin(hint) is tuple else hint
+
+
+def _int_and_bool_fields(record_type: type) -> tuple[str, ...]:
+    import typing
+    from dataclasses import fields
+
+    hints = typing.get_type_hints(record_type)
+    return tuple(
+        f.name
+        for f in fields(record_type)
+        if hints[f.name] in (int, bool) or set(typing.get_args(hints[f.name])) & {int, bool}
+    )
+
+
+def _assert_decision_tables(module, bundle_type: type, key: str, expected: dict) -> None:
+    from adapt.contracts import DecisionTableWrite
+
+    specs = [s for s in module.persistence if isinstance(s, DecisionTableWrite)]
+    assert [s.table for s in specs] == list(expected)
+    for spec in specs:
+        records, primary_key, index_columns, sequenced = expected[spec.table]
+        assert spec.key == key
+        assert spec.records == records
+        assert spec.primary_key == primary_key
+        assert spec.index_columns == index_columns
+        assert spec.sequenced is sequenced
+        own = _int_and_bool_fields(_record_type(bundle_type, records))
+        assert spec.integer_columns == (("seq", *own) if sequenced else own), spec.table
+
+
+class TestDecisionTables:
+    def test_detection_declares_its_three_decision_tables(self):
+        from adapt.contracts import SegmentationDecisions
+        from adapt.modules.detection.node import DetectModule
+
+        _assert_decision_tables(
+            DetectModule,
+            SegmentationDecisions,
+            "detection_decisions",
+            {
+                "segmentation_frames": ("frame", ("run_id", "scan_id"), (), False),
+                "segmentation_seeds": ("seeds", ("run_id", "scan_id", "seq"), (), True),
+                "segmentation_components": (
+                    "components",
+                    ("run_id", "scan_id", "component_id"),
+                    (),
+                    False,
+                ),
+            },
+        )
+
+    def test_tracking_declares_its_six_decision_tables(self):
+        from adapt.contracts import TrackingDecisions
+        from adapt.modules.tracking.node import TrackingModule
+
+        _assert_decision_tables(
+            TrackingModule,
+            TrackingDecisions,
+            "tracking_decisions",
+            {
+                "tracking_scans": ("scan", ("run_id", "scan_id"), (), False),
+                "tracking_cells": (
+                    "cells",
+                    ("run_id", "scan_id", "cell_label"),
+                    ("cell_uid",),
+                    False,
+                ),
+                "tracking_pairs": (
+                    "pairs",
+                    ("run_id", "scan_id", "prev_cell_uid", "curr_cell_label"),
+                    ("prev_cell_uid",),
+                    False,
+                ),
+                "tracking_lineage": ("lineage", ("run_id", "scan_id", "seq"), (), True),
+                "tracking_identity": (
+                    "identity",
+                    (
+                        "run_id",
+                        "scan_id",
+                        "kind",
+                        "identity_uid",
+                        "candidate_side",
+                        "candidate_label",
+                    ),
+                    (),
+                    False,
+                ),
+                "tracking_latent": ("latent", ("run_id", "scan_id", "cell_uid"), (), False),
+            },
+        )

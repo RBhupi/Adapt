@@ -54,8 +54,9 @@ def _reject_legacy_root(root_path: Path) -> None:
 class Collection:
     """One collection's on-disk domain: catalog.db + products.db + decisions.db + objects/.
 
-    ``decisions.db`` is the analysis-only decision log (segmentation and
-    tracking decisions); the pipeline never reads it.
+    ``decisions.db`` is the analysis-only decision log: the decision tables
+    the modules declare, each made with its first row and registered in the
+    file's own ``table_schemas``. The pipeline and the API never read it.
     """
 
     def __init__(self, collection_id: str, path: Path, catalog: Catalog) -> None:
@@ -101,6 +102,7 @@ class Store:
             return self._collections[collection_id]
 
         collection_dir = self.root / "collections" / collection_id
+        _reject_unlisted_tables(collection_id, collection_dir / "decisions.db")
         collection_dir.mkdir(exist_ok=True)
         (collection_dir / "objects").mkdir(exist_ok=True)
         products = SqliteStore(collection_dir / "products.db", "collection_products.sql")
@@ -133,6 +135,40 @@ class Store:
         for coll in self._collections.values():
             coll.close()
         self._collections.clear()
+
+
+def _reject_unlisted_tables(collection_id: str, db_path: Path) -> None:
+    """Raise when decisions.db holds a table its registry does not list.
+
+    The ledger makes each table and its registry row in one transaction, so
+    only a file written before modules declared their decision tables has one.
+    Read-only: the file is left as it is.
+    """
+    if not db_path.exists():
+        return
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        tables = {
+            name
+            for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        listed = (
+            {name for (name,) in conn.execute("SELECT table_name FROM table_schemas")}
+            if "table_schemas" in tables
+            else set()
+        )
+    finally:
+        conn.close()
+    unlisted = sorted(tables - listed - {"table_schemas"})
+    if unlisted:
+        raise StoreError(
+            f"Collection '{collection_id}': decisions.db holds table(s) {', '.join(unlisted)} "
+            "that its table registry does not list. It was written before modules declared "
+            f"their decision tables. Move {db_path} aside (any SQLite tool still reads it) "
+            "and run again; a new one is made."
+        )
 
 
 def _snapshot_fingerprints(db_path: Path) -> dict[str, str]:

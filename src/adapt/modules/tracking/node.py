@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from adapt.contracts import (
-    DecisionTableWrite,
     NetcdfArtifact,
     ProductTableWrite,
     ProductView,
@@ -22,6 +21,7 @@ from adapt.contracts import (
 )
 from adapt.modules.base import BaseModule
 from adapt.modules.tracking.config import TrackingConfig, TrackingOptions
+from adapt.modules.tracking.decision_log import DECISION_TABLES
 from adapt.modules.tracking.lut import attach_cell_uid_lut, attach_registration_uid_lut
 from adapt.modules.tracking.module import CellTracker, TrackerState
 from adapt.modules.tracking.tables import (
@@ -168,7 +168,7 @@ class TrackingModule(BaseModule):
             ),
             reads=("cell_events",),
         ),
-        DecisionTableWrite(key="tracking_decisions"),
+        *DECISION_TABLES,
     )
 
     @classmethod

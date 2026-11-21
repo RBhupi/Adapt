@@ -72,21 +72,11 @@ class TestCollectionProvisioning:
             "annotations",
         }
 
-    def test_decisions_has_the_decision_tables_only(self, store):
+    def test_decisions_has_only_its_table_registry(self, store):
         store.collection("KILX")
         store.close()
 
-        assert _tables(store.root / "collections" / "KILX" / "decisions.db") == {
-            "tracking_scans",
-            "tracking_cells",
-            "tracking_pairs",
-            "tracking_lineage",
-            "tracking_identity",
-            "tracking_latent",
-            "segmentation_frames",
-            "segmentation_seeds",
-            "segmentation_components",
-        }
+        assert _tables(store.root / "collections" / "KILX" / "decisions.db") == {"table_schemas"}
 
     def test_second_open_reuses_layout(self, store):
         first = store.collection("KILX")
@@ -127,6 +117,93 @@ def _freeze_one_table(store) -> None:
         collection_id="KILX",
     )
     writer.write(pd.DataFrame({"run_id": ["run-1"], "cell_label": [1], "area": [1.5]}), meta)
+
+
+def _probe_module_writes_one_row(collection) -> None:
+    """A stand-in module writes one row of its decision table through the router."""
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
+    from adapt.contracts import DecisionTableWrite
+    from adapt.persistence.output_router import StoreOutputRouter
+
+    @dataclass(frozen=True)
+    class _Record:
+        value: float
+
+    @dataclass(frozen=True)
+    class _Log:
+        row: _Record
+
+    probe = SimpleNamespace(
+        name="probe",
+        persistence=(
+            DecisionTableWrite(
+                key="probe_log",
+                records="row",
+                table="probe_rows",
+                primary_key=("run_id", "scan_id"),
+            ),
+        ),
+    )
+    meta = PersistenceMeta(
+        scan_time=datetime(2026, 8, 13, 17, 31, 58, tzinfo=UTC),
+        scan_id="abc123",
+        run_id="run-1",
+        source_file="",
+        collection_id="KILX",
+    )
+    StoreOutputRouter(collection, ()).persist([probe], {"probe_log": _Log(_Record(1.5))}, meta)
+
+
+class TestOlderDecisionsDb:
+    """A decisions.db holding a table its registry does not list was written
+    before modules declared their decision tables: a run refuses it at start."""
+
+    def _expect_refusal(self, store, path) -> None:
+        before = path.read_bytes()
+        with pytest.raises(StoreError) as excinfo:
+            store.collection("KILX")
+        message = str(excinfo.value)
+        assert str(path) in message
+        assert "tracking_candidates" in message
+        assert "aside" in message
+        assert path.read_bytes() == before
+
+    def test_a_file_without_a_registry_is_refused_and_left_as_it_was(self, store):
+        path = store.root / "collections" / "KILX" / "decisions.db"
+        path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE tracking_candidates (run_id TEXT, opc REAL)")
+        conn.commit()
+        conn.close()
+
+        self._expect_refusal(store, path)
+        assert _tables(path) == {"tracking_candidates"}
+
+    def test_a_file_with_a_registry_and_a_table_it_does_not_list_is_refused(self, store):
+        path = store.collection("KILX").decisions_path
+        store.close()
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE tracking_candidates (run_id TEXT, opc REAL)")
+        conn.commit()
+        conn.close()
+
+        reopened = Store.open(store.root)
+        try:
+            self._expect_refusal(reopened, path)
+        finally:
+            reopened.close()
+
+    def test_a_decisions_db_written_by_the_router_opens_again(self, store):
+        _probe_module_writes_one_row(store.collection("KILX"))
+        store.close()
+
+        reopened = Store.open(store.root)
+        try:
+            assert "probe_rows" in _tables(reopened.collection("KILX").decisions_path)
+        finally:
+            reopened.close()
 
 
 class TestValidateCollection:

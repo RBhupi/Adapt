@@ -31,6 +31,23 @@ def test_a_view_names_its_row_table_and_needs_nothing_else():
     assert view.reads == ()
 
 
+def test_a_decision_table_names_its_records_its_table_and_its_key():
+    from adapt.contracts import DecisionTableWrite
+
+    spec = DecisionTableWrite(
+        key="tracking_decisions",
+        records="cells",
+        table="tracking_cells",
+        primary_key=("run_id", "scan_id", "cell_label"),
+    )
+
+    assert (spec.key, spec.records, spec.table) == ("tracking_decisions", "cells", "tracking_cells")
+    assert spec.primary_key == ("run_id", "scan_id", "cell_label")
+    assert (spec.index_columns, spec.integer_columns, spec.sequenced) == ((), (), False)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        spec.table = "other"  # type: ignore[misc]
+
+
 def test_a_store_read_names_its_key_its_source_and_how_far_it_reads():
     from adapt.contracts import StoreRead
 

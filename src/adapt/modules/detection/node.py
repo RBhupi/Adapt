@@ -8,6 +8,9 @@ import numpy as np
 from adapt.contracts import (
     CELL_LABELS_VAR,
     DecisionTableWrite,
+    SegmentationComponent,
+    SegmentationFrame,
+    SegmentationSeed,
     SharedConfig,
     check_grid_ds_2d,
     check_prior_scans,
@@ -19,6 +22,7 @@ from adapt.contracts import (
 from adapt.modules.base import BaseModule
 from adapt.modules.detection.config import DetectionConfig, DetectionOptions
 from adapt.modules.detection.module import CarriedLabels, RadarCellSegmenter
+from adapt.utils.frames import record_integer_columns
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +78,30 @@ class DetectModule(BaseModule):
         "seed_carry": check_seed_carry,
         "detection_decisions": check_segmentation_decisions,
     }
-    persistence = (DecisionTableWrite(key="detection_decisions"),)
+    persistence = (
+        DecisionTableWrite(
+            key="detection_decisions",
+            records="frame",
+            table="segmentation_frames",
+            primary_key=("run_id", "scan_id"),
+            integer_columns=record_integer_columns(SegmentationFrame),
+        ),
+        DecisionTableWrite(
+            key="detection_decisions",
+            records="seeds",
+            table="segmentation_seeds",
+            primary_key=("run_id", "scan_id", "seq"),
+            integer_columns=("seq", *record_integer_columns(SegmentationSeed)),
+            sequenced=True,
+        ),
+        DecisionTableWrite(
+            key="detection_decisions",
+            records="components",
+            table="segmentation_components",
+            primary_key=("run_id", "scan_id", "component_id"),
+            integer_columns=record_integer_columns(SegmentationComponent),
+        ),
+    )
 
     @classmethod
     def configure(cls, options: DetectionOptions, shared: SharedConfig) -> DetectionConfig:

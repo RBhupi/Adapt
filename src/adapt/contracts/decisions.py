@@ -8,6 +8,10 @@ These are analysis-only records written to a separate database
 expose them; they exist so a run can be explained after the fact and gate
 thresholds re-tuned offline from stored numbers. Identity (run, scan, time)
 is stamped by persistence, never carried here.
+
+A stored row is the record's fields plus the run and scan stamps the writer
+adds. Thresholds are not repeated in the log: join ``run_id`` to the run's
+record for the options the run used.
 """
 
 from dataclasses import dataclass
@@ -54,12 +58,12 @@ class TrackingCell:
     cell_label: int
     cell_uid: str
     area_km2: float
-    mass: float
-    mean_excess: float
-    centre_x: float
+    mass: float  # Σ e, e = excess above the cell threshold
+    mean_excess: float  # ē = mass / area (per pixel)
+    centre_x: float  # e²-weighted centre, metres
     centre_y: float
-    score: float
-    core_area_km2: float
+    score: float  # identity score S = log A + γ log ē (−inf: no excess)
+    core_area_km2: float  # diagnostic, above params.tracking.core_field_threshold
     fate: str  # CONTINUE | RESUMED | SPLIT_CHILD | INITIATION
 
 
@@ -76,33 +80,33 @@ class TrackingPair:
     prev_cell_uid: str
     prev_cell_label: int
     curr_cell_label: int
-    source: str  # LIVE | LATENT
+    source: str  # LIVE footprint or LATENT track
     steps: int  # scan intervals the link spans
     growth_radius_km: float
     footprint_area_px: int
     footprint_grown_px: int
     cell_grown_px: int
     intersection_px: int
-    o_c: float
-    o_h: float
-    u: float
+    o_c: float  # |H+ ∩ M+| / |M+|
+    o_h: float  # |H+ ∩ M+| / |H+|
+    u: float  # 1 − √(o_c o_h)
     predicted_x: float
     predicted_y: float
     curr_centre_x: float
     curr_centre_y: float
-    d: float
+    d: float  # shape-aware residual √(δᵀ Σ⁻¹ δ)
     speed_ms: float
     prev_speed_ms: float | None
-    speed_limit_ms: float | None
-    heading_change_deg: float | None
+    speed_limit_ms: float | None  # v_prev + Δv_max; None on a track's first step
+    heading_change_deg: float | None  # None when a step is below two grid lengths
     h: float
-    cost: float
-    gate: str
+    cost: float  # u + w_d d + h
+    gate: str  # PASS | OVERLAP | SPEED | SPEED_CHANGE | COST
     component_id: int | None
     cost_rank: int | None
     margin: float | None
     crossing_with_uid: str | None
-    outcome: str
+    outcome: str  # CONTINUE | RESUMED | LOST | CROSSING | REJECTED
 
 
 @dataclass(frozen=True)
@@ -116,10 +120,10 @@ class TrackingLineage:
     the identity rule made the assigned cell a split child or merge source.
     """
 
-    side: str
+    side: str  # curr orphan | prev unlinked cell
     cell_uid: str
     cell_label: int
-    hypothesis: str
+    hypothesis: str  # RESUME | SPLIT | INITIATION | MERGE | LATENT
     partner_uid: str | None
     partner_label: int | None
     fraction: float | None

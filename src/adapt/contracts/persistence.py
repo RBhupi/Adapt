@@ -79,10 +79,26 @@ class ProductView:
 
 @dataclass(frozen=True)
 class DecisionTableWrite:
-    """Write a decision bundle (context key) to the collection's analysis-only
-    decisions.db. Never a scan product: no catalog link, no API exposure."""
+    """Upsert the records of a decision bundle (context key) into a module-owned
+    table of the collection's analysis-only decisions.db.
 
-    key: str
+    ``records`` names the part of the bundle that holds the table's rows: one
+    frozen dataclass record, or a tuple of them. A record's fields are the
+    columns. The table is made with its first row, as a product table is.
+    Never a scan product: no catalog link, no API exposure.
+    """
+
+    key: str  # the context key of the bundle
+    records: str  # the bundle attribute holding this table's record(s)
+    table: str
+    primary_key: tuple[str, ...]
+    index_columns: tuple[str, ...] = ()
+    # The record's int and bool fields (``record_integer_columns``), and
+    # ``seq`` for a sequenced table. Every other number is stored as REAL.
+    integer_columns: tuple[str, ...] = ()
+    # The rows have no key of their own: the writer numbers them 0, 1, ... in
+    # bundle order, in a column ``seq``.
+    sequenced: bool = False
 
 
 @dataclass(frozen=True)

@@ -210,6 +210,43 @@ of this scan (`target_cell_uid`).
 
 ---
 
+## The decision log (`decisions.db`)
+
+`decisions.db` holds, for every scan, what detection and tracking weighed and
+why: each seed and carried claim, each candidate pair of cells, each split or
+merge hypothesis. Nothing in Adapt reads it, and `StoreClient` does not list
+it; open it with any SQLite tool.
+
+| Table | Written by | One row per | Key |
+|-------|-----------|-------------|-----|
+| `segmentation_frames` | `detection` | scan | `run_id`, `scan_id` |
+| `segmentation_seeds` | `detection` | seed or carried claim, numbered in order | `run_id`, `scan_id`, `seq` |
+| `segmentation_components` | `detection` | component of the convective mask | `run_id`, `scan_id`, `component_id` |
+| `tracking_scans` | `tracking` | scan after the first | `run_id`, `scan_id` |
+| `tracking_cells` | `tracking` | cell of a scan | `run_id`, `scan_id`, `cell_label` |
+| `tracking_pairs` | `tracking` | candidate pair of a previous and a current cell | `run_id`, `scan_id`, `prev_cell_uid`, `curr_cell_label` |
+| `tracking_lineage` | `tracking` | hypothesis for a left-over cell, numbered in order | `run_id`, `scan_id`, `seq` |
+| `tracking_identity` | `tracking` | contender for a split or merged identity | `run_id`, `scan_id`, `kind`, `identity_uid`, `candidate_side`, `candidate_label` |
+| `tracking_latent` | `tracking` | latent track at a scan | `run_id`, `scan_id`, `cell_uid` |
+
+- A row holds the fields of one decision record of the module, with
+  `run_id`, `scan_id`, `scan_time` and `scan_time_unix` added, as in every
+  product table. The columns are documented on the record types, in
+  `adapt.contracts.decisions`.
+- Thresholds are not repeated here: join `run_id` to the run's record
+  (`registry.db`) for the options the run used.
+- A table exists from its first row. `segmentation_frames` and
+  `tracking_scans` get a row at every scan their module runs; a table such as
+  `tracking_identity` appears only with the first contested split or merge, so
+  a query on it before then gets "no such table".
+- `table_schemas` lists each table with its module, its key and its columns.
+- A `decisions.db` written before modules declared their decision tables
+  (Adapt versions before this one) is refused when a run opens the collection.
+  Move `collections/<RADAR>/decisions.db` aside; it stays readable, and the
+  run makes a new one.
+
+---
+
 ## The NetCDF files
 
 | File | Written by | Per scan | Holds |

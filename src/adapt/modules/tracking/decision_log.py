@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from adapt.contracts import (
+    DecisionTableWrite,
     TrackingCell,
     TrackingDecisions,
     TrackingIdentity,
@@ -21,8 +22,67 @@ from adapt.contracts import (
     TrackingPair,
     TrackingScan,
 )
+from adapt.utils.frames import record_integer_columns
 
-__all__ = ["ScanLog"]
+__all__ = ["DECISION_TABLES", "ScanLog"]
+
+_KEY = "tracking_decisions"
+
+# The tables of decisions.db that hold each part of a ``TrackingDecisions``.
+DECISION_TABLES = (
+    DecisionTableWrite(
+        key=_KEY,
+        records="scan",
+        table="tracking_scans",
+        primary_key=("run_id", "scan_id"),
+        integer_columns=record_integer_columns(TrackingScan),
+    ),
+    DecisionTableWrite(
+        key=_KEY,
+        records="cells",
+        table="tracking_cells",
+        primary_key=("run_id", "scan_id", "cell_label"),
+        index_columns=("cell_uid",),
+        integer_columns=record_integer_columns(TrackingCell),
+    ),
+    DecisionTableWrite(
+        key=_KEY,
+        records="pairs",
+        table="tracking_pairs",
+        primary_key=("run_id", "scan_id", "prev_cell_uid", "curr_cell_label"),
+        index_columns=("prev_cell_uid",),
+        integer_columns=record_integer_columns(TrackingPair),
+    ),
+    DecisionTableWrite(
+        key=_KEY,
+        records="lineage",
+        table="tracking_lineage",
+        primary_key=("run_id", "scan_id", "seq"),
+        integer_columns=("seq", *record_integer_columns(TrackingLineage)),
+        sequenced=True,
+    ),
+    DecisionTableWrite(
+        key=_KEY,
+        records="identity",
+        table="tracking_identity",
+        primary_key=(
+            "run_id",
+            "scan_id",
+            "kind",
+            "identity_uid",
+            "candidate_side",
+            "candidate_label",
+        ),
+        integer_columns=record_integer_columns(TrackingIdentity),
+    ),
+    DecisionTableWrite(
+        key=_KEY,
+        records="latent",
+        table="tracking_latent",
+        primary_key=("run_id", "scan_id", "cell_uid"),
+        integer_columns=record_integer_columns(TrackingLatent),
+    ),
+)
 
 
 @dataclass

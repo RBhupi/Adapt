@@ -4,8 +4,9 @@
 """Module-owned product tables with frozen first-frame schemas.
 
 ``SchemaLedger`` freezes a table's schema on its first non-empty frame —
-declared primary key + payload columns — and writes identical snapshots to
-products.db and catalog.db. Frozen types are deterministic: core identity
+declared primary key + payload columns — and registers it in its own
+database; a products.db table's snapshot is copied into catalog.db too, so the
+two agree. Frozen types are deterministic: core identity
 columns are contracted by name (``_CORE_COLUMN_TYPES``), the columns a spec
 declares as ``integer_columns`` freeze as INTEGER, every other numeric column
 freezes as REAL, so the schema depends on the column set — never on the values
@@ -32,7 +33,12 @@ import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
-from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView
+from adapt.contracts.persistence import (
+    DecisionTableWrite,
+    PersistenceMeta,
+    ProductTableWrite,
+    ProductView,
+)
 from adapt.persistence.collection_catalog import Catalog
 from adapt.persistence.errors import StoreError
 from adapt.utils.time import to_scan_iso, to_scan_unix
@@ -84,17 +90,21 @@ class TableDeclaration:
 
 
 class SchemaLedger:
-    """Frozen first-frame schema registry with dual snapshots, and the views
-    over the tables that share a key.
+    """Frozen first-frame schema registry of one database of the collection,
+    and the views over the tables that share a key.
+
+    The snapshot of each table is written to ``db_path`` and, when a
+    ``catalog`` is given, copied into catalog.db too. ``catalog=None`` means
+    the catalog does not list this database's tables.
 
     A view of ``views`` is rebuilt whenever the set of tables can have changed:
     with a table's first write, and when asked (``build_views``).
     """
 
     def __init__(
-        self, products_path: str | Path, catalog: Catalog, views: Sequence[ProductView]
+        self, db_path: str | Path, catalog: Catalog | None, views: Sequence[ProductView]
     ) -> None:
-        self.products_path = Path(products_path)
+        self.db_path = Path(db_path)
         self._catalog = catalog
         self._views = tuple(dict.fromkeys(views))  # one declaration given twice is one view
         # SQLite compares names without regard to case.
@@ -117,9 +127,10 @@ class SchemaLedger:
         return None if row is None else _declaration(row)
 
     def freeze(self, decl: TableDeclaration) -> None:
-        """Create the table + indexes and write identical snapshots to both dbs.
+        """Create the table + indexes, register it, and copy the snapshot into
+        the catalog when the ledger has one.
 
-        The table, its indexes, its products.db snapshot and the views it joins
+        The table, its indexes, its snapshot in the ledger's file and the views it joins
         are made together or not at all: a table whose columns repeat a name in
         a view it joins is refused and not created. A view that does not exist
         yet (its own tables were never written) checks nothing: a repeat among
@@ -138,7 +149,8 @@ class SchemaLedger:
             conn.commit()
         finally:
             conn.close()
-        self._catalog.register_table_schema(snapshot)
+        if self._catalog is not None:
+            self._catalog.register_table_schema(snapshot)
 
     def build_views(self) -> None:
         """Make every view whose tables exist what the tables now give."""
@@ -192,16 +204,21 @@ class SchemaLedger:
             raise StoreError(f"Table '{decl.table}' is already frozen") from exc
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.products_path), isolation_level="DEFERRED")
+        conn = sqlite3.connect(str(self.db_path), isolation_level="DEFERRED")
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
 
 class TableWriter:
-    """Writes one module's product table; freezes on the first non-empty frame."""
+    """Writes one module's table; freezes on the first non-empty frame."""
 
-    def __init__(self, ledger: SchemaLedger, spec: ProductTableWrite, owner_module: str) -> None:
+    def __init__(
+        self,
+        ledger: SchemaLedger,
+        spec: ProductTableWrite | DecisionTableWrite,
+        owner_module: str,
+    ) -> None:
         if spec.table in _RESERVED_TABLES:
             raise StoreError(f"'{spec.table}' is a reserved table name; modules cannot own it")
         self._ledger = ledger

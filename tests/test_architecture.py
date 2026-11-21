@@ -528,6 +528,35 @@ def test_create_table_statements_have_one_home() -> None:
     )
 
 
+def test_the_store_and_configuration_name_no_decision_table() -> None:
+    """A module declares its decision tables (``DecisionTableWrite``); the store
+    and the configuration make and fill them without naming one, or the key of
+    the bundle that holds their rows."""
+    from adapt.contracts import DecisionTableWrite
+
+    names = sorted(
+        {
+            name
+            for module in _registered_default_modules()
+            for spec in module.persistence
+            if isinstance(spec, DecisionTableWrite)
+            for name in (spec.table, spec.key)
+        }
+    )
+    assert names, "no registered module declares a decision table"
+    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, names)) + r")\b")
+    offenders = [
+        f"{_rel(path, _SRC_ADAPT)}: {name}"
+        for package in ("persistence", "configuration")
+        for path in sorted((_SRC_ADAPT / package).rglob("*"))
+        if path.suffix in {".py", ".sql", ".yaml"}
+        for name in sorted(set(pattern.findall(path.read_text(encoding="utf-8"))))
+    ]
+    assert not offenders, "the store or configuration names a decision table:\n" + "\n".join(
+        offenders
+    )
+
+
 # ── Field-generic core: reflectivity stat-column literals are quarantined ─────
 # After the tracking_field refactor, stat columns are minted via
 # adapt.contracts.stat_column and read via the configured field. The literal
@@ -748,12 +777,6 @@ _OLD_OPTION_NAMES = {
         "flags",
     ),
 }
-# A comment inside a CREATE TABLE statement is stored with the table in every
-# decisions.db. Rewording it would make a new store differ from the stores
-# already written, so this one old name stays.
-_STORED_WITH_THE_SCHEMA = {
-    "configuration/schemas/collection_decisions.sql": {"tracker.core_field_threshold"},
-}
 
 
 def _whole_names_in_the_source(names: list[str]) -> list[str]:
@@ -766,9 +789,7 @@ def _whole_names_in_the_source(names: list[str]) -> list[str]:
             continue
         rel = _rel(path, _SRC_ADAPT)
         found = set(pattern.findall(path.read_text(encoding="utf-8")))
-        offenders.extend(
-            f"{rel}: {name}" for name in sorted(found - _STORED_WITH_THE_SCHEMA.get(rel, set()))
-        )
+        offenders.extend(f"{rel}: {name}" for name in sorted(found))
     return offenders
 
 

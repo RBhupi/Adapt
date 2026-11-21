@@ -13,6 +13,7 @@ import pytest
 from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView
 from adapt.persistence.errors import StoreError
 from adapt.persistence.products import SchemaLedger, TableDeclaration, TableWriter
+from adapt.persistence.sqlite_store import SqliteStore
 from adapt.persistence.store import Store, init_store
 
 pytestmark = pytest.mark.unit
@@ -123,6 +124,26 @@ class TestFirstFrameFreeze:
         assert {"run_id", "scan_id", "scan_time", "scan_time_unix", "cell_label", "area"} == (
             frozen_names
         )
+
+    def test_a_ledger_without_a_catalog_registers_the_table_in_its_own_database_only(
+        self, tmp_path
+    ):
+        store = Store.open(init_store(tmp_path / "store"))
+        try:
+            coll = store.collection("KILX")
+            other = coll.path / "other.db"
+            SqliteStore(other, "collection_products.sql").close()
+
+            TableWriter(SchemaLedger(other, None, ()), SPEC, owner_module="analysis").write(
+                _frame(), _scan_meta()
+            )
+
+            assert _snapshot(other, "cell_stats")["owner_module"] == "analysis"
+            assert _snapshot(coll.catalog.db_path, "cell_stats") is None
+            assert _snapshot(coll.products_path, "cell_stats") is None
+            store.validate_collection("KILX")
+        finally:
+            store.close()
 
     def test_a_table_whose_first_write_fails_is_not_left_half_made(self, ledger, collection):
         spec = ProductTableWrite(

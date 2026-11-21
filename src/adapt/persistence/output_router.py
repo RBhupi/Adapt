@@ -22,11 +22,11 @@ from adapt.contracts import (
     ProductTableWrite,
     ProductView,
 )
-from adapt.persistence.decision_store import DecisionStore
 from adapt.persistence.errors import StoreError
 from adapt.persistence.objects import ArtifactMeta, ObjectStore, product_object_name
 from adapt.persistence.products import SchemaLedger, TableWriter
 from adapt.persistence.store import Collection
+from adapt.utils.frames import record_frame
 from adapt.utils.time import to_scan_iso
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,8 @@ class StoreOutputRouter:
     (rewritten in place when the run writes the scan again) + catalog row +
     lineage to the scan's raw volume + scan-product link; ProductTableWrite →
     products.db rows (frozen first-frame schema) + table link; ProductView → a
-    link for each scan that has rows in it.
+    link for each scan that has rows in it; DecisionTableWrite → decisions.db
+    rows, made from the bundle's records by the same table writer, with no link.
 
     ``views`` are the views of the collection, whichever module declares them:
     the store keeps each one the join of the tables that now share its key, so
@@ -52,6 +53,8 @@ class StoreOutputRouter:
         self._views = tuple(views)
         self._ledger = SchemaLedger(collection.products_path, collection.catalog, self._views)
         self._ledger.build_views()
+        # decisions.db: the catalog does not list its tables, and it has no view.
+        self._decisions = SchemaLedger(collection.decisions_path, None, ())
 
     def persist(self, modules: Iterable, result: dict, meta: PersistenceMeta) -> None:
         for module in modules:
@@ -69,21 +72,30 @@ class StoreOutputRouter:
             case ProductView():
                 self._link_view(spec, meta)
             case DecisionTableWrite():
-                self._write_decisions(spec, result, meta)
+                self._write_decisions(module_name, spec, result, meta)
             case _:
                 raise TypeError(f"{module_name}: unknown persistence spec {type(spec).__name__}")
 
     def _write_decisions(
-        self, spec: DecisionTableWrite, result: dict, meta: PersistenceMeta
+        self, module_name: str, spec: DecisionTableWrite, result: dict, meta: PersistenceMeta
     ) -> None:
-        """Analysis-only decision log: never a scan product, so no catalog link.
-
-        One connection per scan, as for the tracking tables.
-        """
+        """Analysis-only decision log: never a scan product, so no catalog link."""
         if spec.key not in result:
             return
-        with DecisionStore(self._collection.decisions_path) as store:
-            store.write(result[spec.key], meta)
+        bundle = result[spec.key]
+        if not hasattr(bundle, spec.records):
+            raise StoreError(
+                f"{module_name}: decision bundle '{spec.key}' ({type(bundle).__name__}) has no "
+                f"'{spec.records}' for table '{spec.table}'"
+            )
+        part = getattr(bundle, spec.records)
+        records = part if isinstance(part, tuple) else (part,)
+        if not records:
+            return
+        frame = record_frame(records)
+        if spec.sequenced:
+            frame.insert(0, "seq", range(len(frame)))
+        TableWriter(self._decisions, spec, owner_module=module_name).write(frame, meta)
 
     def _write_netcdf(
         self, module_name: str, spec: NetcdfArtifact, result: dict, meta: PersistenceMeta
