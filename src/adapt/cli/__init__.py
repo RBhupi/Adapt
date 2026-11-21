@@ -201,8 +201,8 @@ def _add_set(command: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="params.KEY.OPTION=VALUE",
-        help="Set an option for this run, over what the file says: KEY is a module or a "
-        "params section, e.g. --set params.tracking.max_speed_ms=35. May be given more "
+        help="Set an option for this run, over what the file says: KEY is a module, a "
+        "source or a params section, e.g. --set params.tracking.max_speed_ms=35. May be given more "
         "than once; a later setting of the same option holds.",
     )
 
@@ -263,7 +263,7 @@ def _parser() -> argparse.ArgumentParser:
     config.add_argument(
         "--params",
         action="store_true",
-        help="Print the options of the modules (or params sections) NAME with their "
+        help="Print the options of the modules (or sources or params sections) NAME with their "
         "defaults, or with --file add the options the file lacks.",
     )
     config.add_argument(
@@ -275,7 +275,10 @@ def _parser() -> argparse.ArgumentParser:
         "it does not list may stay in it; only listed modules run.",
     )
     config.add_argument(
-        "names", nargs="*", metavar="NAME", help="Modules (or, to print, params sections)."
+        "names",
+        nargs="*",
+        metavar="NAME",
+        help="Modules (or, to print, sources or params sections).",
     )
     config.set_defaults(func=_config_cmd)
 

@@ -72,10 +72,16 @@ _RUN = {
 @pytest.fixture
 def stand_in_config(store_root):
     """The config of a historical KLOT run whose source is the stand-in and whose
-    file sets ``poll_interval_sec: 30``."""
+    record holds the stand-in's options with ``poll_interval_sec: 30``."""
     source_registry.register(_StandInSource)
-    config = new_run_config(store_root, run=_RUN, params={"downloader": {"poll_interval_sec": 30}})
-    yield config.model_copy(update={"source": "stand_in", "source_dir": "/data/klot"})
+    config = new_run_config(store_root, run=_RUN)
+    yield config.model_copy(
+        update={
+            "source": "stand_in",
+            "source_dir": "/data/klot",
+            "source_params": {"poll_interval_sec": 30, "min_file_size": 1024},
+        }
+    )
     source_registry.unregister("stand_in")
 
 
@@ -110,13 +116,26 @@ class TestBuildSource:
         source_registry.register(plain)
         try:
             source = build_source(
-                stand_in_config.model_copy(update={"source": "plain"}), object(), object()
+                stand_in_config.model_copy(update={"source": "plain", "source_params": None}),
+                object(),
+                object(),
             )
         finally:
             source_registry.unregister("plain")
 
         assert source.built_with[0] == _HANDED
         assert source.built_with[1] is None
+
+    def test_a_record_without_the_options_of_a_source_that_has_some_is_refused(
+        self, stand_in_config
+    ):
+        from adapt.configuration.schemas.errors import ConfigError
+        from adapt.runtime.sources import build_source
+
+        unrecorded = stand_in_config.model_copy(update={"source_params": None})
+
+        with pytest.raises(ConfigError, match="no options are recorded for source 'stand_in'"):
+            build_source(unrecorded, object(), object())
 
 
 class TestCheckSource:

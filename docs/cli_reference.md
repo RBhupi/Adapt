@@ -66,7 +66,7 @@ adapt config --params --file nexrad.yaml      # ... of every module the file lis
 | `--nexrad` | Write `./nexrad.yaml` from the `nexrad` pipeline template (one flag per template). Refused when the file exists: it is never overwritten. With `--params`, every module of the catalog, listed or not, gets all its options under `params:`. Takes no `NAME` and no `--file`. |
 | `--params` | Print the options of each `NAME`, or with `--file` add them to the file. Needs `NAME`s or `--file`. |
 | `--file FILE` | With `--params`: the pipeline file to add options to. |
-| `NAME...` | Modules (to print, also the sections `global`, `downloader`, `logging`). An unknown name lists every valid one. |
+| `NAME...` | Modules (to print, also the sources `aws_nexrad`, `local_directory`, `stored_run` and the sections `global`, `logging`, `queue`). An unknown name lists every valid one. |
 
 ### Printing options
 
@@ -79,8 +79,11 @@ adapt config --params --file nexrad.yaml      # ... of every module the file lis
   packaged rule (`growing_isolated`) with the reasoning in comments;
   `arm_radar_comm`, which has no defaults, prints every option it needs as a
   dry-run example to copy, with the environment variables it reads;
+- a **source** (`aws_nexrad`, `local_directory`, `stored_run`): its options
+  under its own name, after a heading comment with its summary; `stored_run`
+  has none;
 - `global` (the settings of the whole run, shared by several modules),
-  `downloader` or `logging`.
+  `logging` or `queue`.
 
 The first line of the output names the line to paste the rest under: the
 file's `params:` line. The entries are indented to sit under that line, two
@@ -183,20 +186,21 @@ modules* in the [User Guide](USAGE.md); the tables and files are described in
 ### `params`
 
 A mapping from a name to options. The valid names are the modules of the
-catalog, and three sections of the run:
+catalog, the sources of the catalog, and three sections of the run:
 
 | Name | Options of |
 |------|-----------|
 | a module (`ingest`, `detection`, `tracking`, ...) | that module |
+| a source (`aws_nexrad`, `local_directory`, `stored_run`) | that source, when `run.source` names it: for `aws_nexrad` the polling interval, how far back a realtime run looks, the fetch retries and the smallest file kept; for `local_directory` the smallest file kept; `stored_run` has none |
 | `global` | the whole run, shared by several modules: `tracking_field`, `z_level`, `max_scan_gap_minutes` |
-| `downloader` | fetching scans: polling interval, how far back a realtime run looks |
 | `logging` | the log file and the console |
+| `queue` | the queue between the source and the processor: how many scans the source may run ahead (`max_queue_size`) and when it resumes (`queue_resume_fraction`) |
 
-Only the modules listed under `modules:` run, so only their options are read
-and checked. Options of a module the file does not list are kept as they are
-and not read: listing the module turns them on. `params.downloader` cannot set `radar`, `mode`, `start_time` or
-`end_time`; those belong to `run:`. Any other unknown name is an error that
-lists the valid ones.
+Only the modules listed under `modules:` and the source named by `run.source`
+run, so only their options are read and checked. Options of a module the file
+does not list, or of a source it does not name, are kept as they are and not
+read: listing the module, or naming the source, turns them on. Any other
+unknown name is an error that lists the valid ones.
 
 ### How options are read
 
@@ -406,7 +410,8 @@ The rules:
   file's `params.<module>`. The options the stored run recorded for it are not
   carried over.
 - The run keeps the shared settings it was made with: `params.global`,
-  `params.downloader` and `params.logging` are refused.
+  `params.logging` and `params.queue` are refused. `stored_run` has no
+  options, so `params.stored_run` with any option is refused too.
 - A listed module always runs, replacing what it stored before under the same
   key. So if the stored run itself ran a listed module with other options, the
   pass is refused: rows of both sets of options would be left mixed. The
@@ -437,8 +442,8 @@ adapt graph nexrad --set params.detection.h_maxima=4     # check it first, nothi
 ```
 
 - The path is the option's full name as `adapt config --params` and the error
-  messages give it: `params`, then a module or one of the sections `global`,
-  `downloader`, `logging`, then the option. A key deep inside a nested part is
+  messages give it: `params`, then a module, a source or one of the sections
+  `global`, `logging`, `queue`, then the option. A key deep inside a nested part is
   set alone, like in the file. Only `params` can be set; `run:` and
   `modules:` are the file's.
 - The value is read as the file would read it: `35`, `3.5`, `true`, `null`,
@@ -544,14 +549,29 @@ uses them:
 | `analyzer` | `analysis` |
 | `tracker` | `tracking` |
 | `tracker.cell_uid.width` | `tracking.uid_width` |
-| `tracker.cell_uid.alphabet`, `downloader.output_dir` | removed (they had no effect); each is refused as an unknown option, like any other |
+| `tracker.cell_uid.alphabet` | removed (it had no effect); refused as an unknown option, like any other |
 | `visualization`, `output` | removed (they had no effect on a run) |
 | `global.coord_names` | removed: the grid coordinate names are fixed (`x`, `y`, `z`, `time`) |
 | `analyzer.exclude_fields` (defaults plus your entries) | `analysis.exclude_fields` lists only your additions. Five internal variables are always excluded (`ROI`, `labels`, `cell_labels`, `cell_projections`, `clutter_filter_power_removed`); `exclude_fields: []` no longer clears them |
 
 The option names inside a section are otherwise unchanged
-(`segmenter.h_maxima` is `detection.h_maxima`). `global`, `downloader` and
-`logging` keep their names. A value that was refused before (out of its
+(`segmenter.h_maxima` is `detection.h_maxima`). `global` and `logging` keep
+their names.
+
+The section `downloader` is gone. A file that sets `params.downloader` is
+refused, and the message names the new place of each option it sets. Move them:
+
+| Old option under `params.downloader` | Now |
+|---|---|
+| `latest_files`, `latest_minutes`, `poll_interval_sec`, `max_fetch_retries` | `aws_nexrad.<same name>` |
+| `min_file_size` | `aws_nexrad.min_file_size` or `local_directory.min_file_size`: the source `run.source` names |
+| `max_queue_size`, `queue_resume_fraction` | `queue.<same name>` |
+| `output_dir` | removed (it had no effect) |
+
+A run recorded before this change cannot be resumed (`--run-id`) or passed
+over (`run.source: stored_run`); both are refused before anything starts, with
+the keys this version cannot read and "start a new run". Its store still opens
+and reads as before. A value that was refused before (out of its
 bounds, of the wrong type, `null` where the option does not allow it) is
 refused as before, under the new key.
 
@@ -559,8 +579,8 @@ What else is different from earlier versions:
 
 - **Options of a module the file does not list** are kept and not read
   (`params.tracking` in a file whose `modules:` has no `tracking`), as earlier
-  versions did with the old sections. Only a name that is no module or section
-  is refused.
+  versions did with the old sections. Only a name that is no module, source
+  or section is refused.
 - **The two rules on `global.tracking_field`** (it must be in
   `analysis.radar_variables`, and in `ingest.fields` when that list is not
   empty) are each checked by the module they concern, so they apply only in a

@@ -24,6 +24,7 @@ from adapt.configuration.pipeline_template import (
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import resolve_module_configs
 from adapt.execution.module_registry import registry
+from adapt.execution.source_registry import catalog_source_names
 from adapt.persistence.store import init_store
 
 pytestmark = pytest.mark.unit
@@ -63,6 +64,15 @@ params:
 
 def _summaries() -> dict[str, str]:
     return {name: registry.get(name).module_summary() for name in registry.list_modules()}
+
+
+def test_the_source_comment_lists_the_catalogs_sources_and_the_model_names_none():
+    sources = catalog_source_names()
+    written = pipeline_template("nexrad").splitlines()
+
+    line = next(line for line in written if line.startswith("  source:"))
+    assert line.endswith(f"# where scans come from: {' | '.join(sources)}")
+    assert not any(s in RunSection.model_fields["source"].description for s in sources)
 
 
 def test_nexrad_is_the_one_packaged_template():
@@ -148,7 +158,7 @@ def test_written_file_resolves_to_a_runnable_config(tmp_path):
     config = run_config(load_pipeline_file(path), path)
 
     assert config.base_dir == str(root)
-    assert config.downloader.radar == "KLOT"
+    assert config.radar == "KLOT"
     assert config.modules == [
         "ingest",
         "detection",
@@ -175,7 +185,7 @@ def test_written_file_leaves_every_option_at_its_default(tmp_path):
         }
     )
     defaults = run_config(nothing_set, path)
-    for section in ("downloader", "global_", "logging"):
+    for section in ("source_params", "global_", "logging", "queue"):
         assert getattr(config, section) == getattr(defaults, section), section
     assert resolve_module_configs(config, owners) == resolve_module_configs(defaults, owners)
 

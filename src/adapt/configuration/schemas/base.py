@@ -26,3 +26,9 @@ class AdaptBaseModel(BaseModel):
         use_enum_values=True,  # Convert enums to values
         str_strip_whitespace=True,  # Strip whitespace from strings
     )
+
+
+class NoOptions(BaseModel):
+    """The options of a module or source that declares none: every key is unknown."""
+
+    model_config = ConfigDict(extra="forbid")

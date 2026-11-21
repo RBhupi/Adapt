@@ -3,8 +3,8 @@
 
 """``adapt config --params NAME...``: options with their defaults, as YAML ready to paste.
 
-NAME is a module (it shows its options under its own name) or a params
-section; several may be named at once. The output is lines to paste under the
+NAME is a module or a source (each shows its options under its own name) or
+a params section; several may be named at once. The output is lines to paste under the
 file's ``params:`` line, which its first line names; pasted there, it changes
 nothing: it prints the defaults.
 """
@@ -16,8 +16,10 @@ import yaml
 
 from adapt.configuration.pipeline_file import load_pipeline_file, param_section_models
 from adapt.configuration.schemas.module_resolver import module_options
+from adapt.configuration.schemas.source_resolver import source_options
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
+from adapt.execution.source_registry import catalog_source_names, source_registry
 from adapt.modules.analysis.config import ALWAYS_EXCLUDED, AnalysisOptions
 from adapt.modules.arm_radar_comm import RadarCommandConfig
 from adapt.modules.detection.config import DetectionOptions
@@ -48,7 +50,7 @@ def show(adapt, capsys):
 
 
 def _names() -> list[str]:
-    return [*catalog_module_names(), *param_section_models()]
+    return [*catalog_module_names(), *catalog_source_names(), *param_section_models()]
 
 
 def _paste(text: str, fragment: str) -> str:
@@ -75,16 +77,25 @@ def _at_their_defaults(pipeline) -> bool:
     """Whether the file's params leave every option at its default."""
     sections = param_section_models()
     modules = [m for m in pipeline.modules if m not in RULES]
-    return all(
-        value == sections[key].model_fields[option].default
-        for key in pipeline.params
-        if key in sections
-        for option, value in pipeline.params[key].items()
-    ) and all(
-        module_options(m, pipeline.params[m], source="the pasted file")
-        == module_options(m, {}, source="its defaults")
-        for m in modules
-        if m in pipeline.params
+    sources = [s for s in catalog_source_names() if s in pipeline.params]
+    return (
+        all(
+            source_options(s, pipeline.params[s], source="the pasted file")
+            == source_options(s, {}, source="its defaults")
+            for s in sources
+        )
+        and all(
+            value == sections[key].model_fields[option].default
+            for key in pipeline.params
+            if key in sections
+            for option, value in pipeline.params[key].items()
+        )
+        and all(
+            module_options(m, pipeline.params[m], source="the pasted file")
+            == module_options(m, {}, source="its defaults")
+            for m in modules
+            if m in pipeline.params
+        )
     )
 
 
@@ -281,12 +292,6 @@ def test_analysis_shows_the_meaning_of_each_option(show):
     assert excluded.endswith(f"({', '.join(ALWAYS_EXCLUDED)})")
 
 
-def test_options_owned_by_the_run_section_are_not_offered(show):
-    downloader = yaml.safe_load(show("downloader"))["downloader"]
-
-    assert not {"radar", "mode", "start_time", "end_time"} & set(downloader)
-
-
 def test_global_offers_only_the_values_the_modules_share(show):
     shared = yaml.safe_load(show("global"))["global"]
 
@@ -305,18 +310,52 @@ def test_global_shows_each_option_with_its_default_and_its_meaning(show):
     ]
 
 
-def test_downloader_shows_each_option_with_its_default_and_its_meaning(show):
-    assert show("downloader").splitlines()[1:] == [
-        "  downloader:",
+def test_aws_nexrad_shows_its_summary_then_each_option_with_its_default_and_meaning(show):
+    summary = source_registry.summary("aws_nexrad")
+
+    assert show("aws_nexrad").splitlines()[1:] == [
+        f"  # aws_nexrad: {summary}. Its options apply when run.source is aws_nexrad",
+        "  aws_nexrad:",
         "    latest_files: 5  # Realtime: newest scans taken from each poll's latest_minutes "
         "window",
         "    latest_minutes: 60  # Realtime: how far back (minutes) each poll looks for scans",
         "    poll_interval_sec: 300  # Polling interval in seconds",
         "    max_fetch_retries: 3  # AWS scan-fetch attempts before giving up for this poll",
         "    min_file_size: 1024  # Minimum file size in bytes to consider valid",
-        "    max_queue_size: 100  # Scans the downloader may run ahead of the processor; at "
-        "this many queued scans the downloader pauses, while processing never pauses",
-        "    queue_resume_fraction: 0.1  # The downloader resumes once the queue has drained "
+    ]
+
+
+def test_local_directory_shows_its_one_option(show):
+    summary = source_registry.summary("local_directory")
+
+    assert show("local_directory").splitlines()[1:] == [
+        f"  # local_directory: {summary}. Its options apply when run.source is local_directory",
+        "  local_directory:",
+        "    min_file_size: 1024  # Minimum file size in bytes to consider valid",
+    ]
+
+
+def test_stored_run_shows_that_it_has_no_options(show):
+    summary = source_registry.summary("stored_run")
+
+    assert show("stored_run").splitlines()[1:] == [
+        f"  # stored_run: {summary}. It has no options",
+        "  stored_run: {}",
+    ]
+
+
+def test_the_removed_downloader_section_is_an_unknown_name(adapt, capsys):
+    assert adapt("config", "--params", "downloader") == 2
+
+    assert "Unknown name(s) downloader " in capsys.readouterr().err
+
+
+def test_queue_shows_each_option_with_its_default_and_its_meaning(show):
+    assert show("queue").splitlines()[1:] == [
+        "  queue:",
+        "    max_queue_size: 100  # Scans the source may run ahead of the processor; at "
+        "this many queued scans the source pauses, while processing never pauses",
+        "    queue_resume_fraction: 0.1  # The source resumes once the queue has drained "
         "to this fraction of max_queue_size (at least 1 scan)",
     ]
 
@@ -383,16 +422,18 @@ def test_an_unknown_name_lists_every_valid_name_by_kind(adapt, capsys):
 
     err = capsys.readouterr().err
     assert "bogus" in err
-    for kind in ("modules", "params sections"):
+    for kind in ("modules", "sources", "params sections"):
         assert kind in err
     for name in _names():
         assert name in err
 
 
-def test_the_sections_shown_are_downloader_global_and_logging(adapt, capsys):
+def test_the_sources_and_sections_shown_are_the_catalogs_and_the_run_configs(adapt, capsys):
     adapt("config", "--params", "bogus")
 
-    assert "  params sections: downloader, global, logging" in capsys.readouterr().err.splitlines()
+    lines = capsys.readouterr().err.splitlines()
+    assert "  sources: aws_nexrad, local_directory, stored_run" in lines
+    assert "  params sections: global, logging, queue" in lines
 
 
 @pytest.mark.parametrize(

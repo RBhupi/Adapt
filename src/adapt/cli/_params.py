@@ -5,17 +5,18 @@
 
 ``params(names)`` prints lines to paste under the ``params:`` line of a
 pipeline file: a first comment line saying so, then one entry per name,
-indented two spaces, two empty lines between entries. A name is a module or a
-section of the run config:
+indented two spaces, two empty lines between entries. A name is a module, a
+source or a section of the run config:
 
-- a section (``global``, ``downloader``, ``logging``) prints itself;
+- a section (``global``, ``logging``, ``queue``) prints itself;
+- a source prints its options under its own name, after a heading line that
+  names it and its summary;
 - a module prints its options under its own name, after a heading line that
   names it: its packaged preset with its comments when it ships one, else
   every option of its model.
 
 Each option carries the first sentence of its description (and the allowed
-values, for a choice) as a comment. The downloader settings that the pipeline
-file's ``run:`` section owns are not offered.
+values, for a choice) as a comment.
 
 ``add_params(text, modules)`` adds the same to a pipeline file's text: a module
 its ``params`` lack gets its entry at the end of ``params``; a module it has
@@ -34,16 +35,14 @@ import yaml
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from adapt.configuration.pipeline_file import (
-    RUN_OWNED_DOWNLOADER_KEYS,
-    load_pipeline_file,
-    param_section_models,
-)
+from adapt.configuration.pipeline_file import load_pipeline_file, param_section_models
 from adapt.configuration.schemas.errors import ConfigError
 from adapt.configuration.schemas.module_resolver import missing_options, module_defaults
+from adapt.configuration.schemas.source_resolver import source_defaults
 from adapt.configuration.schemas.yaml_writer import Descriptions, dump, insert
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
+from adapt.execution.source_registry import catalog_source_names, source_registry
 
 __all__ = ["add_params", "add_to_file", "params"]
 
@@ -56,20 +55,26 @@ def params(names: Sequence[str]) -> str:
     Raises
     ------
     ConfigError
-        A name is neither a module nor a section; the message lists every valid
-        name by kind.
+        A name is neither a module, a source nor a section; the message lists
+        every valid name by kind.
     """
     modules = catalog_module_names()
+    sources = catalog_source_names()
     sections = param_section_models()
-    unknown = [name for name in names if name not in modules and name not in sections]
+    unknown = [n for n in names if n not in modules and n not in sources and n not in sections]
     if unknown:
         raise ConfigError(
             f"Unknown name(s) {', '.join(unknown)} for adapt config --params. Valid names:\n"
             f"  modules: {', '.join(modules)}\n"
+            f"  sources: {', '.join(sources)}\n"
             f"  params sections: {', '.join(sections)}"
         )
     entries = [
-        _section(name, sections[name]) if name in sections else _module(name)
+        _section(name, sections[name])
+        if name in sections
+        else _source(name)
+        if name in sources
+        else _module(name)
         for name in dict.fromkeys(names)
     ]
     return "# Paste these lines under the params: line of your pipeline file\n" + textwrap.indent(
@@ -86,7 +91,7 @@ def add_to_file(path: Path, names: Sequence[str]) -> list[str]:
     ------
     ConfigError
         ``path`` is no file, is not a valid pipeline file, or a name is not a
-        module (a params section included); nothing is written.
+        module (a source or a params section included); nothing is written.
     """
     if not path.is_file():
         raise ConfigError(f"No pipeline file {path}")
@@ -96,9 +101,9 @@ def add_to_file(path: Path, names: Sequence[str]) -> list[str]:
     if unknown:
         raise ConfigError(
             f"Unknown module(s) {', '.join(unknown)} for adapt config --params --file. "
-            f"Modules: {', '.join(modules)}. A params section "
-            f"({', '.join(param_section_models())}) is not added to a file: print it with  "
-            "adapt config --params NAME  and paste it"
+            f"Modules: {', '.join(modules)}. A source ({', '.join(catalog_source_names())}) "
+            f"or a params section ({', '.join(param_section_models())}) is not added to a "
+            "file: print it with  adapt config --params NAME  and paste it"
         )
     text = path.read_text(encoding="utf-8")
     added, gained = add_params(text, list(dict.fromkeys(names)) or list(pipeline.modules))
@@ -143,24 +148,29 @@ def _module(name: str) -> str:
     return heading + dump({name: module_defaults(name)}, {name: _notes(cls.options_class)})
 
 
+def _source(name: str) -> str:
+    """Source ``name``'s entry: a heading line, then its options under its name."""
+    model = source_registry.options_class(name)
+    applies = (
+        "It has no options" if model is None else f"Its options apply when run.source is {name}"
+    )
+    heading = f"# {name}: {source_registry.summary(name)}. {applies}\n"
+    return heading + dump({name: source_defaults(name)}, {name: _notes(model)})
+
+
 def _section(name: str, model: type[BaseModel]) -> str:
     """Run-config section ``name``'s options with their defaults."""
-    skip = frozenset(RUN_OWNED_DOWNLOADER_KEYS) if name == "downloader" else frozenset()
-    defaults = {
-        option: field.default for option, field in model.model_fields.items() if option not in skip
-    }
-    return dump({name: defaults}, {name: _notes(model, skip)})
+    defaults = {option: field.default for option, field in model.model_fields.items()}
+    return dump({name: defaults}, {name: _notes(model)})
 
 
-def _notes(model: Any, skip: frozenset[str] = frozenset()) -> Descriptions:
+def _notes(model: Any) -> Descriptions:
     """The comments of ``model``'s options, nested as its options nest."""
     if model is None:
         return {}
     notes: Descriptions = {}
     for attr, field in model.model_fields.items():
         key = field.alias or attr
-        if key in skip:
-            continue
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
             notes[key] = {"_header": _meaning(field), **_notes(annotation)}

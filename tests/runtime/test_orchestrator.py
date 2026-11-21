@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from adapt.runtime.orchestrator import PipelineOrchestrator
+from tests.helpers.run_configs import new_run_config
 
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
@@ -92,13 +93,15 @@ def test_orchestrator_builds_working_observability_from_config(pipeline_config):
     assert obs.metrics.counter_total("files_processed_total") == 1.0
 
 
-def test_orchestrator_queue_wiring(pipeline_config):
-    """The queue bound comes from config.downloader.max_queue_size unless overridden."""
-    orch = PipelineOrchestrator(pipeline_config)
-    assert orch.downloader_queue.maxsize == pipeline_config.downloader.max_queue_size == 100
+def test_orchestrator_queue_levels_come_from_params_queue(store_root):
+    """The queue is held at params.queue.max_queue_size and resumes at its fraction."""
+    config = new_run_config(
+        store_root, params={"queue": {"max_queue_size": 7, "queue_resume_fraction": 0.5}}
+    )
+    queue = PipelineOrchestrator(config).downloader_queue
 
-    orch = PipelineOrchestrator(pipeline_config, max_queue_size=7)
-    assert orch.downloader_queue.maxsize == 7
+    stats = queue.backpressure_stats()
+    assert (queue.maxsize, stats["queue_high"], stats["queue_low"]) == (7, 7, 3)
 
 
 def test_orchestrator_queue_has_the_configured_levels(pipeline_config):

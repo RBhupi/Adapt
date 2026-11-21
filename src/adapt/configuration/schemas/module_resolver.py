@@ -17,8 +17,9 @@ from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
+from adapt.configuration.schemas.base import NoOptions
 from adapt.configuration.schemas.errors import ConfigError, OptionsRefused, validated
 from adapt.configuration.schemas.internal import InternalConfig
 from adapt.contracts import SharedConfig, config_key
@@ -31,12 +32,6 @@ __all__ = [
     "recorded_options",
     "resolve_module_configs",
 ]
-
-
-class _NoOptions(BaseModel):
-    """The options of a module that declares none: every key is unknown."""
-
-    model_config = ConfigDict(extra="forbid")
 
 
 def module_options(name: str, given: Mapping[str, Any], *, source: str) -> BaseModel | None:
@@ -60,7 +55,7 @@ def module_options(name: str, given: Mapping[str, Any], *, source: str) -> BaseM
         ``params.<name>.<path>``, then the command that prints the module's options.
     """
     cls = registry.get(name)
-    model = _NoOptions if cls.options_class is None else cls.options_class
+    model = NoOptions if cls.options_class is None else cls.options_class
     defaults = {} if cls.every_option_written else _packaged(name) or {}
     try:
         options = validated(

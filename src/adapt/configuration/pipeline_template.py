@@ -22,6 +22,7 @@ from adapt.configuration.schemas.errors import ConfigError, validated
 from adapt.configuration.schemas.yaml_writer import scalar
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
+from adapt.execution.source_registry import catalog_source_names
 
 __all__ = [
     "pipeline_template",
@@ -105,7 +106,10 @@ def _line(text: str, comment: str | None = None) -> str:
 def _render(run: RunSection, modules: tuple[str, ...]) -> str:
     lines = [_HEADER, "", "run:"]
     for key, value in run.model_dump(mode="json").items():
-        lines.append(_line(f"  {key}: {scalar(value)}", RunSection.model_fields[key].description))
+        comment = RunSection.model_fields[key].description
+        if key == "source":
+            comment = f"{comment}: {' | '.join(catalog_source_names())}"
+        lines.append(_line(f"  {key}: {scalar(value)}", comment))
     lines += ["", _line("modules:", _MODULES_COMMENT)]
     for module in catalog_module_names():
         mark = "  - " if module in modules else "  # - "

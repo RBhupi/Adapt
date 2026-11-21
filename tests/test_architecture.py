@@ -767,6 +767,8 @@ _REMOVED_OPTION_NAMES = (
     "with_module_params",
     "coord_names",
     "labels_var",
+    "InternalDownloaderConfig",
+    "RUN_OWNED_DOWNLOADER_KEYS",
 )
 # The sections that held the options, each with the module that owns them now.
 _OLD_SECTIONS = {
@@ -835,6 +837,46 @@ def test_no_option_is_named_by_the_section_that_held_it() -> None:
         "an option is named by a section that no longer exists; name it by its "
         "module (params.<module>.<option>):\n" + "\n".join(offenders)
     )
+
+
+# The ``downloader`` section held the run's values, the AWS source's options,
+# a file-size limit and the queue's settings (stage 4, item 6). Each now has
+# its own place: ``run.<option>``, ``params.<source>.<option>``,
+# ``params.queue.<option>``; only the refusal of the old key builds its name.
+_DOWNLOADER_FIELDS = (
+    "mode",
+    "radar",
+    "latest_files",
+    "latest_minutes",
+    "poll_interval_sec",
+    "max_fetch_retries",
+    "start_time",
+    "end_time",
+    "min_file_size",
+    "max_queue_size",
+    "queue_resume_fraction",
+)
+
+
+def test_the_removed_download_section_is_named_nowhere() -> None:
+    names = ["params.downloader", "config.downloader"]
+    names += [f"downloader.{field}" for field in _DOWNLOADER_FIELDS]
+
+    offenders = _whole_names_in_the_source(names)
+    assert not offenders, (
+        "the downloader section is named again; name the option by its new place "
+        "(run.<option>, params.<source>.<option>, params.queue.<option>):\n" + "\n".join(offenders)
+    )
+
+
+def test_params_names_are_unique() -> None:
+    """A ``params`` key names one module, one source or one section, never two."""
+    from adapt.configuration.pipeline_file import param_section_models
+    from adapt.execution.pipeline_builder import catalog_module_names
+    from adapt.execution.source_registry import catalog_source_names
+
+    names = [*catalog_module_names(), *catalog_source_names(), *param_section_models()]
+    assert len(names) == len(set(names)), sorted({n for n in names if names.count(n) > 1})
 
 
 # What a node object may set on itself while running: the algorithm it builds

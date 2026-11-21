@@ -95,9 +95,9 @@ def _config(pipeline_config, source_dir, modules):
             "mode": "historical",
             "source": "local_directory",
             "source_dir": str(source_dir),
-            "downloader": pipeline_config.downloader.model_copy(
-                update={"start_time": "2024-05-18T11:00:00Z", "end_time": "2024-05-18T13:00:00Z"}
-            ),
+            "source_params": {"min_file_size": 1024},
+            "start_time": "2024-05-18T11:00:00Z",
+            "end_time": "2024-05-18T13:00:00Z",
             "modules": modules,
             # Seed carry needs the projection module, which these runs leave out.
             "module_params": {

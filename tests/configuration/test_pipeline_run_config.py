@@ -3,7 +3,7 @@
 
 """``run_config``: a pipeline file becomes the run's InternalConfig.
 
-``run:`` maps onto the source and downloader settings, ``modules`` is the run's
+``run:`` maps onto the run's source, radar and window, ``modules`` is the run's
 module list, ``params:`` sections are laid over their defaults and module-owned
 params route to ``module_params``, defaults filled in. The file's
 name, path and content are recorded with the run. A ``--run-id`` naming a stored
@@ -79,8 +79,7 @@ class TestRunSection:
 
         assert config.mode == "realtime"
         assert config.source == "aws_nexrad"
-        assert config.downloader.radar == "KBOX"
-        assert config.downloader.mode == "realtime"
+        assert config.radar == "KBOX"
 
     def test_historical_run_maps_the_time_range_as_utc_strings(self, path):
         run = {
@@ -94,8 +93,8 @@ class TestRunSection:
         config = run_config(_pipeline(run=run), path)
 
         assert config.mode == "historical"
-        assert config.downloader.start_time == "2025-06-17T18:00:00Z"
-        assert config.downloader.end_time == "2025-06-17T20:30:00Z"
+        assert config.start_time == "2025-06-17T18:00:00Z"
+        assert config.end_time == "2025-06-17T20:30:00Z"
 
     def test_historical_run_without_a_time_range_is_rejected(self, path):
         run = {"source": "aws_nexrad", "radar": "KBOX", "mode": "historical"}
@@ -151,13 +150,14 @@ class TestParams:
 
         assert config.global_.z_level == 3000.0
 
-    def test_downloader_section_merges_with_the_run_section(self, path):
-        params = {"downloader": {"poll_interval_sec": 60}}
+    def test_source_options_merge_with_the_run_section(self, path):
+        params = {"aws_nexrad": {"poll_interval_sec": 60}}
 
         config = run_config(_pipeline(params=params), path)
 
-        assert config.downloader.poll_interval_sec == 60
-        assert config.downloader.radar == "KBOX"
+        assert config.source_params is not None
+        assert config.source_params["poll_interval_sec"] == 60
+        assert config.radar == "KBOX"
 
     def test_module_owned_params_route_to_module_params(self, path, tmp_path):
         params = {
@@ -323,10 +323,10 @@ def _record(store_root, config, **changed) -> None:
 
 def _record_of_another_version(store_root, config) -> None:
     """Record ``config``'s run as Adapt 0.9.1 would have, were its config to hold a
-    section and a downloader option this version does not have; the run has ended."""
+    section and a global option this version does not have; the run has ended."""
     recorded = json.loads(config.model_dump_json())
     recorded["retired_section"] = {"depth": 2}
-    recorded["downloader"]["retired_option"] = 1
+    recorded["global_"]["retired_option"] = 1
     _record(store_root, config, config_json=json.dumps(recorded), pipeline_version="0.9.1")
     StoreRegistry.get_instance(store_root).finalize_run(
         config.run_id, "completed", scans_processed=0
@@ -383,10 +383,35 @@ def _assert_names_the_unreadable_module_option(message: str) -> None:
 def _assert_names_the_unusable_record(message: str) -> None:
     assert message == (
         f"Run {_RUN_ID}: this Adapt version cannot read its recorded config "
-        "(runs.config_json), at: retired_section, downloader.retired_option. The run was "
+        "(runs.config_json), at: retired_section, global_.retired_option. The run was "
         "recorded with pipeline_version 0.9.1. It cannot be resumed or used for a stored-run "
-        "pass (run.source: stored_run) with this version"
+        "pass (run.source: stored_run) with this version — start a new run"
     )
+
+
+def _record_with_a_downloader_section(store_root, config) -> None:
+    """Record ``config``'s run as a version before the source owned its options
+    would have: its radar, window and queue settings and the source's options
+    in one ``downloader`` section; the run has ended."""
+    recorded = json.loads(config.model_dump_json())
+    recorded["downloader"] = {
+        "mode": recorded["mode"],
+        "radar": recorded.pop("radar"),
+        "start_time": recorded.pop("start_time"),
+        "end_time": recorded.pop("end_time"),
+        **recorded.pop("queue"),
+        **recorded.pop("source_params"),
+    }
+    _record(store_root, config, config_json=json.dumps(recorded), pipeline_version="0.9.1")
+    StoreRegistry.get_instance(store_root).finalize_run(
+        config.run_id, "completed", scans_processed=0
+    )
+
+
+def _assert_names_the_downloader_section(message: str) -> None:
+    assert message.startswith(f"Run {_RUN_ID}: this Adapt version cannot read its recorded")
+    assert "downloader" in message
+    assert message.endswith("with this version — start a new run")
 
 
 class TestRunId:
@@ -471,6 +496,14 @@ class TestRunId:
             run_config(_pipeline(), path, run_id=_RUN_ID)
 
         _assert_names_the_unusable_record(str(exc.value))
+
+    def test_a_run_recorded_with_a_downloader_section_is_not_resumed(self, path, store_root):
+        _record_with_a_downloader_section(store_root, run_config(_pipeline(), path, run_id=_RUN_ID))
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(_pipeline(), path, run_id=_RUN_ID)
+
+        _assert_names_the_downloader_section(str(exc.value))
 
     def test_a_run_recorded_with_a_module_option_this_version_cannot_read_is_not_resumed(
         self, path, store_root
@@ -655,12 +688,21 @@ class TestStoredRun:
 
         _assert_names_the_unusable_record(str(exc.value))
 
+    def test_a_run_recorded_with_a_downloader_section_is_not_passed_over(self, path, store_root):
+        _record_with_a_downloader_section(store_root, run_config(_pipeline(), path, run_id=_RUN_ID))
+        later = _pipeline(run=self._STORED, modules=("target_selection",))
+
+        with pytest.raises(ConfigError) as exc:
+            run_config(later, path, run_id=_RUN_ID)
+
+        _assert_names_the_downloader_section(str(exc.value))
+
     @pytest.mark.parametrize(
         ("section", "options"),
         [
             ("global", {"z_level": 3000}),
-            ("downloader", {"poll_interval_sec": 60}),
             ("logging", {"level": "DEBUG"}),
+            ("queue", {"max_queue_size": 50}),
         ],
     )
     def test_settings_every_module_shares_cannot_change(self, path, section, options):

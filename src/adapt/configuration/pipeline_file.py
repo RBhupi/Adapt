@@ -6,17 +6,18 @@
 Sections: ``run`` (where scans come from), ``modules`` (the per-scan modules to
 run, by name, checked against the module catalog; Adapt orders them by their
 inputs and outputs) and ``params`` (a section of the run config — ``global``,
-``downloader``, ``logging`` — or the name of a catalog module -> options). Only
-the listed modules run: the params of a module the file does not list are kept
-in the file but never read. The options themselves are checked when a run of
-the file is configured, see ``pipeline_run``: a section's by the run config's
-model of it, a module's by the module's own options model.
+``logging``, ``queue`` — or the name of a catalog source or module -> options).
+Only the listed modules and the source named by ``run.source`` run: the params
+of any other are kept in the file but never read. The options themselves are
+checked when a run of the file is configured, see ``pipeline_run``: a
+section's by the run config's model of it, a source's or a module's by its own
+options model.
 
 ``load_pipeline_file`` reads and validates a file; ``pipeline_run`` turns it
 into a run's config. The folder that holds the file is the store root.
 
 The command line may set options of ``params`` for one run (``--set
-params.<module or section>.<option>=<value>``): ``load_pipeline_file`` lays
+params.<key>.<option>=<value>``): ``load_pipeline_file`` lays
 them over the file's before it validates, so they are checked, used and
 recorded exactly as if the file had said them.
 """
@@ -37,19 +38,18 @@ from pydantic import (
     model_validator,
 )
 
-from adapt.configuration.schemas.base import AdaptBaseModel
+from adapt.configuration.schemas.base import AdaptBaseModel, NoOptions
 from adapt.configuration.schemas.errors import ConfigError, validated
 from adapt.configuration.schemas.internal import (
-    InternalDownloaderConfig,
     InternalGlobalConfig,
     InternalLoggingConfig,
+    InternalQueueConfig,
 )
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import catalog_module_names
-from adapt.execution.source_registry import catalog_source_names
+from adapt.execution.source_registry import catalog_source_names, source_registry
 
 __all__ = [
-    "RUN_OWNED_DOWNLOADER_KEYS",
     "PipelineFile",
     "RunSection",
     "load_pipeline_file",
@@ -57,8 +57,8 @@ __all__ = [
     "pipeline_source",
 ]
 
-# Downloader settings the run section owns; ``params.downloader`` must not set them.
-RUN_OWNED_DOWNLOADER_KEYS = ("radar", "mode", "start_time", "end_time")
+# A params key that was a section; its options now live elsewhere (_moved_to).
+_REMOVED_SECTION = "downloader"
 
 # The source that reads a folder (``run.source_dir``) instead of fetching scans.
 _LOCAL_SOURCE = "local_directory"
@@ -74,9 +74,9 @@ def param_section_models() -> dict[str, type[BaseModel]]:
     model of its options: the three settings ``InternalConfig`` holds under
     these names."""
     return {
-        "downloader": InternalDownloaderConfig,
         "global": InternalGlobalConfig,
         "logging": InternalLoggingConfig,
+        "queue": InternalQueueConfig,
     }
 
 
@@ -85,9 +85,7 @@ class RunSection(AdaptBaseModel):
 
     model_config = _FROZEN
 
-    source: str = Field(
-        description="where scans come from: aws_nexrad | local_directory | stored_run"
-    )
+    source: str = Field(description="where scans come from")
     radar: str = Field(description="radar / collection id")
     mode: Literal["realtime", "historical"] = Field(description="realtime | historical")
     start_time: AwareDatetime | None = Field(
@@ -208,26 +206,45 @@ class PipelineFile(AdaptBaseModel):
     def _params_are_sections_or_modules(
         cls, params: dict[str, dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
-        # A module the file does not list keeps its params here unread: only the
-        # listed modules run, and only their options are read and validated.
+        # A module the file does not list, or a source it does not run, keeps its
+        # params here unread: only their options are read and validated.
+        if _REMOVED_SECTION in params:
+            raise ValueError(_moved_to(params[_REMOVED_SECTION]))
         sections = tuple(param_section_models())
+        sources = catalog_source_names()  # each sets its options under its name
         catalog_module_names()  # registers every catalog module
         modules = sorted(registry.list_modules())  # each sets its options under its name
         for key in params:
-            if key not in modules and key not in sections:
+            if key not in modules and key not in sources and key not in sections:
                 raise ValueError(
                     f"unknown params key '{key}'. Valid keys: the sections "
-                    f"{', '.join(sections)}; the modules {', '.join(modules)}"
+                    f"{', '.join(sections)}; the sources {', '.join(sources)}; "
+                    f"the modules {', '.join(modules)}"
                 )
-        owned = [k for k in RUN_OWNED_DOWNLOADER_KEYS if k in params.get("downloader", {})]
-        if owned:
-            raise ValueError(
-                ", ".join(f"params.downloader.{k}" for k in owned)
-                + " belong to the run section — set "
-                + ", ".join(f"run.{k}" for k in owned)
-                + " instead"
-            )
         return params
+
+
+def _moved_to(options: dict[str, Any]) -> str:
+    """The refusal of the removed section: where each of ``options`` is set now,
+    found by its name among the run section, the sections and the sources."""
+    places: list[tuple[str, type[BaseModel]]] = [
+        ("run", RunSection),
+        *((f"params.{name}", model) for name, model in param_section_models().items()),
+    ]
+    lines = []
+    for option in options:
+        found = [f"{at}.{option}" for at, model in places if option in model.model_fields]
+        by_source = [
+            f"params.{name}.{option}"
+            for name in catalog_source_names()
+            if option in (source_registry.options_class(name) or NoOptions).model_fields
+        ]
+        if by_source:
+            found.append(" or ".join(by_source) + " (the source named by run.source)")
+        moved = f"→ {' or '.join(found)}" if found else "is no longer an option"
+        lines.append(f"    {option} {moved}")
+    heading = f"params.{_REMOVED_SECTION} is no longer a section. Set its options here:"
+    return "\n".join([heading, *lines])
 
 
 class _RepeatedKey(ValueError):

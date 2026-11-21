@@ -44,10 +44,10 @@ def record_run(root: Path, config: InternalConfig, **changed: Any) -> None:
     run starts: its collection, the run with its config, and what each of its
     modules runs with (``changed``: parts of the run's row that differ)."""
     registry = StoreRegistry.get_instance(root)
-    registry.register_collection(config.downloader.radar, source_kind="aws_nexrad")
+    registry.register_collection(config.radar, source_kind="aws_nexrad")
     start = RunStart(
         run_id=config.run_id,
-        collection_id=config.downloader.radar,
+        collection_id=config.radar,
         config_hash="h",
         config_json=config.model_dump_json(),
         pipeline_version="0",

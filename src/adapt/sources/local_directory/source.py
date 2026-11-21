@@ -138,7 +138,7 @@ class LocalDirectorySource(threading.Thread):
             size = path.stat().st_size
             if size < self._min_file_size:
                 logger.warning(
-                    "Skipping %s: %d bytes is under downloader.min_file_size %d",
+                    "Skipping %s: %d bytes is under params.local_directory.min_file_size %d",
                     path.name,
                     size,
                     self._min_file_size,

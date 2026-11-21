@@ -222,8 +222,8 @@ run:
 
 A realtime run starts with the newest scans of the last hour (up to 5), then
 looks for new ones every 300 seconds. It runs until you press `Ctrl-C`, or for
-`max_runtime_minutes` when you set it. The numbers are options of `downloader`
-(`adapt config --params downloader`).
+`max_runtime_minutes` when you set it. The numbers are options of `aws_nexrad`
+(`adapt config --params aws_nexrad`).
 
 ---
 
@@ -270,9 +270,11 @@ name of the module it belongs to. Give only what you change.
 
 What to know:
 
-- The names under `params:` are the modules, and three sections
-  that belong to no module: `global` (the altitude of the slice, the field cells
-  are tracked on, the largest gap between scans), `downloader` and `logging`.
+- The names under `params:` are the modules, the sources (`aws_nexrad`,
+  `local_directory`, `stored_run`: the one `run.source` names is read), and
+  three sections that belong to no module: `global` (the altitude of the slice,
+  the field cells are tracked on, the largest gap between scans), `logging` and
+  `queue` (how far the source may run ahead of the processing).
 - `adapt run` and `adapt graph` check every option before anything starts. A
   misspelled option or a value out of its bounds is refused with its full name
   and the reason, for example
@@ -439,7 +441,7 @@ from the radar.
 
 A scan's time is the start of its volume, and its file exists only when the
 volume ends, 4 to 7 minutes later. So the limit has to cover one volume, the
-polling interval (`params: downloader: poll_interval_sec`, 300 s unless you set
+polling interval (`params: aws_nexrad: poll_interval_sec`, 300 s unless you set
 it) and about 30 s of processing. A limit below one volume sends nothing; one
 that covers the volume but not the polling interval sends only some scans. With
 `poll_interval_sec: 30` a limit of 480 covers both radars measured so far

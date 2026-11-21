@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""The run config's ``global``, ``downloader`` and ``logging`` settings.
+"""The run config's ``global``, ``logging`` and ``queue`` settings.
 
 A pipeline file sets them under ``params:``; a run of the file is configured
 with its defaults, the file's values laid over. A wrong value is refused when
@@ -56,17 +56,8 @@ class TestDefaults:
             "tracking_field": "reflectivity",
         }
 
-    def test_a_file_that_sets_no_downloader_option_runs_with_these(self, path):
-        assert run_config(_pipeline(), path).downloader.model_dump() == {
-            "mode": "realtime",
-            "radar": "KBOX",
-            "latest_files": 5,
-            "latest_minutes": 60,
-            "poll_interval_sec": 300,
-            "max_fetch_retries": 3,
-            "start_time": None,
-            "end_time": None,
-            "min_file_size": 1024,
+    def test_a_file_that_sets_no_queue_option_runs_with_these(self, path):
+        assert run_config(_pipeline(), path).queue.model_dump() == {
             "max_queue_size": 100,
             "queue_resume_fraction": 0.1,
         }
@@ -83,6 +74,22 @@ class TestDefaults:
         }
 
 
+class TestRunValues:
+    def test_the_run_config_holds_the_radar_and_window_at_its_top_level(self, path):
+        config = run_config(_pipeline({**_HISTORICAL, **_WINDOW}), path)
+
+        assert (config.radar, config.start_time, config.end_time) == (
+            "KBOX",
+            "2025-06-17T18:00:00Z",
+            "2025-06-17T19:00:00Z",
+        )
+
+    def test_a_realtime_run_has_no_window(self, path):
+        config = run_config(_pipeline(), path)
+
+        assert (config.start_time, config.end_time) == (None, None)
+
+
 class TestOptionsGiven:
     def test_every_global_option_of_the_file_reaches_the_run(self, path):
         given = {"z_level": 3000.0, "max_scan_gap_minutes": 12.5, "tracking_field": "velocity"}
@@ -92,20 +99,21 @@ class TestOptionsGiven:
 
         assert config.global_.model_dump() == given
 
-    def test_every_downloader_option_of_the_file_reaches_the_run(self, path):
+    def test_every_source_option_of_the_file_reaches_the_run(self, path):
         given = {
             "latest_files": 2,
             "latest_minutes": 30,
             "poll_interval_sec": 60,
             "max_fetch_retries": 5,
             "min_file_size": 2048,
-            "max_queue_size": 7,
-            "queue_resume_fraction": 0.5,
         }
 
-        downloader = run_config(_pipeline(downloader=given), path).downloader.model_dump()
+        assert run_config(_pipeline(aws_nexrad=given), path).source_params == given
 
-        assert {key: downloader[key] for key in given} == given
+    def test_every_queue_option_of_the_file_reaches_the_run(self, path):
+        given = {"max_queue_size": 7, "queue_resume_fraction": 0.5}
+
+        assert run_config(_pipeline(queue=given), path).queue.model_dump() == given
 
     def test_every_logging_option_of_the_file_reaches_the_run(self, path):
         given = {
@@ -136,14 +144,9 @@ class TestRefusals:
         ("section", "option", "value", "bound"),
         [
             ("global", "max_scan_gap_minutes", 0, "greater than 0"),
-            ("downloader", "latest_files", 0, "greater than or equal to 1"),
-            ("downloader", "latest_minutes", 0, "greater than or equal to 1"),
-            ("downloader", "poll_interval_sec", 0, "greater than or equal to 1"),
-            ("downloader", "max_fetch_retries", 0, "greater than or equal to 1"),
-            ("downloader", "min_file_size", 0, "greater than or equal to 1"),
-            ("downloader", "max_queue_size", 0, "greater than or equal to 1"),
-            ("downloader", "queue_resume_fraction", 0, "greater than 0"),
-            ("downloader", "queue_resume_fraction", 1, "less than 1"),
+            ("queue", "max_queue_size", 0, "greater than or equal to 1"),
+            ("queue", "queue_resume_fraction", 0, "greater than 0"),
+            ("queue", "queue_resume_fraction", 1, "less than 1"),
         ],
     )
     def test_a_value_outside_its_bound_is_refused_naming_the_file_and_the_option(
@@ -162,7 +165,7 @@ class TestRefusals:
         [
             ("global", "bogus"),
             ("global", "coord_names"),
-            ("downloader", "output_dir"),
+            ("queue", "output_dir"),
             ("logging", "progress_every"),
         ],
     )
@@ -213,20 +216,20 @@ class TestRefusals:
     def test_the_wrong_options_of_several_sections_are_told_together(self, path):
         pipeline = _pipeline(
             **{"global": {"max_scan_gap_minutes": 0}},
-            downloader={"latest_files": 0},
             logging={"level": "LOUD"},
+            queue={"max_queue_size": 0},
         )
 
         told = [line.split(" — ")[0] for line in _refusal(path, pipeline)[1:]]
 
         assert told == [
-            "  • params.downloader.latest_files",
             "  • params.global.max_scan_gap_minutes",
             "  • params.logging.level",
+            "  • params.queue.max_queue_size",
         ]
 
     def test_adapt_graph_refuses_the_same_value_the_same_way(self, path):
-        pipeline = _pipeline(downloader={"latest_files": 0})
+        pipeline = _pipeline(queue={"max_queue_size": 0})
 
         with pytest.raises(ConfigError) as exc:
             configured_modules(pipeline, path)
@@ -262,13 +265,13 @@ class TestRecord:
     def test_the_record_holds_no_setting_that_nothing_reads(self, path):
         recorded = json.loads(run_config(_pipeline(), path).model_dump_json())
 
-        assert "output_dir" not in recorded["downloader"]
+        assert "output_dir" not in recorded["source_params"]
         assert "progress_every" not in recorded["logging"]
 
     def test_a_config_read_back_from_its_record_is_the_same_config(self, path):
         pipeline = _pipeline(
             {**_HISTORICAL, **_WINDOW},
-            downloader={"max_queue_size": 7},
+            queue={"max_queue_size": 7},
             logging={"json_logs": True},
         )
         config = run_config(pipeline, path)
@@ -282,7 +285,10 @@ class TestRecord:
         with pytest.raises(ValidationError, match="modules"):
             InternalConfig.model_validate(recorded)
 
-    @pytest.mark.parametrize("field", ["source", "run_id", "module_params", "pipeline"])
+    @pytest.mark.parametrize(
+        "field",
+        ["source", "radar", "start_time", "end_time", "run_id", "module_params", "pipeline"],
+    )
     def test_a_run_config_without_this_is_not_a_run_config(self, path, field):
         recorded = json.loads(run_config(_pipeline(), path).model_dump_json())
         del recorded[field]
@@ -292,7 +298,11 @@ class TestRecord:
 
     @pytest.mark.parametrize(
         ("section", "option"),
-        [("global_", "z_level"), ("downloader", "latest_files"), ("logging", "level")],
+        [
+            ("global_", "z_level"),
+            ("logging", "level"),
+            ("queue", "max_queue_size"),
+        ],
     )
     def test_a_section_of_a_run_config_cannot_be_changed(self, path, section, option):
         settings = getattr(run_config(_pipeline(), path), section)

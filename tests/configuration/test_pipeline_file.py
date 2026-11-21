@@ -161,16 +161,16 @@ class TestModules:
 
 
 class TestParams:
-    def test_the_sections_of_the_run_config_are_these_three(self):
-        assert tuple(param_section_models()) == ("downloader", "global", "logging")
+    def test_the_sections_of_the_run_config_are_these(self):
+        assert tuple(param_section_models()) == ("global", "logging", "queue")
 
-    @pytest.mark.parametrize("section", ["downloader", "global", "logging"])
+    @pytest.mark.parametrize("section", ["global", "logging", "queue"])
     def test_a_sections_options_are_the_run_configs_model_of_that_section(self, section):
         held = {field.alias or name: field for name, field in InternalConfig.model_fields.items()}
 
         assert param_section_models()[section] is held[section].annotation
 
-    @pytest.mark.parametrize("section", ["logging", "global", "downloader"])
+    @pytest.mark.parametrize("section", ["logging", "global", "queue"])
     def test_the_run_configs_section_names_are_accepted(self, tmp_path, section):
         pipeline = _load(tmp_path, _file(params={section: {}}))
 
@@ -228,9 +228,16 @@ class TestParams:
 
         message = str(exc.value)
         assert "segmentor" in message
-        assert "global" in message
+        assert "the sections global, logging, queue" in message
+        assert "the sources aws_nexrad, local_directory, stored_run" in message
         assert "detection" in message
         assert "cell_volume_stats" in message
+
+    @pytest.mark.parametrize("source", ["aws_nexrad", "local_directory", "stored_run"])
+    def test_every_catalog_source_takes_its_options_under_its_own_name(self, tmp_path, source):
+        pipeline = _load(tmp_path, _file(params={source: {}}))
+
+        assert pipeline.params == {source: {}}
 
     @pytest.mark.parametrize(
         "section",
@@ -257,18 +264,44 @@ class TestParams:
 
         assert pipeline.params == {"logging": {}}
 
+    def test_the_removed_downloader_section_is_refused_naming_where_each_option_went(
+        self, tmp_path
+    ):
+        given = {"poll_interval_sec": 30, "min_file_size": 2048, "max_queue_size": 50}
+
+        with pytest.raises(ConfigError) as exc:
+            _load(tmp_path, _file(params={"downloader": given}))
+
+        message = str(exc.value)
+        assert "params.downloader is no longer a section" in message
+        assert (
+            "poll_interval_sec → params.aws_nexrad.poll_interval_sec "
+            "(the source named by run.source)"
+        ) in message
+        assert (
+            "min_file_size → params.aws_nexrad.min_file_size or "
+            "params.local_directory.min_file_size (the source named by run.source)"
+        ) in message
+        assert "max_queue_size → params.queue.max_queue_size" in message
+
     @pytest.mark.parametrize("key", ["radar", "mode", "start_time", "end_time"])
-    def test_downloader_settings_owned_by_run_are_rejected(self, tmp_path, key):
+    def test_a_run_value_under_downloader_is_told_to_go_to_the_run_section(self, tmp_path, key):
         with pytest.raises(ConfigError) as exc:
             _load(tmp_path, _file(params={"downloader": {key: "x"}}))
 
-        assert f"run.{key}" in str(exc.value)
+        assert f"{key} → run.{key}" in str(exc.value)
+
+    def test_an_option_under_downloader_that_has_no_new_place_is_told_so(self, tmp_path):
+        with pytest.raises(ConfigError) as exc:
+            _load(tmp_path, _file(params={"downloader": {"output_dir": "/data"}}))
+
+        assert "output_dir is no longer an option" in str(exc.value)
 
     @pytest.mark.parametrize(
         ("section", "options", "path"),
         [
-            ("downloader", {"min_file_size": 0}, "downloader.min_file_size"),
-            ("downloader", {"queue_resume_fraction": 3}, "downloader.queue_resume_fraction"),
+            ("queue", {"max_queue_size": 0}, "queue.max_queue_size"),
+            ("queue", {"queue_resume_fraction": 3}, "queue.queue_resume_fraction"),
         ],
     )
     def test_a_section_option_out_of_its_bounds_is_refused_when_the_file_is_configured(

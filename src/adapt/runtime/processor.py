@@ -257,7 +257,7 @@ class RadarProcessor(threading.Thread):
         with self._obs.bind(
             trace_id=self._root_trace_id,
             pipeline_id=self.run_id,
-            dataset_id=self.config.downloader.radar,
+            dataset_id=self.config.radar,
             worker_id="processor",
         ):
             self._run_loop()
@@ -395,7 +395,7 @@ class RadarProcessor(threading.Thread):
                 scan_id=scan_id,
                 run_id=self.run_id,
                 source_file=str(filepath),
-                collection_id=self.config.downloader.radar,
+                collection_id=self.config.radar,
             )
             scan = ScanAt(self.collection, self.run_id, scan_id, scan_time)
             run = self._executor.run(
@@ -432,7 +432,7 @@ class RadarProcessor(threading.Thread):
             location = result.get(RADAR_LOCATION)
             if location is not None:
                 self.registry.ensure_collection_location(
-                    self.config.downloader.radar, lat=location.latitude, lon=location.longitude
+                    self.config.radar, lat=location.latitude, lon=location.longitude
                 )
 
             # ── The scan is complete: it joins the history and the modules'
@@ -454,7 +454,7 @@ class RadarProcessor(threading.Thread):
                 f" queue={queue_wait_s:.1f}s" if queue_wait_s is not None else "",
             )
 
-            radar = self.config.downloader.radar
+            radar = self.config.radar
             self._obs.metrics.incr("files_processed_total", dataset_id=radar)
             self._obs.metrics.observe("scan_processing_time", elapsed_s)
             self._obs.metrics.gauge("queue_depth", self.input_queue.qsize())

@@ -4,9 +4,9 @@
 """Every wrong option of a pipeline file is told in one refusal.
 
 ``adapt run NAME`` and ``adapt graph NAME`` name the file once, then each wrong
-option on its own line — the options of every listed module and of the
-``global``, ``downloader`` and ``logging`` sections — then, per module with a
-wrong option, the command that prints its options. Nobody has to fix one
+option on its own line — the options of every listed module, of the run's
+source and of the ``global``, ``logging`` and ``queue`` sections — then, per
+module or source with a wrong option, the command that prints its options. Nobody has to fix one
 option, run again and meet the next.
 """
 
@@ -57,21 +57,24 @@ def test_wrong_options_of_two_modules_and_a_section_are_told_together(refusal, c
 
 
 @pytest.mark.parametrize("command", ["run", "graph"])
-def test_wrong_options_of_all_three_sections_and_a_module_are_told_together(refusal, command):
+def test_wrong_options_of_every_section_the_source_and_a_module_are_told_together(refusal, command):
     told = refusal(
         command,
         tracking={"max_speed_ms": 0},
-        downloader={"latest_files": 0},
+        aws_nexrad={"latest_files": 0},
         logging={"level": "LOUD"},
+        queue={"max_queue_size": 0},
         **{"global": {"max_scan_gap_minutes": 0}},
     )
 
     assert [line.split(" — ")[0] for line in told] == [
         "  • params.tracking.max_speed_ms",
-        "  • params.downloader.latest_files",
+        "  • params.aws_nexrad.latest_files",
         "  • params.global.max_scan_gap_minutes",
         "  • params.logging.level",
+        "  • params.queue.max_queue_size",
         "The options of tracking: adapt config --params tracking",
+        "The options of aws_nexrad: adapt config --params aws_nexrad",
     ]
 
 

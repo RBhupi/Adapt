@@ -201,8 +201,9 @@ def test_a_file_written_with_every_option_gains_nothing(adapt, add, tmp_path, mo
     [
         (("tracking", "trackin"), "Unknown module(s) trackin"),
         (("global",), "Unknown module(s) global"),
+        (("aws_nexrad",), "Unknown module(s) aws_nexrad"),
     ],
-    ids=["unknown", "section"],
+    ids=["unknown", "section", "source"],
 )
 def test_a_name_that_is_not_a_module_is_refused_and_nothing_is_written(
     pipeline_file, add, names, told
@@ -214,6 +215,18 @@ def test_a_name_that_is_not_a_module_is_refused_and_nothing_is_written(
     assert code == 2
     assert told in out
     assert path.read_text() == _EDITED
+
+
+@pytest.mark.parametrize("name", ["aws_nexrad", "queue"])
+def test_a_source_or_a_section_is_to_be_printed_and_pasted(pipeline_file, add, name):
+    code, out = add(pipeline_file(_EDITED), name)
+
+    assert code == 2
+    assert (
+        "A source (aws_nexrad, local_directory, stored_run) or a params section "
+        "(global, logging, queue) is not added to a file: print it with "
+        "adapt config --params NAME and paste it"
+    ) in " ".join(out.split())
 
 
 def test_a_missing_file_is_refused(add, tmp_path, monkeypatch):

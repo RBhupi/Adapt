@@ -126,7 +126,6 @@ class PipelineOrchestrator:
     def __init__(
         self,
         config: "InternalConfig",
-        max_queue_size: int | None = None,
         close_repository_on_stop: bool = True,
         skip_failed: bool = False,
     ):
@@ -137,22 +136,15 @@ class PipelineOrchestrator:
         config : InternalConfig
             Fully resolved runtime configuration (from ``pipeline_run.run_config``).
             Already contains all directory paths, run ID, and validated settings.
-
-        max_queue_size : int, optional
-            Override for ``config.downloader.max_queue_size``. Left unset the
-            configured value is used.
         """
         self.config = config
-        self.max_queue_size = (
-            max_queue_size if max_queue_size is not None else config.downloader.max_queue_size
-        )
 
         # Queue for source -> processor communication. A source that fetches
         # ahead is held at this level and resumes at queue_resume_fraction of it
         # (BackpressureQueue.wait_for_room), so in normal operation a put() never
         # blocks and the processor is never starved.
         self.downloader_queue = BackpressureQueue(
-            self.max_queue_size, config.downloader.queue_resume_fraction
+            config.queue.max_queue_size, config.queue.queue_resume_fraction
         )
 
         # Fail fast: the pipeline never runs against an uninitialized root.
@@ -404,7 +396,7 @@ class PipelineOrchestrator:
             orch = PipelineOrchestrator(config)  # mode="historical" in config
             status = orch.start()  # Runs until all files between start/end processed
         """
-        radar = self.config.downloader.radar
+        radar = self.config.radar
 
         # Logging is configured first so that everything below it — repository
         # construction, telemetry setup, and any failure in either — lands in the

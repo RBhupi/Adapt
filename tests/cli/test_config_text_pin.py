@@ -16,7 +16,7 @@ pytestmark = pytest.mark.unit
 
 _PINNED = {
     (): "80ddd73e921082ce86695127b920c28ace33eaf7fd1c2e8beebdb80b97aacd7f",
-    ("--params",): "4f33e6c67414c73201aa24eb12e994fd36e485028fa8bfe2eb46d508efe69606",
+    ("--params",): "da86d0ea478b35770e4caf19325e04e3a60f27a9029f87ea62eb296e9c3b21d5",
 }
 
 

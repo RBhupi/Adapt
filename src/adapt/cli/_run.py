@@ -21,7 +21,7 @@ on with the scan after its last complete one, exactly as if it had not stopped.
 has (``--run-id`` names it): nothing is acquired, and what those modules read
 from modules not listed is read back from the store.
 
-``--set params.<module or section>.<option>=<value>`` sets an option for this
+``--set params.<module, source or section>.<option>=<value>`` sets an option for this
 run, over what the file says; the run records it. A resumed run keeps the
 options it recorded, so ``--set`` is refused there.
 """

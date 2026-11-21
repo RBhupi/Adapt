@@ -8,6 +8,8 @@ import pytest
 from tests.helpers.pipeline_files import MODULES, TARGET_SELECTION, write_pipeline
 
 from adapt.api.store_client import StoreClient
+from adapt.configuration.pipeline_file import load_pipeline_file
+from adapt.configuration.pipeline_run import run_config
 
 pytestmark = pytest.mark.unit
 
@@ -54,6 +56,25 @@ def test_an_option_set_for_the_graph_changes_what_a_module_reads(store, adapt, c
 
     assert adapt("graph", "case", "--set", band) == 0
     assert "arm_radar_comm" in capsys.readouterr().out
+
+
+def test_a_source_option_set_on_the_command_line_reaches_the_run(store):
+    path = write_pipeline(store, "case", run=_REALTIME)
+
+    config = run_config(load_pipeline_file(path, ["params.aws_nexrad.poll_interval_sec=30"]), path)
+
+    assert config.source_params is not None
+    assert config.source_params["poll_interval_sec"] == 30
+
+
+def test_a_setting_of_the_removed_downloader_section_gets_its_refusal(store, adapt, capsys):
+    write_pipeline(store, "case", run=_REALTIME)
+
+    assert adapt("graph", "case", "--set", "params.downloader.poll_interval_sec=30") == 2
+
+    told = capsys.readouterr().err
+    assert "params.downloader is no longer a section" in told
+    assert "poll_interval_sec → params.aws_nexrad.poll_interval_sec" in told
 
 
 def test_set_may_be_given_more_than_once(store, adapt, capsys):

@@ -9,10 +9,11 @@ never calls ``.get()``, applies a fallback or validates again. It is built from
 a pipeline file by ``adapt.configuration.pipeline_run`` and recorded with the
 run.
 
-Its ``downloader``, ``global`` and ``logging`` sections are also the options a
+Its ``global``, ``logging`` and ``queue`` sections are also the options a
 pipeline file sets under ``params:`` with those names: each option's default,
 bounds and description are defined here, once. A module's options are the
-module's own; the run config records them under ``module_params``.
+module's own; the run config records them under ``module_params``. The run's
+source's options are the source's own; it records them under ``source_params``.
 """
 
 from typing import Any, Literal
@@ -28,62 +29,28 @@ _LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 # =============================================================================
 
 
-class InternalDownloaderConfig(AdaptBaseModel):
-    """The scan source's settings (``params.downloader``).
-
-    ``mode``, ``radar``, ``start_time`` and ``end_time`` are the pipeline file's
-    ``run:`` section's; ``params.downloader`` cannot set them.
-    """
+class InternalQueueConfig(AdaptBaseModel):
+    """The queue between the source and the processor (``params.queue``)."""
 
     model_config = ConfigDict(frozen=True)
 
-    mode: Literal["realtime", "historical"] = Field(
-        description="realtime follows new scans; historical processes "
-        "start_time..end_time. A pipeline file sets it as run.mode"
-    )
-    radar: str = Field(
-        description="Radar / collection id to fetch scans for; a pipeline file sets it as run.radar"
-    )
-    latest_files: int = Field(
-        default=5,
-        ge=1,
-        description="Realtime: newest scans taken from each poll's latest_minutes window",
-    )
-    latest_minutes: int = Field(
-        default=60, ge=1, description="Realtime: how far back (minutes) each poll looks for scans"
-    )
-    poll_interval_sec: int = Field(default=300, ge=1, description="Polling interval in seconds")
-    max_fetch_retries: int = Field(
-        default=3, ge=1, description="AWS scan-fetch attempts before giving up for this poll"
-    )
-    start_time: str | None = Field(
-        description="Historical: first scan time (ISO 8601 UTC); a pipeline file sets it as "
-        "run.start_time"
-    )
-    end_time: str | None = Field(
-        description="Historical: last scan time (ISO 8601 UTC); a pipeline file sets it as "
-        "run.end_time"
-    )
-    min_file_size: int = Field(
-        default=1024, ge=1, description="Minimum file size in bytes to consider valid"
-    )
     max_queue_size: int = Field(
         default=100,
         ge=1,
         description=(
-            "Scans the downloader may run ahead of the processor; at this many queued "
-            "scans the downloader pauses, while processing never pauses. Each queued "
+            "Scans the source may run ahead of the processor; at this many queued "
+            "scans the source pauses, while processing never pauses. Each queued "
             "scan costs only the disk of its downloaded volume, about 10 MB"
         ),
     )
-    # The gap between the pause and resume levels stops the downloader flapping on
+    # The gap between the pause and resume levels stops the source flapping on
     # every consumed scan.
     queue_resume_fraction: float = Field(
         default=0.10,
         gt=0.0,
         lt=1.0,
         description=(
-            "The downloader resumes once the queue has drained to this fraction of "
+            "The source resumes once the queue has drained to this fraction of "
             "max_queue_size (at least 1 scan)"
         ),
     )
@@ -192,7 +159,7 @@ class InternalConfig(AdaptBaseModel):
     Runtime code receives InternalConfig and accesses fields directly:
 
         def __init__(self, config: InternalConfig):
-            self.radar = config.downloader.radar  # NOT .get()
+            self.radar = config.radar  # NOT .get()
             self.z_level = config.global_.z_level
 
     Rules
@@ -214,13 +181,24 @@ class InternalConfig(AdaptBaseModel):
         default=None,
         description="Directory a local source scans for already-present files",
     )
+    radar: str = Field(description="Radar / collection id of the run; the file's run.radar")
+    start_time: str | None = Field(
+        description="Historical: first scan time (ISO 8601 UTC); the file's run.start_time"
+    )
+    end_time: str | None = Field(
+        description="Historical: last scan time (ISO 8601 UTC); the file's run.end_time"
+    )
     run_id: str = Field(
         description="The run's id (YYYYMONDD-HHMM-RADAR). Empty in a config built only to "
         "wire a file's modules (adapt graph), which starts no run"
     )
-    downloader: InternalDownloaderConfig
     global_: InternalGlobalConfig = Field(alias="global")
     logging: InternalLoggingConfig
+    queue: InternalQueueConfig
+    source_params: dict[str, Any] | None = Field(
+        description="The validated options of the run's source, complete; None for a "
+        "source without options"
+    )
     module_params: dict[str, dict[str, Any]] = Field(
         description="The validated options of every listed module that has options, "
         "complete, by module name"

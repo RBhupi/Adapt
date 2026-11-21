@@ -4,9 +4,9 @@
 """A run's config from a pipeline file: ``run_config``.
 
 ``run_config`` turns a loaded file into the run's ``InternalConfig``: the run
-section, the ``global``, ``downloader`` and ``logging`` settings (their defaults
-with the file's laid over), every listed module's validated options, and the
-provenance record of the file. It generates the run id, and reloads a stored
+section, the ``global``, ``logging`` and ``queue`` settings (their defaults
+with the file's laid over), the source's and every listed module's validated
+options, and the provenance record of the file. It generates the run id, and reloads a stored
 run's config for ``--run-id``. It configures every module the run will run and
 builds their graph, so a module that refuses its options or lacks an input
 fails before anything starts.
@@ -32,6 +32,7 @@ from adapt.configuration.schemas.module_resolver import (
     module_options,
     resolve_module_configs,
 )
+from adapt.configuration.schemas.source_resolver import source_options
 from adapt.contracts.execution_history import ModuleProvenance
 from adapt.execution.module_registry import registry
 from adapt.execution.pipeline_builder import resolve_enabled_modules, scan_graph
@@ -147,10 +148,9 @@ def _stored_run_config(pipeline: PipelineFile, path: Path, run_id: str | None) -
             f"{str(exc).rstrip('.')}. Runs of radar {radar} in this store: {runs}"
         ) from exc
     recorded = _recorded_config(run, path)
-    if recorded.downloader.radar != radar:
+    if recorded.radar != radar:
         raise ConfigError(
-            f"Run {run_id} is of radar '{recorded.downloader.radar}', but {path} has "
-            f"run.radar '{radar}'"
+            f"Run {run_id} is of radar '{recorded.radar}', but {path} has run.radar '{radar}'"
         )
     if run["status"] == "running":
         raise ConfigError(
@@ -166,14 +166,16 @@ def _stored_run_config(pipeline: PipelineFile, path: Path, run_id: str | None) -
             "remove them (the options of the listed modules still apply)"
         )
     given, refused = _module_params(pipeline, path)
-    if refused:
-        raise together(refused)
+    _, source_refused = _source_params(pipeline, path)  # stored_run has no options
+    if refused or source_refused:
+        raise together([*refused, *source_refused])
     _refuse_other_options(run_id, run_registry.module_provenance(run_id), given, path)
     print(f"Running {', '.join(pipeline.modules)} over stored run {run_id}")
     return recorded.model_copy(
         update={
             "source": _STORED_SOURCE,
             "mode": "historical",
+            "source_params": None,
             "modules": list(pipeline.modules),
             "module_params": {**recorded.module_params, **given},
             "pipeline": _provenance(pipeline, path),
@@ -287,6 +289,20 @@ def _module_params(
     return recorded, refused
 
 
+def _source_params(
+    pipeline: PipelineFile, path: Path
+) -> tuple[dict[str, Any] | None, list[OptionsRefused]]:
+    """What a run records of the options of the file's source (None for a
+    source without options), and their refusal when they are wrong."""
+    name = pipeline.run.source
+    source = pipeline_source(path, pipeline.overrides)
+    try:
+        options = source_options(name, pipeline.params.get(name, {}), source=source)
+    except OptionsRefused as exc:
+        return None, [exc]
+    return (None if options is None else _in_json(options)), []
+
+
 def _options_record(name: str, given: Mapping[str, Any], source: str) -> dict[str, Any] | None:
     """What a run records of module ``name``, given these options by ``source``
     (the file, and the command line's settings): its validated options,
@@ -341,9 +357,9 @@ def _named_run_config(pipeline: PipelineFile, path: Path, run_id: str) -> Intern
         print(f"Using user-provided run ID (new run): {run_id}")
         return _internal_config(pipeline, path, run_id)
     recorded = _recorded_config(run, path)
-    if recorded.downloader.radar != pipeline.run.radar:
+    if recorded.radar != pipeline.run.radar:
         raise ConfigError(
-            f"Run {run_id} is of radar '{recorded.downloader.radar}', but {path} has "
+            f"Run {run_id} is of radar '{recorded.radar}', but {path} has "
             f"run.radar '{pipeline.run.radar}'"
         )
     if pipeline.overrides:
@@ -377,7 +393,7 @@ def _recorded_config(run: Mapping[str, Any], path: Path) -> InternalConfig:
             f"Run {run['run_id']}: this Adapt version cannot read its recorded config "
             f"(runs.config_json), at: {', '.join(keys)}. The run was recorded with "
             f"pipeline_version {run['pipeline_version']}. It cannot be resumed or used for a "
-            "stored-run pass (run.source: stored_run) with this version"
+            "stored-run pass (run.source: stored_run) with this version — start a new run"
         ) from exc
     return recorded.model_copy(update={"base_dir": str(path.parent)})
 
@@ -404,20 +420,22 @@ def _new_run_id(pipeline: PipelineFile, path: Path) -> str:
 
 def _internal_config(pipeline: PipelineFile, path: Path, run_id: str) -> InternalConfig:
     """The config of new run ``run_id`` of the file: its run section, the
-    ``global``, ``downloader`` and ``logging`` settings (their defaults with the
-    file's laid over) and every listed module's options.
+    ``global``, ``logging`` and ``queue`` settings (their defaults with the
+    file's laid over), its source's options and every listed module's options.
 
     Raises
     ------
     ConfigError
-        Options are wrong: every wrong one of the listed modules and of the
-        three sections is told, each as ``params.<key>.<option>``, in one
-        message that names the file. Or a historical run that fetches or reads
+        Options are wrong: every wrong one of the listed modules, of the source
+        and of the three sections is told, each as ``params.<key>.<option>``, in
+        one message that names the file. Or a historical run that fetches or reads
         scans has no time window.
     """
     run = pipeline.run
     params = pipeline.params
     module_params, refused = _module_params(pipeline, path)
+    source_params, source_refused = _source_params(pipeline, path)
+    refused += source_refused
     try:
         config = validated(
             InternalConfig,
@@ -426,16 +444,14 @@ def _internal_config(pipeline: PipelineFile, path: Path, run_id: str) -> Interna
                 "base_dir": str(path.parent),
                 "source": run.source,
                 "source_dir": run.source_dir,
+                "radar": run.radar,
+                "start_time": None if run.start_time is None else to_scan_iso(run.start_time),
+                "end_time": None if run.end_time is None else to_scan_iso(run.end_time),
                 "run_id": run_id,
-                "downloader": {
-                    **params.get("downloader", {}),
-                    "mode": run.mode,
-                    "radar": run.radar,
-                    "start_time": None if run.start_time is None else to_scan_iso(run.start_time),
-                    "end_time": None if run.end_time is None else to_scan_iso(run.end_time),
-                },
                 "global": params.get("global", {}),
                 "logging": params.get("logging", {}),
+                "queue": params.get("queue", {}),
+                "source_params": source_params,
                 "module_params": module_params,
                 "modules": list(pipeline.modules),
                 "pipeline": _provenance(pipeline, path),
