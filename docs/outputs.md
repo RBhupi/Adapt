@@ -152,7 +152,7 @@ the database itself (`PRAGMA table_info(cell_stats)` in SQLite,
 | Column | Meaning |
 |--------|---------|
 | `cell_uid` | the identity of the cell across scans |
-| `cell_label` | its number in this scan; the value of its pixels in the NetCDF label field |
+| `cell_label` | its number in this scan; the value of its pixels in the NetCDF label field. A label is valid only within its own scan: the same cell can have another number in the next scan. Follow a cell from scan to scan by `cell_uid`, never by its label |
 | `age_seconds` | time since the track was first seen |
 | `is_initiated_here` | 1 when the track begins at this scan |
 | `is_split_target_here`, `is_merge_target_here` | 1 when the cell came out of a split, or absorbed another cell, at this scan |
@@ -261,7 +261,7 @@ Fields of the segmentation file:
 | `cell_labels` | the cell number of each grid point; 0 is no cell |
 | `cell_uid` | the `cell_uid` of each cell number of this scan |
 | `heading_x`, `heading_y` | the motion field, in grid points per scan step |
-| `cell_projections` | cell labels moved by the motion, one layer per `frame_offset`: layer 0 is the previous scan's cells moved to this scan's time, layers 1 and up are this scan's cells moved one scan step further each |
+| `cell_projections` | cell labels moved by the motion, one layer per `frame_offset`: layer 0 is the previous scan's cells moved to this scan's time, numbered with the previous scan's labels (`registration_cell_uid` gives their `cell_uid`); layers 1 and up are this scan's cells moved one scan step further each |
 | `projection_minutes` | this scan's cell labels moved forward to each whole minute after it |
 | `registration_minutes` | the previous scan's cell labels moved to each whole minute between the two scans |
 | `registration_cell_uid` | the `cell_uid` of each cell number of the previous scan |
