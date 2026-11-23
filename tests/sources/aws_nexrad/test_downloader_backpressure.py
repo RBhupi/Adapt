@@ -12,7 +12,7 @@ import pytest
 
 from adapt.runtime.scan_queue import BackpressureQueue
 from adapt.sources.aws_nexrad.config import AwsNexradOptions
-from adapt.sources.aws_nexrad.source import AwsNexradDownloader
+from tests.helpers.offline_aws import offline
 
 pytestmark = pytest.mark.unit
 
@@ -35,9 +35,7 @@ def test_the_downloader_asks_the_queue_for_room_before_each_download(
 ):
     q = _RecordingQueue(fake_gateway)
     scans = [fake_scan(f"s{i}") for i in range(3)]
-    d = AwsNexradDownloader(
-        source_run(), AwsNexradOptions(), q, fake_gateway, conn=fake_aws_conn(scans)
-    )
+    d = offline(fake_aws_conn(scans))(source_run(), AwsNexradOptions(), q, fake_gateway)
 
     d._process_scans(scans)
 
@@ -52,9 +50,7 @@ def test_a_stop_while_the_downloader_waits_ends_the_batch_with_nothing_downloade
     q = BackpressureQueue(2, 0.5, sleep=lambda _seconds: d.stop())
     q.put("earlier-scan-0")
     q.put("earlier-scan-1")  # the queue is at its high level
-    d = AwsNexradDownloader(
-        source_run(), AwsNexradOptions(), q, fake_gateway, conn=fake_aws_conn(scans)
-    )
+    d = offline(fake_aws_conn(scans))(source_run(), AwsNexradOptions(), q, fake_gateway)
 
     d._process_scans(scans)
 

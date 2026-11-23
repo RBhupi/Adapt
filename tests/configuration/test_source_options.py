@@ -49,17 +49,20 @@ def test_a_file_that_sets_no_source_option_records_the_sources_defaults(path):
     assert run_config(_pipeline(), path).source_params == {
         "latest_files": 5,
         "latest_minutes": 60,
-        "poll_interval_sec": 300,
+        "first_check_sec": 200,
+        "expected_arrival_sec": 300,
+        "late_after_sec": 450,
+        "max_skipped_scans": 3,
         "max_fetch_retries": 3,
         "min_file_size": 1024,
     }
 
 
 def test_a_source_option_of_the_file_reaches_the_run(path):
-    config = run_config(_pipeline(aws_nexrad={"poll_interval_sec": 30}), path)
+    config = run_config(_pipeline(aws_nexrad={"max_skipped_scans": 5}), path)
 
     assert config.source_params is not None
-    assert config.source_params["poll_interval_sec"] == 30
+    assert config.source_params["max_skipped_scans"] == 5
 
 
 def test_a_wrong_source_option_is_refused_naming_the_file_and_the_option(path):
@@ -110,10 +113,10 @@ def test_a_pass_over_a_stored_run_refuses_an_option_of_stored_run(path):
 
 
 def test_a_pass_over_a_stored_run_has_no_source_options_and_leaves_the_record(path):
-    registry = _stored(path, aws_nexrad={"poll_interval_sec": 30})
+    registry = _stored(path, aws_nexrad={"max_skipped_scans": 5})
 
     config = run_config(_pipeline(_STORED, modules=["target_selection"]), path, run_id=_RUN_ID)
 
     assert config.source_params is None
     kept = json.loads(registry.get_run(_RUN_ID)["config_json"])
-    assert kept["source_params"]["poll_interval_sec"] == 30
+    assert kept["source_params"]["max_skipped_scans"] == 5

@@ -3,9 +3,12 @@
 
 """AWS S3 NEXRAD Level-II file discovery and download.
 
-Monitors AWS S3 bucket for new NEXRAD radar files and acquires them into the
-store in realtime or historical batches. Deduplicates via the catalog (by
-source URI) to avoid re-downloading.
+Realtime: checks the radar name once, takes the newest scans of the recent
+window, then lists only the keys after the last one seen, on a schedule set by
+the age of the last volume published (``schedule.next_check_at``). While the
+processor is behind only the newest volume is taken; the others are skipped
+and logged, and too many skips stop the run. Historical: lists and queues the
+window one UTC day at a time. Deduplicates via the catalog (by source URI).
 """
 
 import contextlib
@@ -16,29 +19,49 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import ClassVar
 
 from adapt.contracts.source import ScanQueue, SourceRun
-from adapt.downloaders import NexradS3
+from adapt.downloaders import ArchiveScan, NexradS3
 from adapt.sources.aws_nexrad.config import AwsNexradOptions
+from adapt.sources.aws_nexrad.schedule import next_check_at
 
-__all__ = ["AwsNexradDownloader"]
+__all__ = ["AwsNexradDownloader", "Seams"]
 
 logger = logging.getLogger(__name__)
+
+_TICK_SECONDS = 1  # realtime loop: how soon a stop, an empty queue or a check time is noticed
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
+class Seams:
+    """How the downloader reaches the archive and the clock. Tests run it offline
+    by subclassing with fakes: ``seams = Seams(connect=lambda: fake_conn)``."""
+
+    connect: Callable[[], NexradS3] = NexradS3  # the archive connection, made once
+    clock: Callable[[], datetime] = _utc_now  # the current UTC time
+    sleep: Callable[[float], None] = time.sleep
 
 
 class AwsNexradDownloader(threading.Thread):
     """Downloads NEXRAD Level-II files from AWS S3 in realtime or historical mode.
 
-    **Realtime Mode:** Continuously monitors S3 for new files within a rolling
-    time window (e.g., "last 60 minutes"). Useful for operational nowcasting.
-    The latest N files are retained; older files are not re-downloaded.
+    **Realtime Mode:** Refuses a radar with no data today or yesterday, takes the
+    newest ``latest_files`` of the last ``latest_minutes``, then looks for each
+    new volume on the arrival schedule. Newest wins while processing is behind;
+    ``max_skipped_scans`` skips stop the run (a restart begins new tracks).
 
-    **Historical Mode:** Downloads all files within a fixed time range
-    (start_time to end_time) then exits. Useful for batch reprocessing and
-    research studies.
+    **Historical Mode:** Lists and queues the window (start_time to end_time)
+    one UTC day at a time, then exits. A window without volumes fails.
 
     **AWS S3 Bucket:** Files stored at
     `s3://unidata-nexrad-level2/{YYYY}/{MM}/{DD}/{radar}/`
@@ -71,18 +94,9 @@ class AwsNexradDownloader(threading.Thread):
     source_name: ClassVar[str] = "aws_nexrad"
     summary: ClassVar[str] = "NEXRAD Level-II scans downloaded from the AWS archive"
     options_class: ClassVar[type[AwsNexradOptions]] = AwsNexradOptions
+    seams: ClassVar[Seams] = Seams()
 
-    def __init__(
-        self,
-        run: SourceRun,
-        options: AwsNexradOptions,
-        queue: ScanQueue,
-        acquire,
-        *,
-        conn=None,
-        clock=None,
-        sleeper=None,
-    ):
+    def __init__(self, run: SourceRun, options: AwsNexradOptions, queue: ScanQueue, acquire):
         """Initialize downloader.
 
         Parameters
@@ -102,17 +116,7 @@ class AwsNexradDownloader(threading.Thread):
             registers them for the run. The source never touches persistence
             itself.
 
-        conn : adapt.downloaders.NexradS3, optional
-            AWS S3 connection object. If None, creates new connection.
-            Allows injection for testing.
-
-        clock : callable, optional
-            Function returning current datetime (for testing). If None, uses
-            `datetime.now(timezone.utc)`. Signature: `callable() -> datetime`.
-
-        sleeper : callable, optional
-            Function to sleep (for testing). If None, uses `time.sleep`.
-            Allows mocking time in tests.
+        The archive connection and the clock come from the class's ``seams``.
 
         Notes
         -----
@@ -126,17 +130,17 @@ class AwsNexradDownloader(threading.Thread):
         self.mode = run.mode
         self.start_time = run.start_time
         self.end_time = run.end_time
-        self.poll_interval_sec = options.poll_interval_sec
+        self._options = options
         self.max_fetch_retries = options.max_fetch_retries
         self.latest_files = options.latest_files
         self.latest_minutes = options.latest_minutes
+        self.max_skipped_scans = options.max_skipped_scans
 
         self.result_queue = queue
         self._acquire = acquire
-        self.conn = conn or NexradS3()
-        # injectable time helpers for testing
-        self._clock = clock or (lambda: datetime.now(UTC))
-        self._sleep = sleeper or time.sleep
+        self.conn = self.seams.connect()
+        self._clock = self.seams.clock
+        self._sleep = self.seams.sleep
 
         self._stop_event = threading.Event()
         # Sources already handed to the processor this run (by source URI).
@@ -146,7 +150,13 @@ class AwsNexradDownloader(threading.Thread):
         # Store-external scratch space for in-flight S3 downloads; every file is
         # moved into the store (or deleted) immediately after download.
         self._staging_dir = Path(tempfile.mkdtemp(prefix="adapt_download_"))
-        self._last_availability_warning: tuple[object, object] | None = None
+
+        # Realtime discovery: the last key listed, its publication time, the newest
+        # volume waiting for the processor to be free, and how many were passed over.
+        self._last_key: str | None = None
+        self._last_published: datetime | None = None
+        self._candidate: ArchiveScan | None = None
+        self._skipped = 0
 
         # Historical mode tracking
         self._historical_complete = threading.Event()
@@ -260,44 +270,18 @@ class AwsNexradDownloader(threading.Thread):
         This is the primary execution method called by threading.Thread.start().
         Do NOT call directly; use thread.start() instead.
 
-        Behavior:
-            1. Logs startup with mode (realtime or historical)
-            2. Repeatedly calls download_task() at intervals
-            3. Handles exceptions in download task (logs and continues)
-            4. In historical mode: exits automatically when complete
-            5. In realtime mode: runs until stop() is called
-            6. Performs interruptible sleep between iterations (can exit quickly)
-
-        Notes
-        -----
-        - Running in a background daemon thread (set at __init__)
-        - All exceptions are logged; failures don't crash the thread
-        - Sleep is interruptible: responds to stop() and historical completion
-          within 2 seconds (default is 2-second sleep chunks)
-        - Thread-safe: can call stop() from another thread
-
-        Examples
-        --------
-        >>> downloader = AwsNexradDownloader(run, options, queue, gateway)
-        >>> downloader.start()  # Calls run() in background thread
-        >>> downloader.join()   # Wait for thread to finish
+        Historical: lists and queues the window day by day, then returns.
+        Realtime: runs until ``stop()``. A misspelled radar, a historical window
+        without volumes, a historical listing that fails its retries, or too many
+        skipped realtime volumes raise, ending the thread; the orchestrator then
+        finalizes the run as failed. The staging folder is always removed.
         """
         logger.info("Starting %s in %s mode", self.name, self.mode)
-
         try:
-            while not self.stopped():
-                try:
-                    self._download_task()
-                except Exception:
-                    logger.exception("Download task failed")
-
-                # Historical: exit after completion
-                if self.mode == "historical" and self.is_historical_complete():
-                    logger.info("Historical download complete")
-                    break
-
-                # Sleep between iterations (interruptible)
-                self._interruptible_sleep(self.poll_interval_sec)
+            if self.mode == "historical":
+                self._run_historical()
+            else:
+                self._run_realtime()
         finally:
             try:
                 shutil.rmtree(self._staging_dir)
@@ -306,85 +290,124 @@ class AwsNexradDownloader(threading.Thread):
 
         logger.info("Stopped %s", self.name)
 
-    def _interruptible_sleep(self, seconds: int):
-        """Sleep that can be interrupted by stop event."""
-        for _ in range(seconds // 2):
-            if self.stopped():
-                break
-            if self.mode == "historical" and self.is_historical_complete():
-                break
-            self._sleep(2)
-
     # ========================================================================
-    # Download task - dispatches to realtime or historical
+    # Historical: the window one UTC day at a time
     # ========================================================================
 
-    def _download_task(self) -> list:
-        """Execute a single download iteration (realtime or historical).
-
-        Dispatches to appropriate download strategy based on mode:
-        - Historical: downloads scans in specified date range (one batch)
-        - Realtime: downloads latest scans within rolling time window
-
-        Returns
-        -------
-        list of Path
-            Paths to newly downloaded files (files that didn't exist before
-            this call). Existing files already in the output directory are
-            queued but not included in return list.
-
-        Notes
-        -----
-        - Typically called repeatedly in the run() loop
-        - Can raise exceptions; the run() loop catches and logs them
-        - Files are downloaded to a temporary directory, then moved to
-          the final location to ensure atomic writes
-        - Only files >= 1 KB are considered valid
-        - All queued files (new or existing) are put on the queue
-        - In historical mode: after one complete iteration, completion
-          is marked (but loop continues to allow processing time)
-        """
-        if self.mode == "historical":
-            return self._download_historical()
-        else:
-            return self._download_realtime()
-
-    def _download_historical(self) -> list:
-        """Download files for historical time range."""
+    def _run_historical(self) -> None:
+        """List each day of the window and queue its volumes before listing the next."""
         start, end = self._parse_time_range()
-        logger.info("Historical: %s to %s", start, end)
+        end = min(end, self._clock())
+        day = start.date()
+        while day <= end.date() and not self.stopped():
+            midnight = datetime(day.year, day.month, day.day, tzinfo=UTC)
+            first = max(start, midnight)
+            last = min(end, midnight + timedelta(days=1) - timedelta(seconds=1))
+            scans = self._listed(
+                partial(self.conn.get_avail_scans_in_range, first, last, self.radar)
+            )
+            logger.info("Historical %s: %d volumes", day, len(scans))
+            self._expected_scans += len(scans)
+            self._process_scans(scans)
+            day += timedelta(days=1)
+        if self.stopped():
+            return
+        if self._expected_scans == 0:
+            raise ValueError(
+                f"no volumes of {self.radar} in the AWS archive between {start.isoformat()} "
+                f"and {end.isoformat()}; check the radar name and the run's window"
+            )
+        self._historical_complete.set()
+        logger.info("Historical download complete: %d volumes", self._processed_scans)
 
-        self._check_radar_available(start, end)
+    # ========================================================================
+    # Realtime: arrival schedule, newest wins
+    # ========================================================================
 
-        scans = self._fetch_scans(start, end)
-        if not scans:
-            self._historical_complete.set()
-            return []
+    def _run_realtime(self) -> None:
+        """Check the radar, then look for volumes on the arrival schedule until stopped."""
+        self._require_radar()
+        next_check = self._clock()
+        while not self.stopped():
+            if self._clock() >= next_check:
+                try:
+                    self._discover()
+                except Exception:
+                    logger.exception(
+                        "Looking for new volumes failed; trying again at the next check"
+                    )
+                next_check = next_check_at(self._last_published, self._clock(), self._options)
+            self._take_candidate()
+            if self._skipped >= self.max_skipped_scans:
+                message = (
+                    f"Realtime processing fell behind: skipped {self._skipped} volumes of "
+                    f"{self.radar} (max_skipped_scans={self.max_skipped_scans}); stopping the "
+                    "run so it can be restarted with new tracks"
+                )
+                logger.error(message)
+                raise RuntimeError(message)
+            self._sleep(_TICK_SECONDS)
 
-        self._expected_scans = len(scans)
-        return self._process_scans(scans)
+    def _require_radar(self) -> None:
+        """Refuse a radar with no data in the archive yesterday or today (UTC)."""
+        today = self._clock().date()
+        days = (today - timedelta(days=1), today)
+        for day in days:
+            ymd = (f"{day:%Y}", f"{day:%m}", f"{day:%d}")
+            radars = self._listed(partial(self.conn.get_avail_radars, *ymd))
+            if self.radar in radars:
+                return
+        raise ValueError(
+            f"radar {self.radar!r} has no data in the AWS archive on {days[0]} or {days[1]}; "
+            "check the radar name"
+        )
 
-    def _download_realtime(self) -> list:
-        """Download latest files for realtime mode."""
-        end = self._clock()
-        start = end - timedelta(minutes=self.latest_minutes)
+    def _discover(self) -> None:
+        """List the volumes published since the last check; the newest becomes the candidate."""
+        now = self._clock()
+        if self._last_key is None:
+            start = now - timedelta(minutes=self.latest_minutes)
+            window = self._listed(
+                lambda: self.conn.get_avail_scans_in_range(start, now, self.radar)
+            )
+            if window:
+                self._seen(window[-1])
+                self._process_scans(window[-self.latest_files :])
+            return
+        last_key = self._last_key
+        new = self._listed(lambda: self.conn.get_scans_after(self.radar, last_key, now))
+        if not new:
+            return
+        self._seen(new[-1])
+        passed = ([self._candidate] if self._candidate is not None else []) + new[:-1]
+        if passed:
+            self._skip(passed)
+        self._candidate = new[-1]
 
-        logger.debug("Realtime: last %d min (%s to %s)", self.latest_minutes, start, end)
+    def _seen(self, scan: ArchiveScan) -> None:
+        self._last_key = scan.key
+        self._last_published = scan.published
 
-        # Use the full realtime window for availability checks. This avoids
-        # false "not found" warnings around UTC midnight when the window spans
-        # two dates (yesterday has inventory, today may not yet).
-        self._check_radar_available(start, end)
+    def _take_candidate(self) -> None:
+        """Download and queue the candidate once no scan is waiting for the processor."""
+        if self._candidate is None or not self.result_queue.empty():
+            return
+        scan, self._candidate = self._candidate, None
+        self._process_scans([scan])
 
-        scans = self._fetch_scans(start, end)
-        if not scans:
-            return []
-
-        # Keep only latest N
-        scans = scans[-self.latest_files :]
-        logger.debug("Keeping latest %d scans", len(scans))
-
-        return self._process_scans(scans)
+    def _skip(self, scans: list[ArchiveScan]) -> None:
+        """Log the volumes passed over because a newer one arrived while processing was behind."""
+        self._skipped += len(scans)
+        names = [scan.key.rsplit("/", 1)[-1] for scan in scans]
+        span = names[0] if len(names) == 1 else f"{names[0]} … {names[-1]}"
+        logger.warning(
+            "Skipped %d volume%s (%s): processing is behind; skipped %d of max_skipped_scans=%d",
+            len(names),
+            "" if len(names) == 1 else "s",
+            span,
+            self._skipped,
+            self.max_skipped_scans,
+        )
 
     # ========================================================================
     # Scan fetching and processing
@@ -412,103 +435,37 @@ class AwsNexradDownloader(threading.Thread):
         end = datetime.fromisoformat(self.end_time.replace("Z", "+00:00"))
         return start, end
 
-    def _fetch_scans(self, start: datetime, end: datetime) -> list:
-        """Fetch available scans from AWS, retrying transient failures.
+    def _listed(self, fetch: Callable[[], list]) -> list:
+        """Call one archive listing, retrying failures with linear backoff.
 
-        Retries up to ``max_fetch_retries`` times with linear backoff. After the
-        final attempt fails, returns ``[]`` so a transient AWS error does not
-        stop the downloader — the next poll retries from scratch.
+        Tries ``max_fetch_retries`` times; the last failure is raised (a historical
+        run fails; a realtime run logs it and tries again at its next check).
         """
         for attempt in range(1, self.max_fetch_retries + 1):
             try:
-                scans = self.conn.get_avail_scans_in_range(start, end, self.radar)
-                scans = sorted(scans, key=lambda s: s.scan_time)
-
-                # Filter out MDM files
-                scans = [s for s in scans if not s.key.endswith("_MDM")]
-
-                logger.debug("Found %d scans for %s", len(scans), self.radar)
-                return scans
+                return fetch()
             except Exception as e:
-                if attempt < self.max_fetch_retries:
-                    logger.warning(
-                        "Fetch scans attempt %d/%d failed: %s; retrying",
-                        attempt,
-                        self.max_fetch_retries,
-                        e,
-                    )
-                    self._sleep(attempt)
-                else:
-                    logger.error(
-                        "Failed to fetch scans after %d attempts: %s",
-                        self.max_fetch_retries,
-                        e,
-                    )
-        return []
-
-    # ========================================================================
-    # Radar availability helpers
-    # ========================================================================
-
-    def _check_radar_available(self, start: datetime, end: datetime) -> None:
-        """Check radar availability and log warnings (best-effort).
-
-        Checks if radar is listed in AWS inventory for the given date range.
-        This is informational only — it does not block downloads.
-
-        For a single date (start == end): checks that date.
-        For a date range: checks each day, warns only if explicitly not found on any day.
-
-        Uses `self.conn.get_avail_radars(year, month, day)` from NexradAwsInterface.
-        Exceptions are silently ignored (inventory may be temporarily unavailable).
-        Only warns if we successfully checked and radar is explicitly not present.
-        """
-        current = start.date()
-        end_date = end.date()
-        found_on_any_day = False
-        all_checks_failed = True  # Track if all checks failed (don't warn in that case)
-
-        while current <= end_date:
-            dt = datetime(current.year, current.month, current.day, tzinfo=UTC)
-            y = dt.strftime("%Y")
-            m = dt.strftime("%m")
-            d = dt.strftime("%d")
-            try:
-                available = self.conn.get_avail_radars(y, m, d)
-                all_checks_failed = False  # At least one check succeeded
-                if self.radar in available:
-                    found_on_any_day = True
-                    break
-            except Exception as e:
-                logger.debug("Availability check failed for %s: %s", dt, e)
-            current = current + timedelta(days=1)
-
-        # Warn ONLY if we successfully checked and radar was explicitly not found
-        # Don't warn if all checks failed (inventory temporarily unavailable)
-        if not found_on_any_day and not all_checks_failed:
-            warned_key = (start.date(), end.date())
-            if self._last_availability_warning == warned_key:
-                return
-            self._last_availability_warning = warned_key
-            logger.warning(
-                "⚠️ Radar %s not found in AWS for %s - %s."
-                " Downloader will continue polling for scans.",
-                self.radar,
-                start.date(),
-                end.date(),
-            )
+                if attempt == self.max_fetch_retries:
+                    logger.error("AWS listing failed after %d attempts: %s", attempt, e)
+                    raise
+                logger.warning(
+                    "AWS listing attempt %d/%d failed: %s; retrying",
+                    attempt,
+                    self.max_fetch_retries,
+                    e,
+                )
+                self._sleep(attempt)
+        raise AssertionError("unreachable: max_fetch_retries >= 1")
 
     def _process_scans(self, scans: list) -> list:
         """Acquire each scan into the store (downloading only when needed) and queue it."""
         acquired = []
         queued = 0
-        processed = 0
 
         for scan in scans:
             if self.stopped():
                 break
 
-            processed += 1
             source_uri = str(scan.key)
             with self._known_files_lock:
                 already_queued = source_uri in self._known_files
@@ -545,12 +502,8 @@ class AwsNexradDownloader(threading.Thread):
         if queued > 0 or acquired:
             logger.info("Queued %d files (%d new downloads)", queued, len(acquired))
 
-        # Mark historical complete when all scans have been attempted
         if self.mode == "historical":
-            self._processed_scans = queued
-            if processed >= len(scans):
-                self._historical_complete.set()
-                logger.info("Historical mode complete after processing %d scans", processed)
+            self._processed_scans += queued
 
         return acquired
 

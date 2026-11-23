@@ -5,7 +5,7 @@ import pytest
 
 from adapt.runtime.scan_queue import BackpressureQueue
 from adapt.sources.aws_nexrad.config import AwsNexradOptions
-from adapt.sources.aws_nexrad.source import AwsNexradDownloader
+from tests.helpers.offline_aws import offline
 
 pytestmark = pytest.mark.unit
 
@@ -37,43 +37,17 @@ def test_realtime_download_hybrid(fake_scan, fake_aws_conn, fake_gateway, source
 
     fake_gateway.acquired.add("scan1")  # already committed by a previous run
 
-    d = AwsNexradDownloader(
+    d = offline(conn, clock=lambda: now, sleep=lambda _: None)(
         source_run(radar="KDIX"),
         AwsNexradOptions(latest_files=2, latest_minutes=30),
         q,
         fake_gateway,
-        conn=conn,
-        clock=lambda: now,
-        sleeper=lambda _: None,
     )
 
-    downloads = d._download_realtime()
+    downloads = d._process_scans(scans)
 
     assert downloads == ["scan2"]  # only the missing scan hit S3
     assert download_calls == [["scan2"]]
     assert fake_gateway.acquire_existing_calls == ["scan1"]
     assert [uri for _, uri in fake_gateway.acquire_file_calls] == ["scan2"]
     assert q.qsize() == 2  # both scans are queued for the processor
-
-
-def test_realtime_idempotent(fake_scan, fake_aws_conn, fake_gateway, source_run, scan_queue):
-    scans = [fake_scan("same")]
-
-    conn = fake_aws_conn(scans)
-    download_calls: list = []
-    _count_downloads(conn, download_calls)
-
-    d = AwsNexradDownloader(
-        source_run(),
-        AwsNexradOptions(),
-        scan_queue,
-        fake_gateway,
-        conn=conn,
-        sleeper=lambda _: None,
-    )
-
-    d._download_realtime()
-    d._download_realtime()
-
-    assert len(d._known_files) == 1
-    assert download_calls == [["same"]]  # second pass skips the known URI

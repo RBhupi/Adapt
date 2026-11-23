@@ -43,6 +43,9 @@ class ScanQueue(Protocol):
     def wait_for_room(self, stopped: Callable[[], bool]) -> None:
         """Hold a source that fetches ahead until the queue has room or ``stopped()``."""
 
+    def empty(self) -> bool:
+        """True when no acquired scan is waiting for the processor."""
+
 
 @runtime_checkable
 class ScanSource(Protocol):

@@ -63,6 +63,9 @@ def test_to_utc_converts_aware_offset_to_utc():
 # ── range search (mirrors test_get_available_scans_in_range, _missing) ─────────
 
 
+_PUB = datetime(2013, 5, 20, 19, 4, 31, tzinfo=UTC)
+
+
 def _listing_client(contents):
     """A client whose list_objects_v2 paginator returns one page of ``contents``."""
     client = MagicMock()
@@ -75,11 +78,11 @@ def _listing_client(contents):
 def test_get_avail_scans_in_range_filters_sorts_and_excludes_mdm():
     p = "2013/05/20/KTLX/"
     contents = [
-        {"Key": f"{p}KTLX20130520_190000_V06.gz", "Size": 12},  # in range
-        {"Key": f"{p}KTLX20130520_180000_V06.gz", "Size": 10},  # in range (== start)
-        {"Key": f"{p}KTLX20130520_170000_V06.gz", "Size": 11},  # before start
-        {"Key": f"{p}KTLX20130520_181500_V06_MDM", "Size": 1},  # MDM sidecar
-        {"Key": f"{p}KTLX20130520_index.html", "Size": 2},  # not a volume file
+        {"Key": f"{p}KTLX20130520_190000_V06.gz", "Size": 12, "LastModified": _PUB},  # in range
+        {"Key": f"{p}KTLX20130520_180000_V06.gz", "Size": 10, "LastModified": _PUB},  # == start
+        {"Key": f"{p}KTLX20130520_170000_V06.gz", "Size": 11, "LastModified": _PUB},  # before
+        {"Key": f"{p}KTLX20130520_181500_V06_MDM", "Size": 1, "LastModified": _PUB},  # MDM
+        {"Key": f"{p}KTLX20130520_index.html", "Size": 2, "LastModified": _PUB},  # not a volume
     ]
     store = NexradS3(client=_listing_client(contents))
 
@@ -107,6 +110,71 @@ def test_get_avail_scans_in_range_empty_when_no_data():
         "KTLX",
     )
     assert scans == []
+
+
+def test_a_listed_scan_carries_its_s3_publication_time():
+    key = "2013/05/20/KTLX/KTLX20130520_180000_V06.gz"
+    published = datetime(2013, 5, 20, 18, 4, 55, tzinfo=UTC)
+    store = NexradS3(client=_listing_client([{"Key": key, "Size": 10, "LastModified": published}]))
+
+    (scan,) = store.get_avail_scans_in_range(
+        datetime(2013, 5, 20, 18, 0, tzinfo=UTC), datetime(2013, 5, 20, 19, 0, tzinfo=UTC), "KTLX"
+    )
+
+    assert scan.published == published
+
+
+# ── listing after the last seen key ───────────────────────────────────────────
+
+
+def _folder_client(folders):
+    """A client listing ``folders[prefix]``, keeping only keys after ``StartAfter``."""
+    client = MagicMock()
+
+    def paginate(Bucket, Prefix, StartAfter=""):
+        keys = [k for k in folders.get(Prefix, []) if k > StartAfter]
+        return iter([{"Contents": [{"Key": k, "Size": 1, "LastModified": _PUB} for k in keys]}])
+
+    client.get_paginator.return_value.paginate.side_effect = paginate
+    return client
+
+
+def test_scans_after_a_key_are_only_the_later_volumes_of_its_day():
+    p = "2026/11/23/KHTX/"
+    folders = {
+        p: [
+            f"{p}KHTX20261123_080112_V06",
+            f"{p}KHTX20261123_080633_V06",
+            f"{p}KHTX20261123_080633_V06_MDM",
+            f"{p}KHTX20261123_081145_V06",
+        ]
+    }
+    store = NexradS3(client=_folder_client(folders))
+
+    scans = store.get_scans_after(
+        "KHTX", f"{p}KHTX20261123_080112_V06", datetime(2026, 11, 23, 8, 20, tzinfo=UTC)
+    )
+
+    assert [s.key for s in scans] == [f"{p}KHTX20261123_080633_V06", f"{p}KHTX20261123_081145_V06"]
+
+
+def test_scans_after_a_key_of_yesterday_include_late_volumes_of_both_days():
+    # A 23:56 volume is published after midnight, under the day it started.
+    old, new = "2026/11/22/KHTX/", "2026/11/23/KHTX/"
+    folders = {
+        old: [f"{old}KHTX20261122_235107_V06", f"{old}KHTX20261122_235630_V06"],
+        new: [f"{new}KHTX20261123_000153_V06"],
+    }
+    store = NexradS3(client=_folder_client(folders))
+
+    scans = store.get_scans_after(
+        "KHTX", f"{old}KHTX20261122_235107_V06", datetime(2026, 11, 23, 0, 7, tzinfo=UTC)
+    )
+
+    assert [s.key for s in scans] == [
+        f"{old}KHTX20261122_235630_V06",
+        f"{new}KHTX20261123_000153_V06",
+    ]
 
 
 # ── future-date guard (mirrors nexradawsinterface.py:192-197) ──────────────────
@@ -167,7 +235,12 @@ def _download_client(sizes):
 
 def test_download_single_writes_file_and_reports_success(tmp_path):
     key = "2013/05/31/KTLX/KTLX20130531_000358_V06.gz"
-    scan = ArchiveScan(key=key, scan_time=datetime(2013, 5, 31, 0, 3, 58, tzinfo=UTC), size=5)
+    scan = ArchiveScan(
+        key=key,
+        scan_time=datetime(2013, 5, 31, 0, 3, 58, tzinfo=UTC),
+        size=5,
+        published=datetime(2013, 5, 20, tzinfo=UTC),
+    )
     store = NexradS3(client=_download_client({key: 5}))
 
     result = store.download([scan], tmp_path / "out")
@@ -187,7 +260,12 @@ def test_download_multiple_all_succeed(tmp_path):
         f"{p}KTLX20130531_001311_V06.gz": 5,
     }
     scans = [
-        ArchiveScan(key=k, scan_time=datetime(2013, 5, 31, tzinfo=UTC), size=v)
+        ArchiveScan(
+            key=k,
+            scan_time=datetime(2013, 5, 31, tzinfo=UTC),
+            size=v,
+            published=datetime(2013, 5, 20, tzinfo=UTC),
+        )
         for k, v in sizes.items()
     ]
     store = NexradS3(client=_download_client(sizes))
@@ -213,8 +291,18 @@ def test_download_bad_key_is_recorded_as_failure(tmp_path):
 
     client.download_file.side_effect = _dl
     scans = [
-        ArchiveScan(key=good, scan_time=datetime(2013, 5, 31, tzinfo=UTC), size=4),
-        ArchiveScan(key=bad, scan_time=datetime(2013, 5, 31, tzinfo=UTC), size=4),
+        ArchiveScan(
+            key=good,
+            scan_time=datetime(2013, 5, 31, tzinfo=UTC),
+            size=4,
+            published=datetime(2013, 5, 20, tzinfo=UTC),
+        ),
+        ArchiveScan(
+            key=bad,
+            scan_time=datetime(2013, 5, 31, tzinfo=UTC),
+            size=4,
+            published=datetime(2013, 5, 20, tzinfo=UTC),
+        ),
     ]
     store = NexradS3(client=client)
 
@@ -226,7 +314,12 @@ def test_download_bad_key_is_recorded_as_failure(tmp_path):
 
 def test_download_rejects_keep_aws_folders(tmp_path):
     # We deliberately do not implement the AWS folder structure (acquisition uses flat).
-    scan = ArchiveScan(key="k/scan.gz", scan_time=datetime(2013, 5, 20, tzinfo=UTC), size=1)
+    scan = ArchiveScan(
+        key="k/scan.gz",
+        scan_time=datetime(2013, 5, 20, tzinfo=UTC),
+        size=1,
+        published=datetime(2013, 5, 20, tzinfo=UTC),
+    )
     store = NexradS3(client=MagicMock())
     with pytest.raises(NotImplementedError):
         store.download([scan], tmp_path, keep_aws_folders=True)

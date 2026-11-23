@@ -15,7 +15,12 @@ pytestmark = pytest.mark.unit
 
 
 def test_archive_scan_is_frozen():
-    scan = ArchiveScan(key="k", scan_time=datetime(2013, 5, 20, tzinfo=UTC), size=10)
+    scan = ArchiveScan(
+        key="k",
+        scan_time=datetime(2013, 5, 20, tzinfo=UTC),
+        size=10,
+        published=datetime(2013, 5, 20, tzinfo=UTC),
+    )
     assert scan.key == "k"
     assert scan.size == 10
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -24,7 +29,12 @@ def test_archive_scan_is_frozen():
 
 def test_download_result_iter_success_yields_only_successes():
     good = LocalScan(filepath=Path("/tmp/good"))
-    bad = ArchiveScan(key="bad", scan_time=datetime(2013, 5, 20, tzinfo=UTC), size=1)
+    bad = ArchiveScan(
+        key="bad",
+        scan_time=datetime(2013, 5, 20, tzinfo=UTC),
+        size=1,
+        published=datetime(2013, 5, 20, tzinfo=UTC),
+    )
     result = DownloadResult(success=[good], failed=[bad])
 
     assert list(result.iter_success()) == [good]
@@ -39,7 +49,12 @@ def test_download_result_defaults_are_independent():
 
 
 def test_download_error_carries_scan():
-    scan = ArchiveScan(key="k", scan_time=datetime(2013, 5, 20, tzinfo=UTC), size=1)
+    scan = ArchiveScan(
+        key="k",
+        scan_time=datetime(2013, 5, 20, tzinfo=UTC),
+        size=1,
+        published=datetime(2013, 5, 20, tzinfo=UTC),
+    )
     err = DownloadError("boom", scan)
     assert err.scan is scan
     assert str(err) == "boom"

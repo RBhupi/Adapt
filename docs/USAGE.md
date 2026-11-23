@@ -221,10 +221,28 @@ run:
   max_runtime_minutes: null
 ```
 
-A realtime run starts with the newest scans of the last hour (up to 5), then
-looks for new ones every 300 seconds. It runs until you press `Ctrl-C`, or for
-`max_runtime_minutes` when you set it. The numbers are options of `aws_nexrad`
-(`adapt config --params aws_nexrad`).
+A realtime run first checks that the archive has data for the radar today or
+yesterday, so a misspelled site code fails at once. It starts with the newest
+scans of the last hour (up to 5), then looks for each new volume by the age of
+the last one the archive published: not before 200 seconds, then every 20
+seconds, every 10 seconds from 300 seconds, and every 30 seconds once the volume
+is late (450 seconds). Each look lists only the files added since the last one.
+It runs until you press `Ctrl-C`, or for `max_runtime_minutes` when you set it.
+The numbers are options of `aws_nexrad` (`adapt config --params aws_nexrad`).
+
+**When processing falls behind.** A realtime run keeps current rather than
+complete. While a scan is still waiting to be processed, only the newest new
+volume is kept; each one passed over is logged as `Skipped`. Skipped volumes
+break the tracks, so after `max_skipped_scans` of them (3 unless you set it) the
+run stops and is recorded as `failed`. Restarting it begins new tracks; to do
+that automatically, run it in a loop:
+
+```bash
+until adapt run nexrad; do sleep 10; done
+```
+
+The loop restarts the run after any failure, a misspelled radar too, so check
+the first run before you leave it unattended.
 
 ---
 
@@ -442,11 +460,11 @@ from the radar.
 
 A scan's time is the start of its volume, and its file exists only when the
 volume ends, 4 to 7 minutes later. So the limit has to cover one volume, the
-polling interval (`params: aws_nexrad: poll_interval_sec`, 300 s unless you set
-it) and about 30 s of processing. A limit below one volume sends nothing; one
-that covers the volume but not the polling interval sends only some scans. With
-`poll_interval_sec: 30` a limit of 480 covers both radars measured so far
-(commands ready 300 to 410 s after the scan's start).
+time the source takes to notice the new file (up to about 30 s with the
+`aws_nexrad` defaults) and about 30 s of processing. A limit below one volume
+sends nothing; one that covers the volume but not the rest sends only some
+scans. A limit of 480 covers both radars measured so far (commands ready 300 to
+410 s after the scan's start).
 
 ---
 

@@ -151,12 +151,12 @@ class TestParams:
         assert config.global_.z_level == 3000.0
 
     def test_source_options_merge_with_the_run_section(self, path):
-        params = {"aws_nexrad": {"poll_interval_sec": 60}}
+        params = {"aws_nexrad": {"max_skipped_scans": 5}}
 
         config = run_config(_pipeline(params=params), path)
 
         assert config.source_params is not None
-        assert config.source_params["poll_interval_sec"] == 60
+        assert config.source_params["max_skipped_scans"] == 5
         assert config.radar == "KBOX"
 
     def test_module_owned_params_route_to_module_params(self, path, tmp_path):

@@ -50,6 +50,22 @@ def _is_volume_file(key: str) -> bool:
     return name.endswith(".gz") or "_V0" in name
 
 
+def _scans(entries) -> list[ArchiveScan]:
+    """The volume scans among listed S3 ``entries``, sorted by scan time."""
+    scans = [
+        ArchiveScan(
+            key=entry["Key"],
+            scan_time=parse_scan_time(entry["Key"].rsplit("/", 1)[-1]),
+            size=entry["Size"],
+            published=entry["LastModified"],
+        )
+        for entry in entries
+        if _is_volume_file(entry["Key"])
+    ]
+    scans.sort(key=lambda scan: scan.scan_time)
+    return scans
+
+
 def _to_utc(value: datetime) -> datetime:
     """Normalize a datetime to UTC, treating a naive value as already UTC."""
     if value.tzinfo is None:
@@ -82,16 +98,24 @@ class NexradS3:
         scans: list[ArchiveScan] = []
         day = start.date()
         while day <= end.date():
-            for entry in s3.list_objects(self._client, BUCKET, build_prefix(radar, day)):
-                key = entry["Key"]
-                if not _is_volume_file(key):
-                    continue
-                scan_time = parse_scan_time(key.rsplit("/", 1)[-1])
-                if start <= scan_time <= end:
-                    scans.append(ArchiveScan(key=key, scan_time=scan_time, size=entry["Size"]))
+            listed = _scans(s3.list_objects(self._client, BUCKET, build_prefix(radar, day)))
+            scans.extend(scan for scan in listed if start <= scan.scan_time <= end)
             day += timedelta(days=1)
-        scans.sort(key=lambda scan: scan.scan_time)
         return scans
+
+    def get_scans_after(self, radar: str, key: str, until: datetime) -> list[ArchiveScan]:
+        """Return the volume scans of ``radar`` listed after ``key``, sorted by scan time.
+
+        Lists ``key``'s day folder from just after ``key``, then every later day
+        folder up to ``until``'s day: one request normally, two after UTC midnight
+        while volumes started the day before are still being published.
+        """
+        day = datetime.strptime(key[:10], "%Y/%m/%d").date()
+        entries = list(s3.list_objects(self._client, BUCKET, build_prefix(radar, day), key))
+        while day < _to_utc(until).date():
+            day += timedelta(days=1)
+            entries.extend(s3.list_objects(self._client, BUCKET, build_prefix(radar, day)))
+        return _scans(entries)
 
     def get_avail_radars(self, y: str, m: str, d: str) -> list[str]:
         """Return the radar IDs with data for the given UTC year/month/day."""

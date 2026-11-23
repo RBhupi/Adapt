@@ -19,12 +19,14 @@ class ArchiveScan:
     """A remote scan object in the S3 bucket.
 
     ``size`` is the S3 ``Size`` captured at listing time so a download can be
-    verified without an extra ``head_object`` round-trip.
+    verified without an extra ``head_object`` round-trip. ``published`` is the
+    S3 ``LastModified``: when the archive made the volume available.
     """
 
     key: str
     scan_time: datetime
     size: int
+    published: datetime
 
 
 @dataclass(frozen=True)

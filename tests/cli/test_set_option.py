@@ -61,20 +61,20 @@ def test_an_option_set_for_the_graph_changes_what_a_module_reads(store, adapt, c
 def test_a_source_option_set_on_the_command_line_reaches_the_run(store):
     path = write_pipeline(store, "case", run=_REALTIME)
 
-    config = run_config(load_pipeline_file(path, ["params.aws_nexrad.poll_interval_sec=30"]), path)
+    config = run_config(load_pipeline_file(path, ["params.aws_nexrad.max_skipped_scans=5"]), path)
 
     assert config.source_params is not None
-    assert config.source_params["poll_interval_sec"] == 30
+    assert config.source_params["max_skipped_scans"] == 5
 
 
 def test_a_setting_of_the_removed_downloader_section_gets_its_refusal(store, adapt, capsys):
     write_pipeline(store, "case", run=_REALTIME)
 
-    assert adapt("graph", "case", "--set", "params.downloader.poll_interval_sec=30") == 2
+    assert adapt("graph", "case", "--set", "params.downloader.latest_files=2") == 2
 
     told = capsys.readouterr().err
     assert "params.downloader is no longer a section" in told
-    assert "poll_interval_sec → params.aws_nexrad.poll_interval_sec" in told
+    assert "latest_files → params.aws_nexrad.latest_files" in told
 
 
 def test_set_may_be_given_more_than_once(store, adapt, capsys):

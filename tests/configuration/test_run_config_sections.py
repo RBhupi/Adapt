@@ -103,7 +103,10 @@ class TestOptionsGiven:
         given = {
             "latest_files": 2,
             "latest_minutes": 30,
-            "poll_interval_sec": 60,
+            "first_check_sec": 150,
+            "expected_arrival_sec": 250,
+            "late_after_sec": 400,
+            "max_skipped_scans": 5,
             "max_fetch_retries": 5,
             "min_file_size": 2048,
         }

@@ -2,7 +2,7 @@
 import pytest
 
 from adapt.sources.aws_nexrad.config import AwsNexradOptions
-from adapt.sources.aws_nexrad.source import AwsNexradDownloader
+from tests.helpers.offline_aws import offline
 
 pytestmark = pytest.mark.unit
 
@@ -16,13 +16,8 @@ def test_run_exits_after_historical_complete(
         mode="historical", start_time="2024-01-01T00:00:00Z", end_time="2024-01-01T01:00:00Z"
     )
 
-    d = AwsNexradDownloader(
-        run,
-        AwsNexradOptions(),
-        scan_queue,
-        fake_gateway,
-        conn=fake_aws_conn(scans),
-        sleeper=lambda _: None,
+    d = offline(fake_aws_conn(scans), sleep=lambda _: None)(
+        run, AwsNexradOptions(), scan_queue, fake_gateway
     )
 
     d.run()

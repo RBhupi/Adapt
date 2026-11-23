@@ -191,7 +191,7 @@ catalog, the sources of the catalog, and three sections of the run:
 | Name | Options of |
 |------|-----------|
 | a module (`ingest`, `detection`, `tracking`, ...) | that module |
-| a source (`aws_nexrad`, `local_directory`, `stored_run`) | that source, when `run.source` names it: for `aws_nexrad` the polling interval, how far back a realtime run looks, the fetch retries and the smallest file kept; for `local_directory` the smallest file kept; `stored_run` has none |
+| a source (`aws_nexrad`, `local_directory`, `stored_run`) | that source, when `run.source` names it: for `aws_nexrad` how far back a realtime run looks at its start, when it looks for each new volume, how many volumes it may skip while processing is behind, the fetch retries and the smallest file kept; for `local_directory` the smallest file kept; `stored_run` has none |
 | `global` | the whole run, shared by several modules: `tracking_field`, `z_level`, `max_scan_gap_minutes` |
 | `logging` | the log file and the console |
 | `queue` | the queue between the source and the processor: how many scans the source may run ahead (`max_queue_size`) and when it resumes (`queue_resume_fraction`) |
@@ -563,7 +563,8 @@ refused, and the message names the new place of each option it sets. Move them:
 
 | Old option under `params.downloader` | Now |
 |---|---|
-| `latest_files`, `latest_minutes`, `poll_interval_sec`, `max_fetch_retries` | `aws_nexrad.<same name>` |
+| `latest_files`, `latest_minutes`, `max_fetch_retries` | `aws_nexrad.<same name>` |
+| `poll_interval_sec` | no longer an option: `aws_nexrad.first_check_sec`, `expected_arrival_sec` and `late_after_sec` set when a realtime run looks |
 | `min_file_size` | `aws_nexrad.min_file_size` or `local_directory.min_file_size`: the source `run.source` names |
 | `max_queue_size`, `queue_resume_fraction` | `queue.<same name>` |
 | `output_dir` | removed (it had no effect) |

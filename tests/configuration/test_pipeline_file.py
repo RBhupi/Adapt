@@ -267,7 +267,12 @@ class TestParams:
     def test_the_removed_downloader_section_is_refused_naming_where_each_option_went(
         self, tmp_path
     ):
-        given = {"poll_interval_sec": 30, "min_file_size": 2048, "max_queue_size": 50}
+        given = {
+            "latest_files": 2,
+            "poll_interval_sec": 30,
+            "min_file_size": 2048,
+            "max_queue_size": 50,
+        }
 
         with pytest.raises(ConfigError) as exc:
             _load(tmp_path, _file(params={"downloader": given}))
@@ -275,9 +280,9 @@ class TestParams:
         message = str(exc.value)
         assert "params.downloader is no longer a section" in message
         assert (
-            "poll_interval_sec → params.aws_nexrad.poll_interval_sec "
-            "(the source named by run.source)"
+            "latest_files → params.aws_nexrad.latest_files (the source named by run.source)"
         ) in message
+        assert "poll_interval_sec is no longer an option" in message
         assert (
             "min_file_size → params.aws_nexrad.min_file_size or "
             "params.local_directory.min_file_size (the source named by run.source)"

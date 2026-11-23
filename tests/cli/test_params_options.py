@@ -316,11 +316,17 @@ def test_aws_nexrad_shows_its_summary_then_each_option_with_its_default_and_mean
     assert show("aws_nexrad").splitlines()[1:] == [
         f"  # aws_nexrad: {summary}. Its options apply when run.source is aws_nexrad",
         "  aws_nexrad:",
-        "    latest_files: 5  # Realtime: newest scans taken from each poll's latest_minutes "
-        "window",
-        "    latest_minutes: 60  # Realtime: how far back (minutes) each poll looks for scans",
-        "    poll_interval_sec: 300  # Polling interval in seconds",
-        "    max_fetch_retries: 3  # AWS scan-fetch attempts before giving up for this poll",
+        "    latest_files: 5  # Realtime start: newest scans taken from the latest_minutes window",
+        "    latest_minutes: 60  # Realtime start: how far back (minutes) to look for scans",
+        "    first_check_sec: 200  # Realtime: seconds after a volume is published before "
+        "looking for the next",
+        "    expected_arrival_sec: 300  # Realtime: seconds after a volume from which the next "
+        "is expected (looks every 10 s)",
+        "    late_after_sec: 450  # Realtime: seconds after a volume from which the next is "
+        "late (looks every 30 s)",
+        "    max_skipped_scans: 3  # Realtime: volumes skipped while processing is behind "
+        "before the run stops",
+        "    max_fetch_retries: 3  # AWS scan-fetch attempts before giving up for this listing",
         "    min_file_size: 1024  # Minimum file size in bytes to consider valid",
     ]
 

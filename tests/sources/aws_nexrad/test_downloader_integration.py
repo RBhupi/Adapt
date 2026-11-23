@@ -17,7 +17,7 @@ def test_real_aws_listing(source_run, scan_queue, fake_gateway):
     d = AwsNexradDownloader(run, AwsNexradOptions(), scan_queue, fake_gateway)
     end = datetime.now(UTC)
     start = end - timedelta(minutes=60)
-    scans = d._fetch_scans(start, end)
+    scans = d.conn.get_avail_scans_in_range(start, end, "KHTX")
 
     # Skip if no scans available (integration test depends on real AWS data availability)
     if not scans:

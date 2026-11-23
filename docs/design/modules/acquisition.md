@@ -44,13 +44,13 @@ AwsNexradDownloader
 
 ### Realtime Mode
 
-Polls AWS S3 on a configurable interval (default: 60 seconds) for new files within a rolling time window (default: 60 minutes). Files already seen in a prior poll are not re-enqueued.
+Checks once that the archive has the radar today or yesterday (else the run fails), takes the newest `latest_files` of the last `latest_minutes`, then lists only the keys after the last one seen. When it lists is set by the age of the last volume's S3 publication time (`schedule.next_check_at`): nothing before `first_check_sec`, then every 20 s, every 10 s from `expected_arrival_sec`, every 30 s from `late_after_sec`. While a scan waits in the queue only the newest new volume is kept; the others are logged as skipped, and `max_skipped_scans` skips stop the run.
 
 This mode runs until externally stopped (Ctrl+C or `orchestrator.stop()`).
 
 ### Historical Mode
 
-Fetches the complete list of files for a fixed time range (`start_time` to `end_time`) and enqueues them all. No polling. Terminates when the queue is exhausted.
+Lists the fixed time range (`start_time` to `end_time`) one UTC day at a time and enqueues each day before listing the next. No polling. A range without volumes, or a listing that fails its retries, fails the run.
 
 ---
 
@@ -59,15 +59,15 @@ Fetches the complete list of files for a fixed time range (`start_time` to `end_
 ```
 AwsNexradDownloader.run()
     │
-    ├── [ Historical ] enumerate all files in range
+    ├── [ Historical ] for each UTC day of the range
     │       │
-    │       └── for each file: download → queue.put(path)
+    │       └── list the day → for each file: download → queue.put(message)
     │
-    └── [ Realtime ] loop until stopped
+    └── [ Realtime ] check the radar, then loop until stopped (1 s ticks)
             │
-            ├── poll S3 for new files in rolling window
-            ├── for each new file: download → queue.put(path)
-            └── sleep(poll_interval_seconds)
+            ├── at the scheduled time: list keys after the last one seen
+            ├── newest new volume = candidate; older ones skipped and logged
+            └── queue empty → download the candidate → queue.put(message)
 ```
 
 The thread signals completion by putting a sentinel value (`None`) into the queue. The processor thread exits its loop when it receives the sentinel.

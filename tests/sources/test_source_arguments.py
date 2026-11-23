@@ -14,12 +14,11 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("name", catalog_source_names())
-def test_a_source_takes_run_options_queue_acquire_and_nothing_else_by_position(name):
+def test_a_source_takes_run_options_queue_acquire_and_nothing_else(name):
     parameters = list(inspect.signature(source_registry.get(name).__init__).parameters.values())[1:]
 
-    assert [p.name for p in parameters[:4]] == ["run", "options", "queue", "acquire"]
-    assert all(p.default is inspect.Parameter.empty for p in parameters[:4])
-    assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters[4:])
+    assert [p.name for p in parameters] == ["run", "options", "queue", "acquire"]
+    assert all(p.default is inspect.Parameter.empty for p in parameters)
 
 
 @pytest.mark.parametrize("name", catalog_source_names())

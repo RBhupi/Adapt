@@ -40,6 +40,16 @@ def test_list_objects_spans_multiple_pages():
     )
 
 
+def test_list_objects_starts_after_a_given_key():
+    client = _paginating_client([{"Contents": [{"Key": "prefix/c", "Size": 3}]}])
+
+    list(s3.list_objects(client, "bucket", "prefix/", start_after="prefix/b"))
+
+    client.get_paginator.return_value.paginate.assert_called_once_with(
+        Bucket="bucket", Prefix="prefix/", StartAfter="prefix/b"
+    )
+
+
 def test_list_objects_handles_empty_page():
     client = _paginating_client([{}])
     assert list(s3.list_objects(client, "bucket", "prefix/")) == []

@@ -29,23 +29,28 @@ def client():
     return boto3.client("s3", config=Config(signature_version=UNSIGNED))
 
 
-def _pages(s3_client, bucket: str, prefix: str, delimiter: str | None):
+def _pages(s3_client, bucket: str, prefix: str, delimiter: str | None, start_after: str | None):
     """Yield every page of a paginated ``list_objects_v2`` call."""
     kwargs = {"Bucket": bucket, "Prefix": prefix}
     if delimiter is not None:
         kwargs["Delimiter"] = delimiter
+    if start_after is not None:
+        kwargs["StartAfter"] = start_after
     yield from s3_client.get_paginator("list_objects_v2").paginate(**kwargs)
 
 
-def list_objects(s3_client, bucket: str, prefix: str) -> Iterator[dict]:
-    """Yield each object entry (``Key``, ``Size``, ``LastModified``) under ``prefix``."""
-    for page in _pages(s3_client, bucket, prefix, delimiter=None):
+def list_objects(
+    s3_client, bucket: str, prefix: str, start_after: str | None = None
+) -> Iterator[dict]:
+    """Yield each object entry (``Key``, ``Size``, ``LastModified``) under ``prefix``,
+    only those whose key sorts after ``start_after`` when it is given."""
+    for page in _pages(s3_client, bucket, prefix, delimiter=None, start_after=start_after):
         yield from page.get("Contents", [])
 
 
 def list_common_prefixes(s3_client, bucket: str, prefix: str) -> Iterator[str]:
     """Yield each immediate sub-prefix (folder) under ``prefix``."""
-    for page in _pages(s3_client, bucket, prefix, delimiter="/"):
+    for page in _pages(s3_client, bucket, prefix, delimiter="/", start_after=None):
         for entry in page.get("CommonPrefixes", []):
             yield entry["Prefix"]
 

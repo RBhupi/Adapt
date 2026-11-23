@@ -41,8 +41,12 @@ class FakeScan:
 
 
 class FakeAwsConn:
-    def __init__(self, scans):
+    def __init__(self, scans, radars=("TEST_RADAR", "KDIX")):
         self.scans = scans
+        self.radars = list(radars)
+
+    def get_avail_radars(self, y, m, d):
+        return self.radars
 
     def get_avail_scans_in_range(self, start, end, radar_id):
         return self.scans
