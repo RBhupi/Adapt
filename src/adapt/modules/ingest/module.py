@@ -62,7 +62,6 @@ class RadarDataLoader:
     -----
     - Not thread-safe: create separate loader instances for concurrent use
     - Regridding takes 5-15 seconds per file (CPU-bound)
-    - NetCDF output is always compressed (zlib, level 9)
     - All methods return None on failure (logged, not raised)
     - Radar object is a temporary Py-ART object; only the xarray.Dataset is kept
 

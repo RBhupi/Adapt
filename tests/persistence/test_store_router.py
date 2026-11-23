@@ -7,6 +7,7 @@ import sqlite3
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
@@ -61,6 +62,32 @@ def _meta(
 
 def _dataset() -> xr.Dataset:
     return xr.Dataset({"reflectivity": ("x", [1.0, 2.0])})
+
+
+def _volume() -> xr.Dataset:
+    """A small volume with the kinds of array a stored product holds: a float
+    field with gaps, an integer label field and its coordinates."""
+    rng = np.random.default_rng(7)
+    reflectivity = rng.normal(20.0, 10.0, (3, 8, 8)).astype("float32")
+    reflectivity[0, :2, :2] = np.nan
+    labels = np.zeros((8, 8), dtype="int32")
+    labels[2:5, 2:5] = 1
+    return xr.Dataset(
+        {
+            "reflectivity": (("z", "y", "x"), reflectivity, {"units": "dBZ"}),
+            "cell_labels": (("y", "x"), labels, {"long_name": "cell label"}),
+        },
+        coords={
+            "z": ("z", np.array([500.0, 1000.0, 1500.0])),
+            "y": ("y", np.arange(8) * 1000.0),
+            "x": ("x", np.arange(8) * 1000.0),
+        },
+    )
+
+
+def _stored_file(collection):
+    artifact_id = collection.catalog.scan_products(RUN, SID)["segmentation2d"]["artifact_id"]
+    return collection.objects_dir / collection.catalog.get_artifact(artifact_id)["object_name"]
 
 
 def _tracking_result() -> dict:
@@ -161,6 +188,54 @@ class TestNetcdfArtifact:
             assert reopened.attrs["radar"] == "KILX"
         finally:
             reopened.close()
+
+    def test_every_array_of_the_file_is_stored_compressed(
+        self, router, collection, raw_artifact_id
+    ):
+        router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": _volume()}, _meta())
+
+        with xr.open_dataset(_stored_file(collection)) as stored:
+            for name in ("reflectivity", "cell_labels", "x", "y", "z"):
+                encoding = stored[name].encoding
+                assert encoding["zlib"] is True, name
+                assert encoding["shuffle"] is True, name
+                assert encoding["complevel"] == 1, name
+
+    def test_a_compressed_file_reads_back_what_was_written(
+        self, router, collection, raw_artifact_id
+    ):
+        written = _volume()
+
+        router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": written}, _meta())
+
+        stored = xr.load_dataset(_stored_file(collection))
+        xr.testing.assert_identical(stored, written)
+        for name in written.variables:
+            assert stored[name].dtype == written[name].dtype, name
+
+    def test_a_value_that_is_not_an_array_is_still_written(
+        self, router, collection, raw_artifact_id
+    ):
+        written = _volume().assign(z_level_m=2000.0, method="watershed")
+
+        router.persist([_module("tracking", NC_SPEC)], {"analysis_ds": written}, _meta())
+
+        stored = xr.load_dataset(_stored_file(collection))
+        assert float(stored["z_level_m"]) == 2000.0
+        assert str(stored["method"].values) == "watershed"
+
+    def test_a_dataset_read_from_a_stored_file_is_written_again(
+        self, router, collection, raw_artifact_id
+    ):
+        module = _module("tracking", NC_SPEC)
+        router.persist([module], {"analysis_ds": _volume()}, _meta())
+        read_back = xr.load_dataset(_stored_file(collection))
+
+        router.persist([module], {"analysis_ds": read_back}, _meta())
+
+        stored = xr.load_dataset(_stored_file(collection))
+        xr.testing.assert_identical(stored, read_back)
+        assert stored["reflectivity"].encoding["zlib"] is True
 
     def test_the_file_is_named_for_its_run_module_source_and_product(
         self, router, collection, raw_artifact_id

@@ -132,9 +132,10 @@ How to read it:
   completed and no scan failed.
 
 Each scan took about 15 seconds on the laptop this guide was checked on, nearly
-all of it gridding. With the default grid a scan also takes about 140 MB of
-disk (the gridded volume is not compressed), so plan for about 1.5 GB per hour
-of scans.
+all of it gridding. With the default grid a scan also takes about 30 MB of
+disk: the radar file as it came, and the gridded and segmentation files, which
+are stored compressed and so grow with the amount of echo. Plan for about
+0.3 GB per hour of scans.
 
 ---
 

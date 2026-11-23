@@ -5,12 +5,17 @@
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 import pandas as pd
 import pytest
 
 from adapt.contracts.persistence import PersistenceMeta, ProductTableWrite, ProductView
+from adapt.modules.analysis.node import AnalysisModule
+from adapt.modules.arm_radar_comm.node import ArmRadarCommModule
+from adapt.modules.arm_radar_comm.record import CommandRecord, Outcome, command_frame
 from adapt.persistence.errors import StoreError
 from adapt.persistence.products import SchemaLedger, TableDeclaration, TableWriter
 from adapt.persistence.sqlite_store import SqliteStore
@@ -337,6 +342,74 @@ class TestDeterministicFreeze:
         )
 
         writer.write(_frame(pixel_count=[60.0, float("nan")]), _scan_meta())
+
+
+class _Counts(NamedTuple):
+    table: str
+    columns: tuple[str, ...]
+
+
+class TestModuleTableCounts:
+    """Counts, labels and flags a module writes are stored as integers."""
+
+    @pytest.mark.parametrize(
+        ("module", "frame", "counts"),
+        [
+            (
+                AnalysisModule,
+                pd.DataFrame(
+                    {
+                        "time": ["2026-08-13T17:31:58"],
+                        "cell_label_a": [1],
+                        "cell_label_b": [2],
+                        "touching_boundary_pixels": [4],
+                    }
+                ),
+                _Counts(
+                    "cell_adjacency", ("cell_label_a", "cell_label_b", "touching_boundary_pixels")
+                ),
+            ),
+            (
+                ArmRadarCommModule,
+                command_frame(
+                    CommandRecord(
+                        outcome=Outcome.PUBLISHED,
+                        config_hash="c",
+                        selection_config_hash="s",
+                        n_entries=12,
+                        truncated=False,
+                    )
+                ),
+                _Counts("radar_commands", ("n_entries", "truncated")),
+            ),
+        ],
+    )
+    def test_counts_freeze_and_store_as_integers(self, ledger, collection, module, frame, counts):
+        (spec,) = [s for s in module.persistence if s.table == counts.table]
+        TableWriter(ledger, spec, owner_module=module.name).write(frame, _scan_meta())
+
+        types = _frozen_types(collection, spec.table)
+        typeofs = ", ".join(f"typeof({c}) AS {c}" for c in counts.columns)
+        stored = _rows(collection, f"SELECT {typeofs} FROM {spec.table}")
+        assert {c: types[c] for c in counts.columns} == dict.fromkeys(counts.columns, "INTEGER")
+        assert stored == [dict.fromkeys(counts.columns, "integer")]
+
+    def test_a_table_frozen_real_keeps_taking_columns_now_declared_integer(
+        self, ledger, collection
+    ):
+        # A store whose table froze before the column was declared integer: a
+        # resumed run writes on into it, and the frozen REAL type stays.
+        TableWriter(ledger, SPEC, owner_module="analysis").write(
+            _frame(pixel_count=[40, 50]), _scan_meta("s1")
+        )
+        declared = replace(SPEC, integer_columns=("pixel_count",))
+
+        TableWriter(ledger, declared, owner_module="analysis").write(
+            _frame(pixel_count=[60, 70]), _scan_meta("s2")
+        )
+
+        assert _frozen_types(collection, "cell_stats")["pixel_count"] == "REAL"
+        assert len(_rows(collection, "SELECT * FROM cell_stats")) == 4
 
 
 # -- the view over the tables that share a key ---------------------------------

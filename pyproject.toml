@@ -81,7 +81,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "adapt.configuration" = ["*.yaml", "templates/*.yaml"]
 "adapt.configuration.schemas" = ["*.sql"]
-"adapt.modules.radar_command.presets" = ["*.yaml"]
+"adapt.modules.arm_radar_comm.presets" = ["*.yaml"]
 "adapt.modules.target_selection.presets" = ["*.yaml"]
 
 [tool.setuptools_scm]

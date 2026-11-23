@@ -270,8 +270,10 @@ The grid coordinates `x` and `y` are in metres from the radar; `lat` and `lon`
 give the position of each grid point. Each file records the `scan_id` and the
 `scan_time` it belongs to in its attributes.
 
-With the default grid a gridded volume is about 120 MB and a segmentation file
-about 15 MB.
+Every array in these files is stored compressed (zlib, lossless), which any
+NetCDF reader opens without a setting. With the default grid a gridded volume
+is about 20 MB and a segmentation file about 3 MB; both grow with the amount of
+echo.
 
 ---
 

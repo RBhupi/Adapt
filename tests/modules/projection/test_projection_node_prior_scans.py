@@ -1,7 +1,7 @@
 # Copyright © 2026, UChicago Argonne, LLC
 # See LICENSE for terms and disclaimer.
 
-"""ProjectionModule projects over the prior scans' frames plus the current one.
+"""ProjectionModule projects from the latest prior scan's frame to the current one.
 
 ``prior_scans`` holds previous completed scan contexts only; the current scan's
 labels arrive as ``segmented_ds``.
@@ -67,3 +67,18 @@ def test_raises_without_prior_scans(make_projection_config):
     }
     with pytest.raises(KeyError):
         ProjectionModule().run(ctx)
+
+
+def test_projects_from_the_latest_prior_scan_whatever_the_history_holds(make_projection_config):
+    def run(prior_times):
+        ctx = {
+            "prior_scans": [_make_scan_ctx(t) for t in prior_times],
+            "segmented_ds": _make_labeled_ds("2024-01-01T00:10:00"),
+            "projection_config": make_projection_config(),
+        }
+        return ProjectionModule().run(ctx)["projected_ds"]
+
+    two_earlier = run(["2024-01-01T00:00:00", "2024-01-01T00:05:00"])
+    one_earlier = run(["2024-01-01T00:05:00"])
+
+    xr.testing.assert_identical(two_earlier, one_earlier)

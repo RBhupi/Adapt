@@ -13,8 +13,8 @@ A node is skipped, not run, when it needs more prior scans than are usable
 (``required_history - 1 > history``) or when any of its dependencies was
 skipped or failed. A node that raises has failed: the pass goes on with the
 nodes that do not depend on it, and the caller is told which failed and why.
-A dependency that ran without returning a key the node consumes is a bug and
-raises: it never looks like a skip.
+A node that ran without returning every output it declares is a bug and
+raises, naming the node and the outputs: it never looks like a skip.
 
 Contract enforcement
 --------------------
@@ -173,15 +173,6 @@ class GraphExecutor:
 
     def _run_node(self, node: Node, context: dict) -> None:
         """Validate, run and merge one node; its dependencies all ran."""
-        for dep in node.dependencies:
-            for key in node.inputs:
-                if key in dep.outputs:
-                    require(
-                        key in context,
-                        f"Module '{dep.name}' ran but did not return '{key}', "
-                        f"which module '{node.name}' needs",
-                    )
-
         # Validate inputs declared by the module — fail immediately if absent
         for key, validator in (node.module.input_contracts or {}).items():
             require(
@@ -194,11 +185,16 @@ class GraphExecutor:
         # exit captures any exception the module raises and records errors_total.
         span_cm = self._obs.span(node.name) if self._obs is not None else nullcontext()
         with span_cm:
-            outputs = node.module.run(context)
+            outputs = node.module.run(context) or {}
 
+        missing = [key for key in node.outputs if key not in outputs]
+        require(
+            not missing,
+            f"Module '{node.name}' ran but did not return its declared output(s) "
+            f"{', '.join(missing)}",
+        )
         # Validate outputs declared by the module
-        if outputs:
-            for key, validator in (node.module.output_contracts or {}).items():
-                if key in outputs:
-                    validator(outputs[key])
-            context.update(outputs)
+        for key, validator in (node.module.output_contracts or {}).items():
+            if key in outputs:
+                validator(outputs[key])
+        context.update(outputs)

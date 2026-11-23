@@ -150,8 +150,27 @@ def test_a_producer_that_ran_without_its_consumed_key_raises():
 
     message = str(excinfo.value)
     assert "detection" in message
-    assert "projection" in message
     assert "segmented_ds" in message
+
+
+def test_a_module_that_ran_without_every_declared_output_raises_naming_them():
+    modules = [
+        _module(
+            "analysis",
+            [],
+            ["cell_stats", "cell_adjacency", "scan_cell_count"],
+            returns={"cell_stats": "rows"},
+        )
+    ]
+    nodes = GraphBuilder(modules, provided=frozenset()).build()
+
+    with pytest.raises(ContractViolation) as excinfo:
+        GraphExecutor(nodes).run({}, history=0)
+
+    assert str(excinfo.value) == (
+        "Module 'analysis' ran but did not return its declared output(s) "
+        "cell_adjacency, scan_cell_count"
+    )
 
 
 def test_skipped_nodes_open_no_span():

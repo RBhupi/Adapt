@@ -27,9 +27,9 @@ Once the run config and the module configs are built, configuration is done. No 
 ## The Layers
 
 ```
---set path=value   ← planned for the next stage; not implemented
+--set params.KEY.OPTION=VALUE   ← one run's settings; KEY is a module, a source or a params section
     ↓ overrides
-Pipeline file      ← params.<module>, params.global, params.downloader, params.logging
+Pipeline file      ← params.<module>, params.<source>, params.global, params.logging, params.queue
     ↓ overrides
 Module defaults    ← each module's options model, or its packaged preset
     ↓
@@ -40,7 +40,7 @@ A value set in the pipeline file wins over the module's default. If the file doe
 
 This means a pipeline file holds only what its author changes. A module listed under `modules:` with no `params:` entry runs with its defaults.
 
-A command-line layer, one generic `--set path=value` on `adapt run` and `adapt graph`, is planned as the next stage. It will be one more layer laid over the file's values before validation. It does not exist yet.
+The command line adds one layer: `--set params.KEY.OPTION=VALUE` on `adapt run` and `adapt graph`, where KEY is a module, a source or a params section. The settings are laid over the file's `params` before validation, so they are checked, used and recorded as if the file had said them (see `adapt run` in the [CLI Reference](../cli_reference.md)).
 
 ---
 

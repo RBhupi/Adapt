@@ -355,10 +355,13 @@ class RadarProcessor(threading.Thread):
                     )
                 # One controlled console line per scan, built from the captured telemetry
                 # (stage timings + cell count) — never printed from inside a module.
+                # A scan that completed with a count carries it on its span; a failed
+                # scan, or a run where no module counts cells, carries none.
                 if self._reporter is not None and modules:
-                    scan_rec = next((s for s in all_spans if s.name == "scan"), None)
-                    n_cells = int(scan_rec.metadata.get("n_cells", 0)) if scan_rec else 0
-                    self._reporter.scan(file_id, modules, n_cells if self._counts_cells else None)
+                    (scan_rec,) = [s for s in all_spans if s.name == "scan"]
+                    counted = scan_rec.metadata.get("n_cells")
+                    n_cells = None if counted is None else int(counted)
+                    self._reporter.scan(file_id, modules, n_cells)
                 return ok
         finally:
             self._current_scan_id = None

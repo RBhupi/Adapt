@@ -94,6 +94,7 @@ class ArmRadarCommModule(BaseModule):
             table="radar_commands",
             primary_key=("run_id", "scan_id", "config_hash"),
             index_columns=("plan_id", "cell_uid"),
+            integer_columns=("n_entries", "truncated"),
         ),
     )
 

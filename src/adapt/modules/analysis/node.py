@@ -61,6 +61,7 @@ class AnalysisModule(BaseModule):
             key="cell_adjacency",
             table="cell_adjacency",
             primary_key=("run_id", "scan_id", "cell_label_a", "cell_label_b"),
+            integer_columns=("cell_label_a", "cell_label_b", "touching_boundary_pixels"),
         ),
     )
 

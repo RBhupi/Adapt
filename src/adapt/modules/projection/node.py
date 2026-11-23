@@ -16,8 +16,9 @@ class ProjectionModule(BaseModule):
     """BaseModule wrapper for RadarCellProjector.
 
     Computes optical flow between consecutive radar frames and projects
-    cell positions forward in time. The frames are the prior scans' labels
-    (``prior_scans``) followed by the current scan's (``segmented_ds``).
+    cell positions forward in time. The frames are the latest prior scan's
+    labels (the last of ``prior_scans``) followed by the current scan's
+    (``segmented_ds``); earlier prior scans are not read.
 
     Context inputs
     --------------
@@ -71,7 +72,8 @@ class ProjectionModule(BaseModule):
         if self._projector is None:
             self._projector = RadarCellProjector(config)
 
-        ds_list = [prior["segmented_ds"] for prior in context["prior_scans"]]
+        # The projector takes two frames: the latest earlier scan and this one.
+        ds_list = [prior["segmented_ds"] for prior in context["prior_scans"][-1:]]
         ds_list.append(context["segmented_ds"])
         projected = self._projector.project(ds_list)
         return {"projected_ds": projected}

@@ -306,7 +306,7 @@ class _WritesProbeRows(BaseModule):
     persistence = (_PROBE_ROWS,)
 
     def run(self, context: dict) -> dict:
-        return {}
+        return {"probe_rows": None}
 
 
 class _ReadsProbeRows(BaseModule):
@@ -316,7 +316,7 @@ class _ReadsProbeRows(BaseModule):
     store_reads = (StoreRead(key="probe_so_far", source="probe_rows", up_to_scan=True),)
 
     def run(self, context: dict) -> dict:
-        return {}
+        return {"probe_seen": None}
 
 
 class _ReadsItsOwnRows(BaseModule):
@@ -331,7 +331,7 @@ class _ReadsItsOwnRows(BaseModule):
     store_reads = (StoreRead(key="probe_self_so_far", source="probe_self_rows", up_to_scan=True),)
 
     def run(self, context: dict) -> dict:
-        return {}
+        return {"probe_self_rows": None}
 
 
 @pytest.fixture

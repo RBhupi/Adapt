@@ -30,11 +30,12 @@ from tests.helpers.queue_msg import msg
 pytestmark = [pytest.mark.unit, pytest.mark.pipeline]
 
 T0 = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-LOCATOR, SILENT, COUNTER, LATE_COUNTER = (
+LOCATOR, SILENT, COUNTER, LATE_COUNTER, FAILING = (
     "probe_locator",
     "probe_silent",
     "probe_counter",
     "probe_late_counter",
+    "probe_failing",
 )
 _PROCESSOR_LOG = "adapt.runtime.processor"
 
@@ -81,7 +82,18 @@ class _LateCounter(_Counter):
     required_history = 2
 
 
-_PROBES = (_Locator, _Silent, _Counter, _LateCounter)
+class _Failing(BaseModule):
+    """Raises in every scan."""
+
+    name = FAILING
+    inputs = ["scan_time"]
+    outputs = ["probe_failing_out"]
+
+    def run(self, context: dict) -> dict:
+        raise RuntimeError("probe failure")
+
+
+_PROBES = (_Locator, _Silent, _Counter, _LateCounter, _Failing)
 
 
 @pytest.fixture(autouse=True)
@@ -216,3 +228,12 @@ def test_without_a_counting_module_the_scan_carries_no_cell_count(processor, sca
     (processed,) = [m for m in messages if m.startswith("Processed")]
     assert "cells" not in processed
     assert obs.metrics.counter_total("cells_detected_total") == 0.0
+
+
+def test_a_failed_scan_carries_no_cell_count(processor, scans):
+    obs, reporter = _obs(), _Reporter()
+    proc = processor([COUNTER, FAILING], observability=obs, reporter=reporter)
+
+    assert proc.process_file(scans[0]) is False
+
+    assert reporter.counts == [None]

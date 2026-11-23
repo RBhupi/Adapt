@@ -189,3 +189,14 @@ def test_every_hard_dependency_is_imported() -> None:
         f"_DECLARED_NOT_IMPORTED entries no longer declared: {sorted(stale)}. "
         "Remove them so the allowlist only shrinks."
     )
+
+
+def test_package_data_names_existing_packages():
+    """Every package-data key names a package that exists under src/."""
+    package_data = tomllib.loads(_PYPROJECT.read_text())["tool"]["setuptools"]["package-data"]
+    missing = [
+        name
+        for name in package_data
+        if not (_ROOT / "src" / Path(*name.split(".")) / "__init__.py").is_file()
+    ]
+    assert missing == [], f"package-data names packages that do not exist: {missing}"
